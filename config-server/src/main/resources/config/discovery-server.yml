@@ -1,0 +1,29 @@
+server:
+  port: 9091
+
+spring:
+  application:
+    name: discovery-server
+  cloud:
+    config:
+      fail-fast: true
+      retry:
+        max-attempts: 30
+        initial-interval: 1000
+        multiplier: 1.5
+        max-interval: 5000
+
+eureka:
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://localhost:9091/eureka
+  server:
+    wait-time-in-ms-when-sync-empty: 3000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics

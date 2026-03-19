@@ -1,0 +1,27 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: authentication-server
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:9091/eureka
+
+management:
+  tracing:
+    enabled: true
+    propagation:
+      produce: b3
+      consume: b3
+    sampling:
+      probability: 1.0
+    export:
+      zipkin:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
