@@ -12,7 +12,7 @@ Projeto em microsserviços para gerenciamento de usuários com autenticação vi
 
 ## Execute
 
-1. Inicie as databases
+1. Inicie a database
    - docker compose up -d
 
 2. Para cada serviço, execute
