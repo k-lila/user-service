@@ -8,4 +8,5 @@ import lombok.Setter;
 public class RegisterResponseDTO {
     String id;
     String email;
+    String token;
 }

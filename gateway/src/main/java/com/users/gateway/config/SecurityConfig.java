@@ -2,6 +2,7 @@ package com.users.gateway.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
@@ -14,8 +15,10 @@ public class SecurityConfig {
     @Bean
     public SecurityWebFilterChain securityFilterChain(ServerHttpSecurity http) throws Exception {
         http
+            .cors(cors -> {})
             .csrf(ServerHttpSecurity.CsrfSpec::disable)
             .authorizeExchange(exchange -> exchange
+                .pathMatchers(HttpMethod.POST, "/auth/login").permitAll()
                 .pathMatchers("/auth/**").permitAll()
                 .pathMatchers("/swagger-ui/**").permitAll()
                 .pathMatchers("/v3/api-docs/**").permitAll()

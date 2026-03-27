@@ -12,7 +12,7 @@ public class GatewayRouter {
 	public RouteLocator routes(RouteLocatorBuilder builder) {
 		return builder.routes()
 		.route("user-service", route -> route.path("/users/**").uri("lb://user-service"))
-        .route("authentication-server", route -> route.path("auth/**").uri("lb://authentication-server"))
+        .route("authentication-server", route -> route.path("/auth/**").uri("lb://authentication-server"))
 		// ##### swagger
         .route("user-service-docs", r -> r
             .path("/v3/api-docs/user/**", "/v3/api-docs/user/")
