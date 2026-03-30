@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
 import authenticationserver.dtos.AuthDTO;
-import authenticationserver.dtos.RegisterRequestDTO;
+import authenticationserver.dtos.InternalRegisterRequestDTO;
 import authenticationserver.dtos.RegisterResponseDTO;
 
 @FeignClient(name = "user-service")
@@ -16,5 +16,5 @@ public interface IUserClient {
     AuthDTO getUserByEmail(@PathVariable("email") String email);
 
     @PostMapping("/internal/users")
-    RegisterResponseDTO registerUser(@RequestBody RegisterRequestDTO registerRequest);
+    RegisterResponseDTO registerUser(@RequestBody InternalRegisterRequestDTO registerRequest);
 }

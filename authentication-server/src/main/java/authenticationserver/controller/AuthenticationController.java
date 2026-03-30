@@ -15,6 +15,7 @@ import authenticationserver.services.AuthenticationService;
 import authenticationserver.services.RegisterService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 
 @Tag(
     name = "Controller",
@@ -34,7 +35,7 @@ public class AuthenticationController {
 
     @Operation(summary = "Autenticar usuário e gerar token JWT")
     @PostMapping("/login")
-    public TokenDTO login(@RequestBody LoginRequestDTO loginRequest ) {
+    public TokenDTO login(@RequestBody @Valid LoginRequestDTO loginRequest ) {
         LOGGER.info(
             "| REQUISIÇÃO DE LOGIN | email: {}",
             loginRequest.getEmail()
@@ -45,7 +46,7 @@ public class AuthenticationController {
 
     @Operation(summary = "Registrar um novo usuário")
     @PostMapping("/register")
-    public RegisterResponseDTO register(@RequestBody RegisterRequestDTO registerRequest) {
+    public RegisterResponseDTO register(@RequestBody @Valid RegisterRequestDTO registerRequest) {
         LOGGER.info(
             "| REQUISIÇÃO DE REGISTRO | email: {}",
             registerRequest.getEmail()

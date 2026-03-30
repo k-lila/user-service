@@ -7,12 +7,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import authenticationserver.clients.IUserClient;
+import authenticationserver.dtos.InternalRegisterRequestDTO;
 import authenticationserver.dtos.RegisterRequestDTO;
 import authenticationserver.dtos.RegisterResponseDTO;
 import authenticationserver.dtos.TokenDTO;
 import feign.FeignException;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
 
 @Tag(name = "Serviço de registro de usuários", description = "Serviço responsável por registrar novos usuários no sistema.")
 @Service
@@ -30,18 +30,18 @@ public class RegisterService {
         this.authenticationService = authenticationService;
     }
 
-    public RegisterResponseDTO registerUser(@Valid RegisterRequestDTO registerRequest) {
+    public RegisterResponseDTO registerUser(RegisterRequestDTO registerRequest) {
         try {
-            RegisterRequestDTO newUser = new RegisterRequestDTO();
+            InternalRegisterRequestDTO newUser = new InternalRegisterRequestDTO();
             newUser.setName(registerRequest.getName());
             newUser.setEmail(registerRequest.getEmail());
-            newUser.setPasswordHash(passwordEncoder.encode(registerRequest.getPasswordHash()));
+            newUser.setPasswordHash(passwordEncoder.encode(registerRequest.getRawPassword()));
             RegisterResponseDTO response = userClient.registerUser(newUser);
             LOGGER.info(
                 "| usuário registrado | email: {}",
                 registerRequest.getEmail()
             );
-            TokenDTO token = authenticationService.authenticate(registerRequest.getEmail(), registerRequest.getPasswordHash());
+            TokenDTO token = authenticationService.authenticate(registerRequest.getEmail(), registerRequest.getRawPassword());
             response.setToken(token.getToken());
             return response;
         } catch (FeignException e) {
