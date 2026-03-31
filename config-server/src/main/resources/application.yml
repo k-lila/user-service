@@ -1,11 +1,11 @@
 server:
-  port: 8888
+  port: ${SERVER_PORT:8888}
 
 spring:
   application:
     name: config-server
   profiles:
-    active: native
+    active: ${SPRING_PROFILES_ACTIVE:native}
   cloud:
     config:
       server:

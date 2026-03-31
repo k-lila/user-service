@@ -1,5 +1,5 @@
 server:
-  port: 8090
+  port: ${SERVER_PORT:8090}
 
 spring:
   application:
@@ -7,11 +7,13 @@ spring:
   data:
     mongodb:
       auto-index-creation: true
+      uri: ${MONGODB_URI:mongodb://user_service:user_1234321@localhost:27020}
+      database: ${MONGODB_DATABASE:user-db}
 
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:9091/eureka
+      defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
 
 springdoc:
   swagger-ui:
