@@ -1,5 +1,5 @@
 server:
-  port: 8082
+  port: ${SERVER_PORT:8082}
 
 spring:
   application:
@@ -8,7 +8,7 @@ spring:
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:9091/eureka
+      defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
 
 management:
   tracing:

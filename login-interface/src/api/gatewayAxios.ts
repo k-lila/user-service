@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 export const gatewayApiClient = axios.create({
-  baseURL: 'http://localhost:8081',
+  baseURL: import.meta.env.VITE_GATEWAY_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },

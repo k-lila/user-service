@@ -1,24 +1,154 @@
 version: "3.9"
 
-services:
-  user-mongo:
-    image: mongo:8.2
-    container_name: user-db
-    ports:
-      - "27020:27017"
-    volumes:
-      - user_db_data:/data/db
-    networks:
-      - users-net
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: user_service
-      MONGO_INITDB_ROOT_PASSWORD: user_1234321
-
 networks:
-  users-net:
-    name: users-net
+  user-service-net:
     driver: bridge
 
 volumes:
   user_db_data:
-    name: user_db_data
+
+services:
+  zipkin:
+    image: openzipkin/zipkin:latest
+    networks:
+      - user-service-net
+    ports:
+      - "9411:9411"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:9411/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 25
+    restart: unless-stopped
+
+  config-server:
+    build: ./config-server
+    networks:
+      - user-service-net
+    ports:
+      - "8888:8888"
+    environment:
+      SERVER_PORT: 8888
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 25
+    restart: unless-stopped
+
+  discovery-server:
+    build: ./discovery-server
+    networks:
+      - user-service-net
+    ports:
+      - "9091:9091"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      zipkin:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 9091
+      CONFIG_SERVER_URL: http://config-server:8888
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 25
+    restart: unless-stopped
+
+  gateway:
+    build: ./gateway
+    networks:
+      - user-service-net
+    ports:
+      - "8081:8081"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      zipkin:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8081
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URI: http://discovery-server:9091/eureka
+      MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 25
+    restart: unless-stopped
+
+  authentication-server:
+    build: ./authentication-server
+    networks:
+      - user-service-net
+    ports:
+      - "8082:8082"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      zipkin:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8082
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URI: http://discovery-server:9091/eureka
+      MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 25
+    restart: unless-stopped
+
+  user-service:
+    build: ./user-service
+    networks:
+      - user-service-net
+    ports:
+      - "8090:8090"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      zipkin:
+        condition: service_healthy
+      user-mongo:
+        condition: service_started
+    environment:
+      SERVER_PORT: 8090
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URI: http://discovery-server:9091/eureka
+      MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      MONGODB_URI: mongodb://user_service:user_1234321@user-mongo:27017/user-db?authSource=admin
+      MONGODB_DATABASE: user-db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 25
+    restart: unless-stopped
+
+  interface:
+    build:
+      context: ./login-interface
+      args:
+        VITE_AUTH_API_URL: http://localhost:8082
+        VITE_GATEWAY_API_URL: http://localhost:8081
+    ports:
+      - "5173:80"
+    networks:
+      - user-service-net
+
+  user-mongo:
+    image: mongo:8.2
+    networks:
+      - user-service-net
+    ports:
+      - "27020:27017"
+    volumes:
+      - user_db_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user_service
+      MONGO_INITDB_ROOT_PASSWORD: user_1234321
