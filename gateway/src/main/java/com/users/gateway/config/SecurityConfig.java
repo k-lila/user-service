@@ -18,8 +18,8 @@ public class SecurityConfig {
             .cors(cors -> {})
             .csrf(ServerHttpSecurity.CsrfSpec::disable)
             .authorizeExchange(exchange -> exchange
-                .pathMatchers(HttpMethod.POST, "/auth/login").permitAll()
-                .pathMatchers("/auth/**").permitAll()
+                .pathMatchers(HttpMethod.POST, "/authentication/login").permitAll()
+                .pathMatchers("/authentication/**").permitAll()
                 .pathMatchers("/swagger-ui/**").permitAll()
                 .pathMatchers("/v3/api-docs/**").permitAll()
                 .anyExchange().authenticated()

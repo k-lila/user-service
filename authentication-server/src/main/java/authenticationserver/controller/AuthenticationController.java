@@ -22,7 +22,7 @@ import jakarta.validation.Valid;
     description = "Endpoints do serviço de autenticação"
 )
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/authentication")
 public class AuthenticationController {
     private final AuthenticationService authenticationService;
     private final RegisterService registerService;

@@ -10,6 +10,10 @@ eureka:
     service-url:
       defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
 
+springdoc:
+  swagger-ui:
+    enabled: false
+
 management:
   tracing:
     enabled: true

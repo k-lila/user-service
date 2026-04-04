@@ -1,4 +1,4 @@
-import { gatewayApiClient } from './gatewayAxios'
+import { api } from './apiAxios'
 
 export interface UserResponse {
   id: string
@@ -8,6 +8,6 @@ export interface UserResponse {
 }
 
 export async function getCurrentUser(): Promise<UserResponse> {
-  const response = await gatewayApiClient.get('/users/me')
+  const response = await api.get('/users/me')
   return response.data
 }

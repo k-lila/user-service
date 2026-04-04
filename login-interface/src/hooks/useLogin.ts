@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import { login } from '../api/authAPI'
+import { login } from '../api/authClient'
 
 export const useLogin = () => {
   const navigate = useNavigate()

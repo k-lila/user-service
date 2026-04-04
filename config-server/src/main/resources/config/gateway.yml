@@ -25,6 +25,8 @@ springdoc:
     urls:
       - name: user-service
         url: /v3/api-docs/user
+      - name: authentication-service
+        url: /v3/api-docs/authentication
 
 management:
   tracing:

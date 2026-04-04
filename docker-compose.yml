@@ -134,8 +134,7 @@ services:
     build:
       context: ./login-interface
       args:
-        VITE_AUTH_API_URL: http://localhost:8082
-        VITE_GATEWAY_API_URL: http://localhost:8081
+        VITE_API_URL: http://localhost:8081
     ports:
       - "5173:80"
     networks:
