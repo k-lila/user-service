@@ -12,7 +12,6 @@ public class GatewayRouter {
 	public RouteLocator routes(RouteLocatorBuilder builder) {
 		return builder.routes()
 		.route("user-service", route -> route.path("/users/**").uri("lb://user-service"))
-        .route("authentication-server", route -> route.path("/authentication/**").uri("lb://authentication-server"))
 		// ##### swagger
         .route("user-service-docs", r -> r
             .path("/v3/api-docs/user/**", "/v3/api-docs/user/")
@@ -21,14 +20,6 @@ public class GatewayRouter {
                 "/v3/api-docs${segment}"
             ))
             .uri("lb://user-service")
-        )
-        .route("authentication-server-docs", r -> r
-            .path("/v3/api-docs/authentication/**", "/v3/api-docs/authentication/")
-            .filters(f -> f.rewritePath(
-                "/v3/api-docs/authentication(?<segment>/?.*)",
-                "/v3/api-docs${segment}"
-            ))
-            .uri("lb://authentication-server")
         )
         .build();
     }

@@ -84,23 +84,34 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Source: https://mvnrepository.com/artifact/io.github.openfeign/feign-micrometer -->
-        <dependency>
-            <groupId>io.github.openfeign</groupId>
-            <artifactId>feign-micrometer</artifactId>
-            <version>13.6</version>
-            <scope>compile</scope>
-        </dependency>
+	    <dependency>
+		    <groupId>org.springframework.boot</groupId>
+		    <artifactId>spring-boot-starter-security</artifactId>
+	    </dependency>
+	    <dependency>
+	    	<groupId>org.springframework.cloud</groupId>
+	    	<artifactId>spring-cloud-starter-loadbalancer</artifactId>
+	    </dependency>
 
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-security-oauth2-resource-server-test</artifactId>
-			<scope>test</scope>
-		</dependency>
+    	<dependency>
+    	  	<groupId>org.springframework.boot</groupId>
+    	  	<artifactId>spring-boot-starter-security-oauth2-client</artifactId>
+    	</dependency>
+    	<dependency>
+    	  	<groupId>org.springframework.boot</groupId>
+    	  	<artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+    	</dependency>
+
+    	<dependency>
+    	  	<groupId>org.springframework.boot</groupId>
+    	  	<artifactId>spring-boot-starter-security-oauth2-client-test</artifactId>
+    	  	<scope>test</scope>
+    	</dependency>
+    	<dependency>
+    	  	<groupId>org.springframework.boot</groupId>
+    	  	<artifactId>spring-boot-starter-security-oauth2-resource-server-test</artifactId>
+    	  	<scope>test</scope>
+    	</dependency>
 
 	</dependencies>
 	<dependencyManagement>
