@@ -1,4 +1,4 @@
-package authenticationserver.dtos;
+package authorizationserver.dtos;
 
 import java.util.Set;
 

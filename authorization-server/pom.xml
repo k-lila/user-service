@@ -9,10 +9,10 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.users</groupId>
-	<artifactId>authentication-server</artifactId>
+	<artifactId>authorization-server</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>authentication-server</name>
-	<description>Serviço de autenticação</description>
+	<name>authorization-server</name>
+	<description>Serviço de autorização</description>
 	<url/>
 	<licenses>
 		<license/>
@@ -106,24 +106,16 @@
             <scope>test</scope>
         </dependency>
 
-		<dependency>
-			<groupId>io.jsonwebtoken</groupId>
-			<artifactId>jjwt-api</artifactId>
-			<version>0.13.0</version>
-		</dependency>
-		<dependency>
-			<groupId>io.jsonwebtoken</groupId>
-			<artifactId>jjwt-impl</artifactId>
-			<version>0.13.0</version>
-			<scope>runtime</scope>
-		</dependency>
-		<dependency>
-			<groupId>io.jsonwebtoken</groupId>
-			<artifactId>jjwt-jackson</artifactId> <!-- or jjwt-gson if Gson is preferred -->
-			<version>0.13.0</version>
-			<scope>runtime</scope>
-		</dependency>
-
+	    <dependency>
+	      <groupId>org.springframework.boot</groupId>
+	      <artifactId>spring-boot-starter-security-oauth2-authorization-server</artifactId>
+	    </dependency>
+	    <dependency>
+	      <groupId>org.springframework.boot</groupId>
+	      <artifactId>spring-boot-starter-security-oauth2-authorization-server-test</artifactId>
+	      <scope>test</scope>
+	    </dependency>
+	
 	</dependencies>
 	<dependencyManagement>
 		<dependencies>

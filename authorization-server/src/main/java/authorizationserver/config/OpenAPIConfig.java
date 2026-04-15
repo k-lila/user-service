@@ -1,4 +1,4 @@
-package authenticationserver.config;
+package authorizationserver.config;
 
 import java.util.List;
 
