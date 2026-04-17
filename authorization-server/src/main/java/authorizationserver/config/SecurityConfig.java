@@ -55,10 +55,7 @@ public class SecurityConfig {
 					        "/oauth2/**",
         					"/.well-known/**",
         					"/login",
-        					"/error",
-							"/v3/api-docs/**"
-					// "/swagger-ui/**",
-					// "/swagger-ui.html"
+        					"/error"
 				).permitAll()
 				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 				.anyRequest().authenticated()

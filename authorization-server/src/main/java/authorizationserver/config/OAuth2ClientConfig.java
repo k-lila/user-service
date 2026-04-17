@@ -27,9 +27,7 @@ public class OAuth2ClientConfig {
     public RegisteredClientRepository registeredClientRepository() {
 
         return new InMemoryRegisteredClientRepository(
-                gatewayClient(),
-                swaggerClient()
-                // internalServiceClient()
+                gatewayClient()
         );
     }
 
@@ -55,38 +53,4 @@ public class OAuth2ClientConfig {
                 .build();
     }
 
-    private RegisteredClient swaggerClient() {
-
-        return RegisteredClient.withId(UUID.randomUUID().toString())
-                .clientId("swagger-client")
-                .clientSecret(passwordEncoder().encode("swagger-secret"))
-                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
-                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
-                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
-                .redirectUri("http://localhost:8081/login/oauth2/code/swagger-client")
-                .redirectUri("http://localhost:8081/swagger-ui/oauth2-redirect.html")
-                .redirectUri("https://oauth.pstmn.io/v1/callback")
-                .scope(OidcScopes.OPENID)
-                .scope(OidcScopes.PROFILE)
-                .scope("users.read")
-                .scope("users.write")
-                .scope("internal")
-                .clientSettings(ClientSettings.builder()
-                        .requireAuthorizationConsent(false)
-                        .requireProofKey(true)
-                        .build())
-                .build();
-    }
-
-    // private RegisteredClient internalServiceClient() {
-    //     return RegisteredClient.withId(UUID.randomUUID().toString())
-    //             .clientId("internal-service-client")
-    //             .clientSecret("{noop}service-secret")
-    //             .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
-    //             .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
-    //             .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
-    //             .scope("internal")
-    //             .build();
-    // }
 }

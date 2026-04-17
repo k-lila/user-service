@@ -13,9 +13,7 @@ import org.springframework.stereotype.Service;
 
 import authorizationserver.clients.IUserClient;
 import authorizationserver.dtos.AuthDTO;
-import io.swagger.v3.oas.annotations.tags.Tag;
 
-@Tag(name = "Serviço de autenticação", description = "Serviços de autenticação de usuários")
 @Service
 public class AuthenticationService implements UserDetailsService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthenticationService.class);

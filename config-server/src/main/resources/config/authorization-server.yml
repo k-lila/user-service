@@ -20,10 +20,6 @@ logging:
     org.springframework.security: INFO
     org.springframework.oauth2: INFO
 
-springdoc:
-  swagger-ui:
-    enabled: false
-
 management:
   tracing:
     enabled: true
