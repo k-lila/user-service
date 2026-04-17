@@ -67,7 +67,10 @@ public class SecurityConfig {
 
 	@Bean
 	public AuthorizationServerSettings authorizationServerSettings() {
-		return AuthorizationServerSettings.builder().build();
+		return AuthorizationServerSettings
+			.builder()
+			.issuer("http://authorization-server:8082")
+			.build();
 	}
 
 }

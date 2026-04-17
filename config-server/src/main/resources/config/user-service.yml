@@ -8,7 +8,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:8082
+          issuer-uri: ${AUTH_ISSUER_URI:http://localhost:8082}
   data:
     mongodb:
       auto-index-creation: true
@@ -23,10 +23,6 @@ eureka:
 springdoc:
   swagger-ui:
     enabled: false
-    oauth:
-      client-id: swagger-client
-      client-secret: swagger-secret
-      use-pkce-with-authorization-code-grant: true
 
 management:
   tracing:

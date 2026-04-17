@@ -1,5 +1,6 @@
 package com.users.gateway.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,6 +16,11 @@ import io.swagger.v3.oas.models.security.SecurityScheme;
 @Configuration
 public class OpenAPIConfig {
 
+    @Value("${AUTH_URL:http://localhost:8082/oauth2/authorize}")
+    private String authUrl;
+    @Value("${AUTH_TOKEN:http://localhost:8082/oauth2/token}")
+    private String tokenUrl;
+
     @Bean
     public OpenAPI gatewayOpenAPI() {
 
@@ -25,8 +31,8 @@ public class OpenAPIConfig {
                                 new OAuthFlows()
                                         .authorizationCode(
                                                 new OAuthFlow()
-                                                        .authorizationUrl("http://localhost:8082/oauth2/authorize")
-                                                        .tokenUrl("http://localhost:8082/oauth2/token")
+                                                        .authorizationUrl(authUrl)
+                                                        .tokenUrl(tokenUrl)
                                                         .scopes(
                                                                 new Scopes()
                                                                         .addString("openid", "OpenID")
@@ -34,7 +40,6 @@ public class OpenAPIConfig {
                                                         )
                                         )
                         );
-
         return new OpenAPI()
                 .components(
                         new Components()
