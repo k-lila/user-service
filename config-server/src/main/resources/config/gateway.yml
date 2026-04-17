@@ -23,17 +23,17 @@ spring:
       client:
         registration:
           gateway-client:
-            provider: auth-server
+            provider: authorization-server
             client-id: gateway-client
-            client-secret: secret
+            client-secret: gateway-secret
             authorization-grant-type: authorization_code
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            redirect-uri: "{baseUrl}/login/oauth2/code/gateway-client"
             scope:
               - openid
               - profile
 
         provider:
-          auth-server:
+          authorization-server:
             issuer-uri: http://localhost:8082
 
       resourceserver:
@@ -52,6 +52,13 @@ springdoc:
     urls:
       - name: user-service
         url: /v3/api-docs/user
+      - name: authorization-server
+        url: /v3/api-docs/authorization-server
+    oauth:
+      client-id: swagger-client
+      client-secret: swagger-secret
+      use-pkce-with-authorization-code-grant: true
+    oauth2-redirect-url: http://localhost:8081/swagger-ui/oauth2-redirect.html
 
 management:
   tracing:

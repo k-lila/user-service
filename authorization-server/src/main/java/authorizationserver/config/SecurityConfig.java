@@ -4,10 +4,13 @@ package authorizationserver.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -21,10 +24,12 @@ public class SecurityConfig {
 	@Order(1)
 	public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http)
 			throws Exception {
-
 		http
 			.oauth2AuthorizationServer((authorizationServer) -> {
-				http.securityMatcher(authorizationServer.getEndpointsMatcher());
+				http
+					.securityMatcher(authorizationServer.getEndpointsMatcher())
+					.cors(Customizer.withDefaults());
+
 				authorizationServer
 					.oidc(Customizer.withDefaults());	// Enable OpenID Connect 1.0
 			})
@@ -49,11 +54,20 @@ public class SecurityConfig {
 	public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http)
 			throws Exception {
 		http
+			.cors(Customizer.withDefaults())
 			.authorizeHttpRequests((authorize) -> authorize
+				.requestMatchers(
+					        "/oauth2/**",
+        					"/.well-known/**",
+        					"/login",
+        					"/error",
+							"/v3/api-docs/**"
+					// "/swagger-ui/**",
+					// "/swagger-ui.html"
+				).permitAll()
+				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 				.anyRequest().authenticated()
 			)
-			// Form login handles the redirect to the login page from the
-			// authorization server filter chain
 			.formLogin(Customizer.withDefaults());
 
 		return http.build();

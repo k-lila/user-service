@@ -10,43 +10,6 @@ spring:
       name: user
       password: password
 
-    oauth2:
-      authorizationserver:
-        client:
-          gateway-client:
-            registration:
-              client-id: "gateway-client"
-              client-secret: "{noop}gateway-secret"
-              client-authentication-methods:
-                - "client_secret_basic"
-
-              authorization-grant-types:
-                - "authorization_code"
-                - "refresh_token"
-
-              redirect-uris:
-                - "http://localhost:8081/login/oauth2/code/gateway"
-
-              scopes:
-                - "openid"
-                - "profile"
-
-            require-authorization-consent: false
-
-          swagger-client:
-            registration:
-              client-id: "swagger-client"
-              client-secret: "{noop}swagger-secret"
-
-              client-authentication-methods:
-                - "client_secret_basic"
-
-              authorization-grant-types:
-                - "client_credentials"
-
-              scopes:
-                - "internal"
-
 eureka:
   client:
     service-url:
@@ -54,7 +17,8 @@ eureka:
 
 logging:
   level:
-    org.springframework.security: TRACE
+    org.springframework.security: INFO
+    org.springframework.oauth2: INFO
 
 springdoc:
   swagger-ui:

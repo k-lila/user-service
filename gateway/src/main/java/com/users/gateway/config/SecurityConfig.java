@@ -15,14 +15,17 @@ public class SecurityConfig {
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
         http
             .csrf(ServerHttpSecurity.CsrfSpec::disable)
+            .cors(Customizer.withDefaults())
             .authorizeExchange(exchange -> exchange
                 .pathMatchers(
                         "/login",
                         "/oauth2/**",
+                        "/oauth2/token",
                         "/login/oauth2/**",
                         "/actuator/**",
                         "/swagger-ui/**",
-                        "/v3/api-docs/**"
+                        "/v3/api-docs/**",
+                        "/swagger-ui.html"
                 ).permitAll()
                 .anyExchange().authenticated()
             )
