@@ -117,9 +117,9 @@ public class UserController {
     @GetMapping("/me")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<UserResponseDTO> getCurrentUser(Authentication auth) {
-        String id = auth.getName();
-        LOGGER.info("| GET | usuário autenticado | ID: {}", id);
-        UserResponseDTO user = searchService.searchById(id);
+        String email = auth.getName();
+        LOGGER.info("| GET | usuário autenticado | email: {}", email);
+        UserResponseDTO user = searchService.searchByEmail(email);
         return ResponseEntity.ok(user);
     }
 

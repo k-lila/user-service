@@ -9,8 +9,6 @@ import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -29,7 +27,6 @@ public class SecurityConfig {
 				http
 					.securityMatcher(authorizationServer.getEndpointsMatcher())
 					.cors(Customizer.withDefaults());
-
 				authorizationServer
 					.oidc(Customizer.withDefaults());	// Enable OpenID Connect 1.0
 			})
@@ -37,8 +34,6 @@ public class SecurityConfig {
 				authorize
 					.anyRequest().authenticated()
 			)
-			// Redirect to the login page when not authenticated from the
-			// authorization endpoint
 			.exceptionHandling((exceptions) -> exceptions
 				.defaultAuthenticationEntryPointFor(
 					new LoginUrlAuthenticationEntryPoint("/login"),

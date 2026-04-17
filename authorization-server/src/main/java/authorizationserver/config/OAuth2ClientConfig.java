@@ -23,7 +23,6 @@ public class OAuth2ClientConfig {
 	    return new BCryptPasswordEncoder();
 	}
 
-
     @Bean
     public RegisteredClientRepository registeredClientRepository() {
 
@@ -44,13 +43,14 @@ public class OAuth2ClientConfig {
                 .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
                 .redirectUri("http://localhost:8081/login/oauth2/code/gateway-client")
                 .redirectUri("http://localhost:8081/swagger-ui/oauth2-redirect.html")
+                .redirectUri("https://oauth.pstmn.io/v1/callback")
                 .scope(OidcScopes.OPENID)
                 .scope(OidcScopes.PROFILE)
                 .scope("users.read")
                 .scope("users.write")
                 .clientSettings(ClientSettings.builder()
                         .requireAuthorizationConsent(false)
-                        .requireProofKey(false)
+                        .requireProofKey(true)
                         .build())
                 .build();
     }
