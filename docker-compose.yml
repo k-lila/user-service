@@ -75,6 +75,7 @@ services:
       MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       OAUTH_GATEWAY_CLIENT: http://localhost:8081/login/oauth2/code/gateway-client
       OAUTH_SWAGGER_REDIRECT_URL: http://localhost:8081/swagger-ui/oauth2-redirect.html
+      AUTH_ISSUER: http://authorization-server:8082
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]

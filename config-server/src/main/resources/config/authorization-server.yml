@@ -5,10 +5,8 @@ spring:
   application:
     name: authorization-server
 
-  security:
-    user:
-      name: user
-      password: password
+auth:
+  issuer: ${AUTH_ISSUER:http://localhost:8082}
 
 eureka:
   client:

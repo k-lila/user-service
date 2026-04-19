@@ -7,9 +7,19 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 
+import authorizationserver.clients.IUserClient;
+import authorizationserver.dtos.AuthDTO;
+
 
 @Configuration
 public class TokenCustomizerConfig {
+
+    private final IUserClient userClient;
+
+    public TokenCustomizerConfig(IUserClient userClient) {
+        this.userClient = userClient;
+    }
+
     @Bean
     public OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer() {
         return context -> {
@@ -17,14 +27,10 @@ public class TokenCustomizerConfig {
                 return;
             }
             var authentication = context.getPrincipal();
-            String username = authentication.getName();
-            var roles = authentication.getAuthorities()
-                    .stream()
-                    .map(a -> a.getAuthority().replace("ROLE_", ""))
-                    .toList();
+            AuthDTO user = userClient.getUserByEmail(authentication.getName());
             context.getClaims().claims(claims -> {
-                claims.put("email", username);
-                claims.put("roles", roles);
+                claims.put("userID", user.getId());
+                claims.put("roles", user.getRoles());
                 claims.put("permissions", List.of(
                         "users.read",
                         "users.write"

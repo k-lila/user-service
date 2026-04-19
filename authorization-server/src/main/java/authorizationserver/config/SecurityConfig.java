@@ -1,6 +1,6 @@
 package authorizationserver.config;
 
-
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -18,6 +18,9 @@ import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 @EnableWebSecurity
 public class SecurityConfig {
 
+	@Value("${auth.issuer}")
+	private String issuer;
+
 	@Bean
 	@Order(1)
 	public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http)
@@ -28,7 +31,7 @@ public class SecurityConfig {
 					.securityMatcher(authorizationServer.getEndpointsMatcher())
 					.cors(Customizer.withDefaults());
 				authorizationServer
-					.oidc(Customizer.withDefaults());	// Enable OpenID Connect 1.0
+					.oidc(Customizer.withDefaults());
 			})
 			.authorizeHttpRequests((authorize) ->
 				authorize
@@ -69,7 +72,7 @@ public class SecurityConfig {
 	public AuthorizationServerSettings authorizationServerSettings() {
 		return AuthorizationServerSettings
 			.builder()
-			.issuer("http://authorization-server:8082")
+			.issuer(issuer)
 			.build();
 	}
 
