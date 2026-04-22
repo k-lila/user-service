@@ -3,16 +3,20 @@ server:
 
 spring:
   application:
-    name: authentication-server
+    name: authorization-server
+
+auth:
+  issuer: ${AUTH_ISSUER:http://localhost:8082}
 
 eureka:
   client:
     service-url:
       defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
 
-springdoc:
-  swagger-ui:
-    enabled: false
+logging:
+  level:
+    org.springframework.security: INFO
+    org.springframework.oauth2: INFO
 
 management:
   tracing:
@@ -25,7 +29,8 @@ management:
     export:
       zipkin:
         enabled: true
+
   endpoints:
     web:
       exposure:
-        include: health, info, metrics
+        include: health,info,metrics

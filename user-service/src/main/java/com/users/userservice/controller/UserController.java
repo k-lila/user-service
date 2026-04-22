@@ -8,9 +8,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,6 +45,17 @@ public class UserController {
         this.searchService = searchService;
     }
 
+    @Operation(summary = "Registrar novo usuário")
+    @PostMapping("/register")
+    public ResponseEntity<UserResponseDTO> registerUser(@RequestBody @Valid UserRequestDTO userDTO) {
+        LOGGER.info(
+            "| POST | Registrar novo usuário | nome: {}",
+            userDTO.getName()
+        );
+        UserResponseDTO newUser = registerService.registerUser(userDTO);
+        return ResponseEntity.status(201).body(newUser);
+    }
+
     @Operation(summary = "Lista todos os usuários")
     @GetMapping
     @PreAuthorize("hasRole('USER')")
@@ -63,8 +77,13 @@ public class UserController {
             "| GET | buscar por ID | ID: {}",
             userID
         );
-        UserResponseDTO user = searchService.searchById(userID);
-        return ResponseEntity.ok(user);
+        try {
+            UserResponseDTO user = searchService.searchById(userID);
+            return ResponseEntity.ok(user);
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+
+        }
     }
 
     @Operation(summary = "Buscar usuário por Email")
@@ -72,8 +91,13 @@ public class UserController {
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<UserResponseDTO> searchByEmail(@PathVariable(value = "email", required = true) String email) {
         LOGGER.info("| GET | busca por email");
-        UserResponseDTO user = searchService.searchByEmail(email);
-        return ResponseEntity.ok(user);
+        
+        try {
+            UserResponseDTO user = searchService.searchByEmail(email);
+            return ResponseEntity.ok(user);
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @Operation(summary = "Modificar um usuário")
@@ -91,7 +115,7 @@ public class UserController {
 
     @Operation(summary = "Desativar um usuário")
     @DeleteMapping(value = "/{id}")
-    @PreAuthorize("hasRole('USER')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> removeUser(@PathVariable(value = "id", required = true) String userID) {
         LOGGER.info(
             "| DESATIVADAR | id: {}",
@@ -113,13 +137,26 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    @Operation(summary = "Desativar usuário atual")
+    @DeleteMapping(value = "/remove/{id}")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<Void> removeCurrentUser(@AuthenticationPrincipal Jwt jwt) {
+        String userID = jwt.getClaim("userID");
+        LOGGER.info(
+            "| DESATIVADAR | id: {}",
+            userID
+        );
+        registerService.deleteUser(userID);
+        return ResponseEntity.noContent().build();
+    }
+
     @Operation(summary = "Retornar o usuário atual")
     @GetMapping("/me")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UserResponseDTO> getCurrentUser(Authentication auth) {
-        String id = auth.getName();
-        LOGGER.info("| GET | usuário autenticado | ID: {}", id);
-        UserResponseDTO user = searchService.searchById(id);
+    public ResponseEntity<UserResponseDTO> getCurrentUser(@AuthenticationPrincipal Jwt jwt) {
+        String userID = jwt.getClaim("userID");
+        LOGGER.info("| GET | usuário autenticado | id: {}", userID);
+        UserResponseDTO user = searchService.searchById(userID);
         return ResponseEntity.ok(user);
     }
 

@@ -4,6 +4,7 @@ server:
 spring:
   application:
     name: gateway
+
   cloud:
     config:
       fail-fast: true
@@ -12,6 +13,32 @@ spring:
         initial-interval: 1000
         multiplier: 1.5
         max-interval: 5000
+
+    gateway:
+      default-filters:
+        - TokenRelay
+
+  security:
+    oauth2:
+      client:
+        registration:
+          gateway-client:
+            provider: authorization-server
+            client-id: ${OAUTH_CLIENT_ID:gateway-client}
+            client-secret: ${OAUTH_CLIENT_SECRET:gateway-secret}
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/gateway-client"
+            scope:
+              - openid
+              - profile
+
+        provider:
+          authorization-server:
+            issuer-uri: ${AUTH_ISSUER_URI:http://localhost:8082}
+
+      resourceserver:
+        jwt:
+          issuer-uri: ${AUTH_ISSUER_URI:http://localhost:8082}
 
 eureka:
   client:
@@ -25,8 +52,12 @@ springdoc:
     urls:
       - name: user-service
         url: /v3/api-docs/user
-      - name: authentication-service
-        url: /v3/api-docs/authentication
+
+    oauth:
+      client-id: ${OAUTH_CLIENT_ID:gateway-client}
+      client-secret: ${OAUTH_CLIENT_SECRET:gateway-secret}
+      use-pkce-with-authorization-code-grant: true
+    oauth2-redirect-url: ${OAUTH2SWAGGER_REDIRECT_URL:http://localhost:8081/swagger-ui/oauth2-redirect.html}
 
 management:
   tracing:
@@ -39,9 +70,11 @@ management:
     export:
       zipkin:
         enabled: true
+
   endpoint:
     gateway:
       enabled: true
+
   endpoints:
     web:
       exposure:

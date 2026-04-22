@@ -7,6 +7,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import com.users.userservice.domain.User;
@@ -23,10 +24,12 @@ import jakarta.validation.Valid;
 public class RegisterService {
     private static final Logger LOGGER = LoggerFactory.getLogger(RegisterService.class);
     private final IUserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
     @Autowired
-    public RegisterService(IUserRepository iUserRepository) {
+    public RegisterService(IUserRepository iUserRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = iUserRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     public UserResponseDTO registerUser(@Valid UserRequestDTO userDTO) {
@@ -40,7 +43,7 @@ public class RegisterService {
         User user = new User();
         user.setName(userDTO.getName());
         user.setEmail(userDTO.getEmail());
-        user.setPasswordHash(userDTO.getPasswordHash());
+        user.setPasswordHash(passwordEncoder.encode(userDTO.getPasswordHash()));
         user.setRoles(Set.of("USER"));
         user.setRegistrationDate(Instant.now());
         user.setActive(true);

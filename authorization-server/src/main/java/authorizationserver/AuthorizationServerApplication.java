@@ -1,4 +1,4 @@
-package authenticationserver;
+package authorizationserver;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -6,9 +6,9 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 
 @EnableFeignClients
 @SpringBootApplication
-public class AuthenticationServerApplication {
+public class AuthorizationServerApplication {
 		public static void main(String[] args) {
-		SpringApplication.run(AuthenticationServerApplication.class, args);
+		SpringApplication.run(AuthorizationServerApplication.class, args);
 	}
 
 }
