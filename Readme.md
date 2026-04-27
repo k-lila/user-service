@@ -37,4 +37,5 @@ Para execução via docker:
 - Eureka: http://localhost:9091
 - Zipkin: http://localhost:9411
 - Swagger UI: http://localhost:8081/swagger-ui/index.html
+- Logout: http://localhost:8082/logout
 - interface: http://localhost:5173/

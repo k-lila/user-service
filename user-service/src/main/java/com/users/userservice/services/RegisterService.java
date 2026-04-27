@@ -67,7 +67,10 @@ public class RegisterService {
         if (!userRepository.existsById(userID)) {
             throw new DomainEntityNotFound(User.class,"ID" , userID);
         }
-        if (userRepository.findByEmail(userDTO.getEmail()).isPresent()) {
+
+        User existingUser = userRepository.findById(userID).get();
+
+        if (!existingUser.getEmail().equals(userDTO.getEmail())) {
             LOGGER.info(
                 "| email já cadastrado | email: {}",
                 userDTO.getEmail()
