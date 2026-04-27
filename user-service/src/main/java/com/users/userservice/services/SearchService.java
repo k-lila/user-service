@@ -5,6 +5,7 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,7 @@ public class SearchService {
         return mapped;
     }
 
+    @Cacheable(value = "users", key = "#userID")
     public UserResponseDTO searchById(String userID) {
         Optional<User> user = userRepository.findById(userID);
         if (user.isEmpty()) {
@@ -53,6 +55,7 @@ public class SearchService {
         return UserResponseDTO.toResponseDTO(found);
     }
 
+    @Cacheable(value = "users", key = "#email")
     public UserResponseDTO searchByEmail(String email) {
         Optional<User> user = userRepository.findByEmail(email);
         if (user.isEmpty()) {
@@ -65,5 +68,4 @@ public class SearchService {
         );
         return UserResponseDTO.toResponseDTO(found);    
     }
-
 }
