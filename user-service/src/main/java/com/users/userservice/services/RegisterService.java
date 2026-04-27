@@ -7,6 +7,9 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +28,9 @@ public class RegisterService {
     private static final Logger LOGGER = LoggerFactory.getLogger(RegisterService.class);
     private final IUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+
+    @Autowired
+    CacheManager cacheManager;
 
     @Autowired
     public RegisterService(IUserRepository iUserRepository, PasswordEncoder passwordEncoder) {
@@ -56,14 +62,26 @@ public class RegisterService {
         return UserResponseDTO.toResponseDTO(registered);
     }
 
+    @CachePut(value = "users", key = "#userID")
     public UserResponseDTO updateUser(@Valid UserRequestDTO userDTO, String userID) {
         if (!userRepository.existsById(userID)) {
             throw new DomainEntityNotFound(User.class,"ID" , userID);
         }
+        if (userRepository.findByEmail(userDTO.getEmail()).isPresent()) {
+            LOGGER.info(
+                "| email já cadastrado | email: {}",
+                userDTO.getEmail()
+            );
+            throw new RuntimeException("Email já cadastrado");
+        }
+
         User toUpdate = userRepository.findById(userID).get();
+        String oldMail = toUpdate.getEmail();
         toUpdate.setName(userDTO.getName());
         toUpdate.setEmail(userDTO.getEmail());
         User updated = userRepository.save(toUpdate);
+        cacheManager.getCache("users").evict(oldMail);
+        cacheManager.getCache("users").evict(updated.getEmail());
         LOGGER.info(
             "| usuário atualizado | ID: {}",
             updated.getName(),
@@ -72,18 +90,21 @@ public class RegisterService {
         return UserResponseDTO.toResponseDTO(updated);
     }
 
+    @CacheEvict(value = "users", key = "#userID")
     public void deleteUser(String userID) {
         Optional<User> user = userRepository.findById(userID);
         if (user.isEmpty()) {
             throw new DomainEntityNotFound(User.class,"ID" , userID);
         }
         userRepository.delete(user.get());
+        cacheManager.getCache("users").evict(user.get().getEmail());
         LOGGER.info(
             "| usuário deletado | ID: {}",
             userID
         );
     }
 
+    @CacheEvict(value = "users", key = "#userID")
     public void deactivateUser(String userID) {
         Optional<User> user = userRepository.findById(userID);
         if (user.isEmpty()) {
@@ -92,10 +113,10 @@ public class RegisterService {
         User toDeactivate = user.get();
         toDeactivate.setActive(false);
         userRepository.save(toDeactivate);
+        cacheManager.getCache("users").evict(user.get().getEmail());
         LOGGER.info(
             "| usuário desativado | ID: {}",
             userID
         );
     }
-
 }

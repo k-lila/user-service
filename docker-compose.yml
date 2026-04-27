@@ -29,6 +29,8 @@ services:
       - "8888:8888"
     environment:
       SERVER_PORT: 8888
+      REDIS_HOST: user-redis
+      REDIS_PORT: 6379
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
       interval: 5s
@@ -159,6 +161,14 @@ services:
       - "5173:80"
     networks:
       - user-service-net
+
+  user-redis:
+    image: redis:7
+    networks:
+      - user-service-net
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
 
   user-mongo:
     image: mongo:8.2
