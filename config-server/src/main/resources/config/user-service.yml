@@ -15,7 +15,7 @@ spring:
       uri: ${MONGODB_URI:mongodb://user_service:user_1234321@localhost:27020}
       database: ${MONGODB_DATABASE:user-db}
     redis:
-      host: ${REDIS_HOST:user-redis}
+      host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
 eureka:

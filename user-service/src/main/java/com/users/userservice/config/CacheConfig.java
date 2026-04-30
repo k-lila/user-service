@@ -25,7 +25,7 @@ public class CacheConfig {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.activateDefaultTyping(
             BasicPolymorphicTypeValidator.builder()
-                .allowIfSubType(Object.class) // em prod, restrinja seu pacote
+                .allowIfSubType(Object.class)
                 .build(),
             ObjectMapper.DefaultTyping.NON_FINAL,
             JsonTypeInfo.As.PROPERTY
