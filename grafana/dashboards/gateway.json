@@ -1,0 +1,210 @@
+{
+  "title": "Gateway - Observabilidade Profissional",
+  "timezone": "browser",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "5s",
+
+  "templating": {
+    "list": [
+      {
+        "name": "application",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(http_server_requests_seconds_count, application)",
+        "current": {
+          "text": "gateway",
+          "value": "gateway"
+        }
+      }
+    ]
+  },
+
+  "panels": [
+    {
+      "type": "row",
+      "title": "📊 Overview"
+    },
+
+    {
+      "type": "stat",
+      "title": "RPS",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Erro (%)",
+      "targets": [
+        {
+          "expr": "100 * (sum(rate(http_server_requests_seconds_count{application=\"$application\",status=~\"5..\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Latência Média",
+      "targets": [
+        {
+          "expr": "1000 * (sum(rate(http_server_requests_seconds_sum{application=\"$application\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 200 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Erros (RPS)",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",status=~\"5..\"}[1m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "row",
+      "title": "⏱ Latência"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Latência Média",
+      "targets": [
+        {
+          "expr": "1000 * (sum(rate(http_server_requests_seconds_sum{application=\"$application\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Latência p95 / p99",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"$application\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"$application\"}[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "📈 Tráfego"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "RPS Total",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m]))"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "RPS por Endpoint",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",uri!~\"/actuator.*|/swagger.*|UNKNOWN\"}[1m])) by (uri, method)",
+          "legendFormat": "{{method}} {{uri}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "🚨 Erros"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Distribuição HTTP",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])) by (status)"
+        }
+      ],
+      "options": {
+        "stacking": {
+          "mode": "normal"
+        }
+      },
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Top endpoints com erro",
+      "targets": [
+        {
+          "expr": "topk(5, sum(rate(http_server_requests_seconds_count{application=\"$application\",status=~\"5..\",uri!~\"/actuator.*|/swagger.*|UNKNOWN\"}[1m])) by (uri))",
+          "legendFormat": "{{uri}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 }
+    }
+  ]
+}
