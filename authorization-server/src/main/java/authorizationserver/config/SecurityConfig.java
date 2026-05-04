@@ -58,7 +58,8 @@ public class SecurityConfig {
 					        "/oauth2/**",
         					"/.well-known/**",
         					"/login",
-        					"/error"
+        					"/error",
+							"/actuator/**"
 				).permitAll()
 				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 				.anyRequest().authenticated()

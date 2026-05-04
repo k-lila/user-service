@@ -39,6 +39,11 @@ public class GatewayRouter {
                 }))
                 .uri("lb://authorization-server")
             )
+
+            .route("auth-login", route -> route
+                .path("/login")
+                .uri("lb://authorization-server")
+            )
         
             .route("user-service", route -> route
                 .path("/users/**")

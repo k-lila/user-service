@@ -78,8 +78,13 @@ management:
   endpoint:
     gateway:
       enabled: true
+    prometheus:
+      enabled: true
 
   endpoints:
     web:
       exposure:
-        include: health, info, metrics, gateway
+        include: health, info, metrics, prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
