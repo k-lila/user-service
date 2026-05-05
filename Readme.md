@@ -1,6 +1,12 @@
 # users
 
-Projeto em microsserviços para gerenciamento de usuários com autenticação via OAuth2
+Projeto de uma API REST implementada com arquitetura de microsserviços para gerenciamento de usuários.
+
+- autenticação via OAuth2
+- trace distribuído com Zipkin
+- observabilidade com Prometheus e Grafana
+- MongoDB para domínio, Redis para cache e rate limiter
+- Swagger-UI para documentação e testes manuais
 
 ## Serviços
 
@@ -33,9 +39,11 @@ Para execução via docker:
 
 ## Endpoints disponíveis:
 
+- interface: http://localhost:5173/
 - Gateway: http://localhost:8081
 - Eureka: http://localhost:9091
 - Zipkin: http://localhost:9411
 - Swagger UI: http://localhost:8081/swagger-ui/index.html
 - Logout: http://localhost:8082/logout
-- interface: http://localhost:5173/
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000
