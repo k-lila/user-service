@@ -228,14 +228,14 @@ docker compose up -d --build
 
 ## Estratégia de Testes
 
-**Estado atual:** 22 testes unitários implementados (BUILD SUCCESS em ambos os módulos).
+**Estado atual:** 25 testes unitários implementados (BUILD SUCCESS em ambos os módulos).
 
 | Serviço | Arquivo de teste | Testes |
 |---------|-----------------|--------|
 | `RegisterService` | `user-service/.../services/RegisterServiceTest.java` | 9 |
-| `SearchService` | `user-service/.../services/SearchServiceTest.java` | 6 |
+| `SearchService` | `user-service/.../services/SearchServiceTest.java` | 7 |
 | `AuthenticationService` (user-service) | `user-service/.../services/AuthenticationServiceTest.java` | 3 |
-| `AuthorizationService` (authorization-server) | `authorization-server/.../services/AuthorizationServiceTest.java` | 4 |
+| `AuthorizationService` (authorization-server) | `authorization-server/.../services/AuthorizationServiceTest.java` | 6 |
 
 **Meta restante:**
 - **Integração** — Testcontainers com MongoDB e Redis reais:

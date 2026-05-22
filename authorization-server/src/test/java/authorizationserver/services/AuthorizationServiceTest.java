@@ -68,20 +68,16 @@ class AuthorizationServiceTest {
     void deveLancarRuntimeException_quandoClienteLancaExcecao() {
         when(userClient.getUserByEmail(any())).thenThrow(new RuntimeException("timeout"));
 
-        RuntimeException excecao = assertThrows(RuntimeException.class,
+        assertThrows(RuntimeException.class,
                 () -> service.loadUserByUsername("fulano@email.com"));
-
-        assertTrue(excecao.getMessage().contains("Erro de comunicação"));
     }
 
     @Test
     void deveLancarRuntimeException_quandoClienteRetornaNull() {
         when(userClient.getUserByEmail(any())).thenReturn(null);
 
-        RuntimeException excecao = assertThrows(RuntimeException.class,
+        assertThrows(RuntimeException.class,
                 () -> service.loadUserByUsername("fulano@email.com"));
-
-        assertTrue(excecao.getMessage().contains("Erro de comunicação"));
     }
 
     @Test

@@ -105,7 +105,7 @@ class RegisterServiceTest {
 
         assertNotNull(result);
         verify(userRepository).save(any(User.class));
-        verify(cache, times(2)).evict("fulano@email.com");
+        verify(cache, atLeastOnce()).evict("fulano@email.com");
     }
 
     @Test

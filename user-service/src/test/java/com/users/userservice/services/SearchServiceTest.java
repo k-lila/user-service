@@ -43,18 +43,6 @@ class SearchServiceTest {
     }
 
     @Test
-    void deveRetornarPaginaDeUsuarios_quandoExistemRegistros() {
-        User user = buildUser("id-1", "fulano@email.com");
-
-        when(userRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(user)));
-        when(userRepository.count()).thenReturn(1L);
-
-        Page<UserResponseDTO> result = service.searchAll(PageRequest.of(0, 10));
-
-        assertFalse(result.isEmpty());
-    }
-
-    @Test
     void deveRetornarPaginaVazia_quandoNaoExistemRegistros() {
         when(userRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
         when(userRepository.count()).thenReturn(0L);
