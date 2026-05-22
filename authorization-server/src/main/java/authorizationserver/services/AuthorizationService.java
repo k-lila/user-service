@@ -15,10 +15,10 @@ import authorizationserver.clients.IUserClient;
 import authorizationserver.dtos.AuthDTO;
 
 @Service
-public class AuthenticationService implements UserDetailsService {
-    private static final Logger LOGGER = LoggerFactory.getLogger(AuthenticationService.class);
+public class AuthorizationService implements UserDetailsService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AuthorizationService.class);
     private final IUserClient userClient;
-    public AuthenticationService(IUserClient userClient) {
+    public AuthorizationService(IUserClient userClient) {
         this.userClient = userClient;
     }
 
@@ -35,7 +35,7 @@ public class AuthenticationService implements UserDetailsService {
             throw new RuntimeException("Erro de comunicação interna entre serviços: " + e);
         }
         List<SimpleGrantedAuthority> authorities = user.getRoles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList();
-        return new User(user.getEmail(), user.getPasswordHash(), authorities); 
+        return new User(user.getEmail(), user.getPasswordHash(), authorities);
     }
 
 }

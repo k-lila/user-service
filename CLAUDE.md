@@ -228,13 +228,16 @@ docker compose up -d --build
 
 ## Estratégia de Testes
 
-**Estado atual:** apenas `contextLoads()` em `user-service/src/test/java/.../UserServiceApplicationTests.java`.
+**Estado atual:** 22 testes unitários implementados (BUILD SUCCESS em ambos os módulos).
 
-**Meta:**
-- **Unitários** — services com Mockito (mock de `IUserRepository`, `CacheManager`, `PasswordEncoder`):
-  - `RegisterService`: registerUser, updateUser (incluindo bug do e-mail), deleteUser, deactivateUser
-  - `SearchService`: searchAll, searchById, searchByEmail
-  - `AuthenticationService`: getUserByEmail (usuário não encontrado, usuário inativo)
+| Serviço | Arquivo de teste | Testes |
+|---------|-----------------|--------|
+| `RegisterService` | `user-service/.../services/RegisterServiceTest.java` | 9 |
+| `SearchService` | `user-service/.../services/SearchServiceTest.java` | 6 |
+| `AuthenticationService` (user-service) | `user-service/.../services/AuthenticationServiceTest.java` | 3 |
+| `AuthorizationService` (authorization-server) | `authorization-server/.../services/AuthorizationServiceTest.java` | 4 |
+
+**Meta restante:**
 - **Integração** — Testcontainers com MongoDB e Redis reais:
   - Fluxo completo de registro → busca → atualização → desativação
   - Validação de unicidade de e-mail no banco
@@ -249,7 +252,7 @@ docker compose up -d --build
 - [ ] Renomear `UserRequestDTO.passwordHash` → `password` (e ajustar usages)
 
 **Qualidade:**
-- [ ] Implementar testes unitários dos services (Mockito)
+- [x] Implementar testes unitários dos services (Mockito) — 22 testes, BUILD SUCCESS
 - [ ] Implementar testes de integração (Testcontainers — MongoDB + Redis)
 - [ ] Adicionar Resilience4j como circuit breaker na chamada Feign do authorization-server → user-service
 
@@ -295,7 +298,7 @@ Identificados e com decisão de abordagem registrada:
 ├── authorization-server/
 │   └── src/main/java/authorizationserver/
 │       ├── config/          # SecurityConfig, OAuth2ClientConfig, TokenCustomizerConfig, JWKConfig, CORSConfig
-│       ├── services/        # AuthenticationService (UserDetailsService)
+│       ├── services/        # AuthorizationService (UserDetailsService)
 │       ├── clients/         # IUserClient (Feign → user-service)
 │       └── dtos/            # AuthDTO
 ├── user-service/
