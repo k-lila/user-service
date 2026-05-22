@@ -73,4 +73,25 @@ class AuthorizationServiceTest {
 
         assertTrue(excecao.getMessage().contains("Erro de comunicação"));
     }
+
+    @Test
+    void deveLancarRuntimeException_quandoClienteRetornaNull() {
+        when(userClient.getUserByEmail(any())).thenReturn(null);
+
+        RuntimeException excecao = assertThrows(RuntimeException.class,
+                () -> service.loadUserByUsername("fulano@email.com"));
+
+        assertTrue(excecao.getMessage().contains("Erro de comunicação"));
+    }
+
+    @Test
+    void deveRetornarUserDetailsComAuthoritiesVazias_quandoRolesVazio() {
+        when(userClient.getUserByEmail("fulano@email.com"))
+                .thenReturn(buildAuthDTO("fulano@email.com", true, Set.of()));
+
+        UserDetails result = service.loadUserByUsername("fulano@email.com");
+
+        assertNotNull(result);
+        assertTrue(result.getAuthorities().isEmpty());
+    }
 }

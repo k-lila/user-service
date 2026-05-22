@@ -101,4 +101,34 @@ class SearchServiceTest {
 
         assertThrows(DomainEntityNotFound.class, () -> service.searchByEmail("nao@existe.com"));
     }
+
+    @Test
+    void deveMapearTodosCamposDoDTO_quandoBuscaPorId() {
+        User user = buildUser("id-1", "fulano@email.com");
+
+        when(userRepository.findById("id-1")).thenReturn(Optional.of(user));
+
+        UserResponseDTO result = service.searchById("id-1");
+
+        assertEquals("id-1", result.getId());
+        assertEquals("Fulano", result.getName());
+        assertEquals("fulano@email.com", result.getEmail());
+        assertTrue(result.getActive());
+    }
+
+    @Test
+    void deveMapearCamposDosUsuariosNaPagina_quandoBuscaTodos() {
+        User user = buildUser("id-1", "fulano@email.com");
+
+        when(userRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(user)));
+        when(userRepository.count()).thenReturn(1L);
+
+        Page<UserResponseDTO> result = service.searchAll(PageRequest.of(0, 10));
+
+        UserResponseDTO dto = result.getContent().get(0);
+        assertEquals("id-1", dto.getId());
+        assertEquals("Fulano", dto.getName());
+        assertEquals("fulano@email.com", dto.getEmail());
+        assertTrue(dto.getActive());
+    }
 }
