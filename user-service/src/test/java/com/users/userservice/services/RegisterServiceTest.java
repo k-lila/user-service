@@ -9,7 +9,6 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -32,7 +31,8 @@ class RegisterServiceTest {
     @Mock private IUserRepository userRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private CacheManager cacheManager;
-    @Mock private Cache cache;
+    @Mock private Cache cacheById;
+    @Mock private Cache cacheByEmail;
 
     private RegisterService service;
 
@@ -40,7 +40,8 @@ class RegisterServiceTest {
     void setUp() {
         service = new RegisterService(userRepository, passwordEncoder);
         ReflectionTestUtils.setField(service, "cacheManager", cacheManager);
-        lenient().when(cacheManager.getCache("users")).thenReturn(cache);
+        lenient().when(cacheManager.getCache("usersById")).thenReturn(cacheById);
+        lenient().when(cacheManager.getCache("usersByEmail")).thenReturn(cacheByEmail);
     }
 
     private User buildUser(String id, String email, boolean active) {
@@ -60,7 +61,7 @@ class RegisterServiceTest {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setName("Fulano");
         dto.setEmail("fulano@email.com");
-        dto.setPasswordHash("senha123");
+        dto.setPassword("senha123");
 
         User saved = buildUser("id-1", "fulano@email.com", true);
 
@@ -97,7 +98,6 @@ class RegisterServiceTest {
         User updated = buildUser(userId, "fulano@email.com", true);
         updated.setName("Novo Nome");
 
-        when(userRepository.existsById(userId)).thenReturn(true);
         when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(User.class))).thenReturn(updated);
 
@@ -105,7 +105,8 @@ class RegisterServiceTest {
 
         assertNotNull(result);
         verify(userRepository).save(any(User.class));
-        verify(cache, atLeastOnce()).evict("fulano@email.com");
+        verify(cacheById).put(eq(userId), any(UserResponseDTO.class));
+        verify(cacheByEmail, atLeastOnce()).evict("fulano@email.com");
     }
 
     @Test
@@ -113,24 +114,9 @@ class RegisterServiceTest {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setEmail("fulano@email.com");
 
-        when(userRepository.existsById("id-inexistente")).thenReturn(false);
+        when(userRepository.findById("id-inexistente")).thenReturn(Optional.empty());
 
         assertThrows(DomainEntityNotFound.class, () -> service.updateUser(dto, "id-inexistente"));
-    }
-
-    @Test
-    void deveLancarRuntimeException_quandoEmailDiferenteNoUpdate() {
-        // ATENÇÃO: testa o comportamento ATUAL (BUGADO). Ver CLAUDE.md > Bugs Conhecidos.
-        String userId = "id-1";
-        UserRequestDTO dto = new UserRequestDTO();
-        dto.setEmail("novo@email.com");
-
-        User existing = buildUser(userId, "antigo@email.com", true);
-
-        when(userRepository.existsById(userId)).thenReturn(true);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
-
-        assertThrows(RuntimeException.class, () -> service.updateUser(dto, userId));
     }
 
     @Test
@@ -142,7 +128,6 @@ class RegisterServiceTest {
         service.deleteUser("id-1");
 
         verify(userRepository).delete(user);
-        verify(cache).evict("fulano@email.com");
     }
 
     @Test
@@ -163,7 +148,6 @@ class RegisterServiceTest {
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(captor.capture());
         assertFalse(captor.getValue().getActive());
-        verify(cache).evict("fulano@email.com");
     }
 
     @Test
@@ -178,7 +162,7 @@ class RegisterServiceTest {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setName("Fulano");
         dto.setEmail("fulano@email.com");
-        dto.setPasswordHash("senha123");
+        dto.setPassword("senha123");
 
         User saved = buildUser("id-1", "fulano@email.com", true);
 
@@ -208,7 +192,6 @@ class RegisterServiceTest {
         assertThrows(RuntimeException.class, () -> service.registerUser(dto));
     }
 
-    @Disabled("Depende da correção do bug em updateUser() — ver CLAUDE.md > Bugs Conhecidos")
     @Test
     void deveAtualizarUsuario_quandoNovoEmailNaoExisteNoBanco_comportamentoCorreto() {
         String userId = "id-1";
@@ -219,7 +202,6 @@ class RegisterServiceTest {
         User existing = buildUser(userId, "antigo@email.com", true);
         User updated = buildUser(userId, "novo@email.com", true);
 
-        when(userRepository.existsById(userId)).thenReturn(true);
         when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
         when(userRepository.findByEmail("novo@email.com")).thenReturn(Optional.empty());
         when(userRepository.save(any(User.class))).thenReturn(updated);
@@ -228,11 +210,10 @@ class RegisterServiceTest {
 
         assertNotNull(result);
         verify(userRepository).save(any(User.class));
-        verify(cache).evict("antigo@email.com");
-        verify(cache).evict("novo@email.com");
+        verify(cacheByEmail).evict("antigo@email.com");
+        verify(cacheByEmail).evict("novo@email.com");
     }
 
-    @Disabled("Depende da correção do bug em updateUser() — ver CLAUDE.md > Bugs Conhecidos")
     @Test
     void deveLancarRuntimeException_quandoNovoEmailPertenceAOutroUsuario_comportamentoCorreto() {
         String userId = "id-1";
@@ -242,7 +223,6 @@ class RegisterServiceTest {
         User existing = buildUser(userId, "fulano@email.com", true);
         User outroUsuario = buildUser("id-2", "outro@email.com", true);
 
-        when(userRepository.existsById(userId)).thenReturn(true);
         when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
         when(userRepository.findByEmail("outro@email.com")).thenReturn(Optional.of(outroUsuario));
 
