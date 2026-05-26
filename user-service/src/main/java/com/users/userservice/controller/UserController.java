@@ -102,7 +102,8 @@ public class UserController {
     @Operation(summary = "Modificar um usuário")
     @PutMapping
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UserResponseDTO> updateUser(@RequestBody @Valid UserRequestDTO userDTO, String userID) {
+    public ResponseEntity<UserResponseDTO> updateUser(@RequestBody @Valid UserRequestDTO userDTO, @AuthenticationPrincipal Jwt jwt) {
+        String userID = jwt.getClaim("userID");
         LOGGER.info(
             "| PUT | nome: {}, id: {}",
             userDTO.getName(),
@@ -124,7 +125,7 @@ public class UserController {
             "| DESATIVADAR | id: {}",
             userID
         );
-        registerService.deleteUser(userID);
+        registerService.deactivateUser(userID);
         return ResponseEntity.noContent().build();
     }
 
@@ -149,7 +150,7 @@ public class UserController {
             "| DESATIVADAR | id: {}",
             userID
         );
-        registerService.deleteUser(userID);
+        registerService.deactivateUser(userID);
         return ResponseEntity.noContent().build();
     }
 
