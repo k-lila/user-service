@@ -21,7 +21,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @Service
 public class SearchService {
     private static final Logger LOGGER = LoggerFactory.getLogger(SearchService.class);
-    private IUserRepository userRepository;
+    private final IUserRepository userRepository;
 
     @Autowired
     public SearchService(IUserRepository iUserRepository) {
@@ -36,12 +36,12 @@ public class SearchService {
             "| página encontrada | {}x{} | total (usuários): {}",
             pageable.getPageSize(),
             pageable.getPageNumber(),
-            userRepository.count()
+            mapped.getTotalElements()
         );
         return mapped;
     }
 
-    @Cacheable(value = "users", key = "#userID")
+    @Cacheable(value = "usersById", key = "#userID")
     public UserResponseDTO searchById(String userID) {
         Optional<User> user = userRepository.findById(userID);
         if (user.isEmpty()) {
@@ -55,7 +55,7 @@ public class SearchService {
         return UserResponseDTO.toResponseDTO(found);
     }
 
-    @Cacheable(value = "users", key = "#email")
+    @Cacheable(value = "usersByEmail", key = "#email")
     public UserResponseDTO searchByEmail(String email) {
         Optional<User> user = userRepository.findByEmail(email);
         if (user.isEmpty()) {
