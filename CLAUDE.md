@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+## Restrições de Execução
+
+- Não refatore código fora do escopo explícito da tarefa pedida
+- Não adicione tratamento de erro para cenários impossíveis
+- Não crie arquivos sem ser pedido explicitamente
+- Pergunte antes de agir se a tarefa tiver mais de 3 arquivos envolvidos
+
+---
+
 ## Visão Geral do Projeto
 
 Sistema de microsserviços em Java + Spring para gerenciamento de usuários, pronto para produção. O objetivo central é fornecer uma base sólida de autenticação, registro e controle de acesso sobre a qual outras camadas de domínio serão adicionadas futuramente.
@@ -67,7 +76,7 @@ login-interface (React)
 ### user-service (porta 8090)
 - Domínio central: CRUD de usuários
 - Banco: MongoDB, coleção `users`
-- Cache: Redis (TTL 5 min, nome do cache: `"users"`)
+- Cache: Redis (TTL 5 min, caches: `"usersById"` e `"usersByEmail"`)
 - Dois controllers:
   - `UserController` — endpoints públicos (via gateway)
   - `InternalUserController` — `GET /internal/users/email/{email}`, sem autenticação, **não exposto pelo gateway**, usado exclusivamente pelo authorization-server via Feign
@@ -100,9 +109,9 @@ login-interface (React)
 ```
 
 **Estratégia de cache:**
-- `@Cacheable` em `searchById` e `searchByEmail`
-- `@CachePut` em `updateUser`
-- `@CacheEvict` em `deleteUser` e `deactivateUser`
+- Dois caches Redis distintos: `usersById` (chave = ID) e `usersByEmail` (chave = e-mail)
+- Leitura (declarativa): `@Cacheable("usersById")` em `searchById` e `@Cacheable("usersByEmail")` em `searchByEmail`
+- Escrita (manual via `CacheManager`): `updateUser` atualiza `usersById` e evicta o e-mail antigo e o novo em `usersByEmail`; `deleteUser` e `deactivateUser` evictam ambos os caches. A escrita é manual (não declarativa) porque cada cache usa uma chave diferente — ID vs e-mail
 
 ### gateway (porta 8081)
 - Spring Cloud Gateway (WebFlux/reativo)
@@ -206,9 +215,10 @@ docker compose up -d --build
 
 - **Separação de responsabilidades rígida**: authorization-server não acessa MongoDB diretamente — apenas via Feign para user-service
 - **Endpoint interno isolado**: `/internal/users/email/{email}` não está registrado nas rotas do gateway e não aparece no Swagger — é canal exclusivo entre authorization-server e user-service
-- **Dois endpoints DELETE admin são intencionais**:
-  - `DELETE /users/{id}` → soft-delete (`deactivateUser`, seta `active = false`)
-  - `DELETE /users/del/{id}` → hard-delete (`deleteUser`, remove do banco)
+- **Endpoints DELETE com semânticas distintas e intencionais**:
+  - `DELETE /users/{id}` (ADMIN) → soft-delete (`deactivateUser`, seta `active = false`)
+  - `DELETE /users/del/{id}` (ADMIN) → hard-delete (`deleteUser`, remove do banco)
+  - `DELETE /users/remove/{id}` (USER, auto-remoção) → soft-delete (`deactivateUser`)
 - **BCrypt** para hash de senha — custo padrão (10)
 - **Roles são fixas**: apenas `USER` e `ADMIN`. Não há sistema de roles dinâmicas — roles são strings simples no MongoDB: `["USER"]`, `["USER", "ADMIN"]`
 - **Configuração centralizada**: segredos vêm do config-server via variáveis de ambiente. Segredos hardcoded são gaps de segurança conhecidos (ver seção abaixo), não padrão intencional
@@ -219,8 +229,9 @@ docker compose up -d --build
 
 | Arquivo | Bug | Comportamento Atual | Comportamento Esperado |
 |---------|-----|---------------------|------------------------|
-| `user-service/.../services/RegisterService.java` | `updateUser()` — validação de e-mail invertida | Lança exceção quando os e-mails são *diferentes*, impedindo qualquer atualização de e-mail | Deve lançar exceção se o novo e-mail já pertence a *outro* usuário existente |
 | `user-service/.../dtos/UserRequestDTO.java` | Campo `passwordHash` nomeado incorretamente | Recebe senha em **plain text**; BCrypt é aplicado no servidor em `RegisterService` | Renomear para `password` para refletir o que realmente é recebido |
+
+> **Corrigido:** `RegisterService.updateUser()` — a validação de e-mail estava invertida (lançava exceção quando os e-mails eram *diferentes*). Agora lança exceção apenas quando o novo e-mail já pertence a *outro* usuário existente.
 
 > O campo no `domain/User.java` (`passwordHash`) está correto — armazena o resultado do BCrypt. Apenas o DTO de entrada precisa ser renomeado.
 
@@ -228,32 +239,37 @@ docker compose up -d --build
 
 ## Estratégia de Testes
 
-**Estado atual:** 25 testes unitários implementados (BUILD SUCCESS em ambos os módulos).
+**Estado atual:** 28 testes unitários + 18 testes de integração (Testcontainers), BUILD SUCCESS em ambos os módulos.
+
+**Unitários (Mockito):**
 
 | Serviço | Arquivo de teste | Testes |
 |---------|-----------------|--------|
-| `RegisterService` | `user-service/.../services/RegisterServiceTest.java` | 9 |
+| `RegisterService` | `user-service/.../services/RegisterServiceTest.java` | 12 |
 | `SearchService` | `user-service/.../services/SearchServiceTest.java` | 7 |
 | `AuthenticationService` (user-service) | `user-service/.../services/AuthenticationServiceTest.java` | 3 |
 | `AuthorizationService` (authorization-server) | `authorization-server/.../services/AuthorizationServiceTest.java` | 6 |
 
-**Meta restante:**
-- **Integração** — Testcontainers com MongoDB e Redis reais:
-  - Fluxo completo de registro → busca → atualização → desativação
-  - Validação de unicidade de e-mail no banco
-  - Comportamento do cache Redis
+**Integração (Testcontainers — MongoDB `mongo:7` + Redis `redis:7-alpine`):**
+
+| Foco | Arquivo de teste | Testes |
+|------|-----------------|--------|
+| Fluxo registro → busca → atualização → desativação/remoção e unicidade de e-mail | `user-service/.../integration/UserFlowIntegrationTest.java` | 10 |
+| Comportamento do cache Redis (popular/evictar `usersById` e `usersByEmail`) | `user-service/.../integration/CacheIntegrationTest.java` | 8 |
+
+> Base comum: `AbstractIntegrationTest` sobe os containers, mocka o `JwtDecoder` e limpa Redis (`flushDb`) + os caches `usersById`/`usersByEmail` entre os testes.
 
 ---
 
 ## Trabalho Pendente (Estado Atual)
 
 **Correções de bugs (back-end):**
-- [ ] Corrigir `RegisterService.updateUser()` — lógica de validação de e-mail invertida
+- [x] Corrigir `RegisterService.updateUser()` — lógica de validação de e-mail invertida
 - [ ] Renomear `UserRequestDTO.passwordHash` → `password` (e ajustar usages)
 
 **Qualidade:**
-- [x] Implementar testes unitários dos services (Mockito) — 22 testes, BUILD SUCCESS
-- [ ] Implementar testes de integração (Testcontainers — MongoDB + Redis)
+- [x] Implementar testes unitários dos services (Mockito) — 28 testes, BUILD SUCCESS
+- [x] Implementar testes de integração (Testcontainers — MongoDB + Redis) — 18 testes
 - [ ] Adicionar Resilience4j como circuit breaker na chamada Feign do authorization-server → user-service
 
 **Front-end:**
