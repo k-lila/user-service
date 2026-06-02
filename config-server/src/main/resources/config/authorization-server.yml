@@ -8,6 +8,10 @@ spring:
 auth:
   issuer: ${AUTH_ISSUER:http://localhost:8082}
 
+oauth:
+  client:
+    secret: ${OAUTH_CLIENT_SECRET}
+
 eureka:
   client:
     service-url:

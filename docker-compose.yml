@@ -76,6 +76,7 @@ services:
       OAUTH_GATEWAY_CLIENT: http://localhost:8081/login/oauth2/code/gateway-client
       OAUTH_SWAGGER_REDIRECT_URL: http://localhost:8081/swagger-ui/oauth2-redirect.html
       AUTH_ISSUER: http://authorization-server:8082
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-gateway-secret}
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
@@ -168,16 +169,12 @@ services:
     image: redis:7
     networks:
       - user-service-net
-    ports:
-      - "6379:6379"
     restart: unless-stopped
 
   user-mongo:
     image: mongo:8.2
     networks:
       - user-service-net
-    ports:
-      - "27020:27017"
     volumes:
       - user_db_data:/data/db
     environment:

@@ -12,7 +12,7 @@ spring:
   data:
     mongodb:
       auto-index-creation: true
-      uri: ${MONGODB_URI:mongodb://user_service:user_1234321@localhost:27020}
+      uri: ${MONGODB_URI}
       database: ${MONGODB_DATABASE:user-db}
     redis:
       host: ${REDIS_HOST:localhost}

@@ -2,6 +2,7 @@ package authorizationserver.config;
 
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -17,6 +18,9 @@ import org.springframework.security.oauth2.server.authorization.settings.ClientS
 
 @Configuration
 public class OAuth2ClientConfig {
+
+    @Value("${oauth.client.secret}")
+    private String clientSecret;
 
     @Bean
 	PasswordEncoder passwordEncoder() {
@@ -34,7 +38,7 @@ public class OAuth2ClientConfig {
     private RegisteredClient gatewayClient() {
         return RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId("gateway-client")
-                .clientSecret(passwordEncoder().encode("gateway-secret"))
+                .clientSecret(passwordEncoder().encode(clientSecret))
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
