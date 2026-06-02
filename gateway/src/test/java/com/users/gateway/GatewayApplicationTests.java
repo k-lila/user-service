@@ -1,4 +1,4 @@
-package com.memelandia.gateway;
+package com.users.gateway;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

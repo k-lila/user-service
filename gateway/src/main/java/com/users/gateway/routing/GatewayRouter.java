@@ -47,7 +47,10 @@ public class GatewayRouter {
         
             .route("user-service", route -> route
                 .path("/users/**")
-                .filters(f -> f.requestRateLimiter(c -> {
+                // tokenRelay() injeta o access token da sessão BFF como Authorization: Bearer.
+                // Declarado aqui (e não via default-filters) porque rotas do RouteLocatorBuilder
+                // não recebem os default-filters do gateway.yml.
+                .filters(f -> f.tokenRelay().requestRateLimiter(c -> {
                     c.setRateLimiter(redisRateLimiterHigh); //menos restritivo
                     c.setKeyResolver(userKeyResolver);
                 }))

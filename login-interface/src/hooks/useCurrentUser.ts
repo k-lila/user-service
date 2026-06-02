@@ -7,5 +7,7 @@ export function useCurrentUser() {
     queryFn: getCurrentUser,
     staleTime: 1000 * 60 * 10,
     refetchOnWindowFocus: false,
+    // 401 = não autenticado; não re-tentar (é a fonte de verdade do estado de auth).
+    retry: false,
   })
 }

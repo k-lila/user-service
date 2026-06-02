@@ -44,8 +44,11 @@ public class OAuth2ClientConfig {
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
                 .redirectUri("http://localhost:8081/login/oauth2/code/gateway-client")
+                .redirectUri("http://localhost:5173/login/oauth2/code/gateway-client") // SPA (BFF): callback via proxy do front (Vite :5173 dev / nginx :5173 Docker)
                 .redirectUri("http://localhost:8081/swagger-ui/oauth2-redirect.html")
                 .redirectUri("https://oauth.pstmn.io/v1/callback")
+                // RP-Initiated Logout: para onde o auth-server devolve o browser após encerrar a sessão
+                .postLogoutRedirectUri("http://localhost:5173/")
                 .scope(OidcScopes.OPENID)
                 .scope(OidcScopes.PROFILE)
                 .scope("users.read")
