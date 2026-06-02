@@ -8,15 +8,18 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.test.annotation.DirtiesContext;
 
 import com.users.userservice.domain.User;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.exceptions.DomainEntityNotFound;
+import com.users.userservice.exceptions.EmailAlreadyRegisteredException;
 import com.users.userservice.repository.IUserRepository;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
 
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class UserFlowIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired RegisterService registerService;
@@ -51,13 +54,15 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertNotNull(encontrado);
         assertEquals("fulano@email.com", encontrado.getEmail());
         assertEquals("Fulano", encontrado.getName());
+        assertTrue(encontrado.getActive());           // lacuna 1
+        assertNotNull(encontrado.getRegistrationDate()); // lacuna 2
     }
 
     @Test
-    void deveLancarExcecao_quandoEmailDuplicadoNoBanco() {
+    void deveLancarEmailAlreadyRegisteredException_quandoEmailDuplicadoNoBanco() {
         registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
 
-        assertThrows(RuntimeException.class, () ->
+        assertThrows(EmailAlreadyRegisteredException.class, () ->
                 registerService.registerUser(buildDTO("Ciclano", "fulano@email.com", "outrasenha")));
     }
 
@@ -128,5 +133,80 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         Page<UserResponseDTO> pagina = searchService.searchAll(PageRequest.of(0, 10));
 
         assertTrue(pagina.isEmpty());
+    }
+
+    // lacuna 3
+    @Test
+    void deveAtribuirRoleUser_quandoUsuarioRegistrado() {
+        UserResponseDTO registrado = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+
+        User persistido = userRepository.findById(registrado.getId()).orElseThrow();
+
+        assertTrue(persistido.getRoles().contains("USER"));
+        assertEquals(1, persistido.getRoles().size());
+    }
+
+    // lacuna 4
+    @Test
+    void deveHashearSenhaComBcrypt_quandoUsuarioRegistrado() {
+        UserResponseDTO registrado = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+
+        User persistido = userRepository.findById(registrado.getId()).orElseThrow();
+
+        assertNotNull(persistido.getPasswordHash());
+        assertNotEquals("senha123", persistido.getPasswordHash());
+    }
+
+    // lacuna 5
+    @Test
+    void deveLancarDomainEntityNotFound_quandoIdInexistenteNaBusca() {
+        assertThrows(DomainEntityNotFound.class, () ->
+                searchService.searchById("id-inexistente"));
+    }
+
+    // lacuna 6
+    @Test
+    void deveBuscarPorEmail_quandoEmailExiste() {
+        registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
+
+        UserResponseDTO encontrado = searchService.searchByEmail("fulano@email.com");
+
+        assertNotNull(encontrado);
+        assertEquals("Fulano", encontrado.getName());
+        assertEquals("fulano@email.com", encontrado.getEmail());
+    }
+
+    // lacuna 7
+    @Test
+    void deveLancarDomainEntityNotFound_quandoEmailInexistente() {
+        assertThrows(DomainEntityNotFound.class, () ->
+                searchService.searchByEmail("nao@existe.com"));
+    }
+
+    // lacuna 8
+    @Test
+    void deveLancarEmailAlreadyRegisteredException_quandoEmailDeAtualizacaoConflita() {
+        UserResponseDTO userA = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+        registerService.registerUser(buildDTO("Ciclano", "ciclano@email.com", "senha456"));
+
+        assertThrows(EmailAlreadyRegisteredException.class, () ->
+                registerService.updateUser(buildDTO("Fulano", "ciclano@email.com", null), userA.getId()));
+    }
+
+    // lacuna 9
+    @Test
+    void deveRetornarPaginaCorreta_quandoPaginacaoVariada() {
+        registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
+        registerService.registerUser(buildDTO("Ciclano", "ciclano@email.com", "senha456"));
+        registerService.registerUser(buildDTO("Beltrano", "beltrano@email.com", "senha789"));
+
+        Page<UserResponseDTO> pagina = searchService.searchAll(PageRequest.of(1, 2));
+
+        assertEquals(3, pagina.getTotalElements());
+        assertEquals(1, pagina.getNumberOfElements());
+        assertEquals(1, pagina.getNumber());
     }
 }
