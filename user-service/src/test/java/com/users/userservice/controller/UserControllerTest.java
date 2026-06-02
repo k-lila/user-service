@@ -200,7 +200,7 @@ class UserControllerTest {
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json(buildRequest("Novo Nome", "fulano@email.com", null))))
+                .content(json(buildRequest("Novo Nome", "fulano@email.com", "senha12345"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("Fulano"));
     }
@@ -214,7 +214,7 @@ class UserControllerTest {
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json(buildRequest("Fulano", "fulano@email.com", null))))
+                .content(json(buildRequest("Fulano", "fulano@email.com", "senha12345"))))
                 .andExpect(status().isOk());
 
         verify(registerService).updateUser(any(), eq(USER_ID));
@@ -230,7 +230,7 @@ class UserControllerTest {
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json(buildRequest("Fulano", "fulano@email.com", null))))
+                .content(json(buildRequest("Fulano", "fulano@email.com", "senha12345"))))
                 .andExpect(status().isNotFound());
     }
 
@@ -244,7 +244,7 @@ class UserControllerTest {
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json(buildRequest("Fulano", "outro@email.com", null))))
+                .content(json(buildRequest("Fulano", "outro@email.com", "senha12345"))))
                 .andExpect(status().isConflict());
     }
 
@@ -261,7 +261,7 @@ class UserControllerTest {
         mockMvc.perform(put("/users")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER")))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json(buildRequest("Fulano", "fulano@email.com", null))))
+                .content(json(buildRequest("Fulano", "fulano@email.com", "senha12345"))))
                 .andExpect(status().isForbidden());
     }
 

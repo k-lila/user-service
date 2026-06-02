@@ -6,7 +6,6 @@ import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -28,7 +27,6 @@ public class RegisterService {
     private final PasswordEncoder passwordEncoder;
     private final CacheService cacheService;
 
-    @Autowired
     public RegisterService(IUserRepository iUserRepository, PasswordEncoder passwordEncoder, CacheService cacheService) {
         this.userRepository = iUserRepository;
         this.passwordEncoder = passwordEncoder;
