@@ -9,9 +9,9 @@ export const RegisterBox = () => {
   const [password, setPassword] = useState('')
   const mutation = useRegister()
 
-  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault()
-    mutation.mutate({ name: name, email: email, rawPassword: password })
+    mutation.mutate({ name, email, password })
   }
 
   return (

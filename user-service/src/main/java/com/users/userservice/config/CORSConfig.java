@@ -18,7 +18,8 @@ public class CORSConfig {
 
         config.setAllowedOrigins(List.of(
                 "http://localhost:8081",
-                "http://localhost:8082"
+                "http://localhost:8082",
+                "http://localhost:5173"
         ));
 
         config.setAllowedMethods(List.of(

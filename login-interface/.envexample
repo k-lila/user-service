@@ -1,1 +1,4 @@
-VITE_API_URL=http://localhost:.....
+# BFF + proxy do Vite: o SPA chama o gateway por caminho relativo (mesma origem :5173).
+# Deixe VITE_API_URL vazio em dev para usar o proxy (ver server.proxy em vite.config.ts).
+# Em produção, aponte para a origem do gateway se o SPA não for servido pelo mesmo domínio.
+VITE_API_URL=
