@@ -311,6 +311,8 @@ docker compose up -d --build
 
 > Base comum: `AbstractIntegrationTest` sobe os containers, mocka o `JwtDecoder` e limpa Redis (`flushDb`) + os caches `usersById`/`usersByEmail` entre os testes.
 
+> **Visibilidade eventual do `RedisCache`:** neste stack (Spring Boot 4.0.1 / spring-data-redis 4.0.1 / Lettuce 6.8.1, sem `commons-pool2`), `cache.put(...)` fica visível para um `cache.get(...)` da mesma chave com atraso de ~1–3 ms. Por isso testes de cache **não fazem read-after-write direto**: as leituras declarativas (`@Cacheable`) chamam `search*` duas vezes (a 1ª dispara o put, a 2ª lê já visível) e as asserções sobre puts manuais via `CacheService` usam `await().atMost(...).untilAsserted(...)` (Awaitility, escopo `test`). O código de produção está correto — em produção a leitura vem em requisição HTTP posterior, então o atraso é irrelevante.
+
 ---
 
 ## Estratégia de Logs

@@ -1,6 +1,9 @@
 package com.users.userservice.integration;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
+
+import java.time.Duration;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -139,9 +142,13 @@ class CacheIntegrationTest extends AbstractIntegrationTest {
 
         registerService.updateUser(buildDTO(NOVO_NOME, EMAIL, null), id);
 
-        assertNotNull(cacheById.get(id));
-        assertEquals(NOVO_NOME,
-                ((UserResponseDTO) cacheById.get(id).get()).getName());
+        // O put no Redis tem visibilidade eventual (alguns ms) neste stack;
+        // aguarda o cache refletir a atualização antes de asserir.
+        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
+            Cache.ValueWrapper wrapper = cacheById.get(id);
+            assertNotNull(wrapper);
+            assertEquals(NOVO_NOME, ((UserResponseDTO) wrapper.get()).getName());
+        });
     }
 
     @Test
