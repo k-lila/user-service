@@ -50,4 +50,12 @@ public class CacheService {
             LOGGER.info("| cache usersByEmail | evict | email: {}", email);
         }
     }
+
+    public void evictByEmailAuth(String email) {
+        Cache cache = cacheManager.getCache("authByEmail");
+        if (cache != null) {
+            cache.evict(email);
+            LOGGER.info("| cache authByEmail | evict | email: {}", email);
+        }
+    }
 }

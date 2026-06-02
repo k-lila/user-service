@@ -4,6 +4,7 @@ import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import com.users.userservice.domain.User;
@@ -23,6 +24,7 @@ public class AuthenticationService {
         this.userRepository = userRepository;
     }
 
+    @Cacheable(value = "authByEmail", key = "#email")
     public AuthDTO getUserByEmail(String email) {
         Optional<User> user = userRepository.findByEmail(email);
         if (user.isEmpty() || user.get().getActive() == false) {

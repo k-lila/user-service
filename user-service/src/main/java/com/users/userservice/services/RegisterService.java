@@ -76,6 +76,7 @@ public class RegisterService {
         User updated = userRepository.save(existingUser);
         UserResponseDTO updatedDTO = UserResponseDTO.toResponseDTO(updated);
         cacheService.evictByEmail(oldMail);
+        cacheService.evictByEmailAuth(oldMail);
         cacheService.evictById(userID);
         cacheService.putById(userID, updatedDTO);
         cacheService.putByEmail(updated.getEmail(), updatedDTO);
@@ -97,6 +98,7 @@ public class RegisterService {
         String email = toDeactivate.getEmail();
         toDeactivate.setActive(false);
         cacheService.evictByEmail(email);
+        cacheService.evictByEmailAuth(email);
         cacheService.evictById(userID);
         userRepository.save(toDeactivate);
         LOGGER.info(
@@ -112,6 +114,7 @@ public class RegisterService {
         }
         String email = user.get().getEmail();
         cacheService.evictByEmail(email);
+        cacheService.evictByEmailAuth(email);
         cacheService.evictById(userID);
         userRepository.delete(user.get());
         LOGGER.info(

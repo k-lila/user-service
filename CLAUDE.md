@@ -325,9 +325,7 @@ docker compose up -d --build
 
 **user-service — qualidade e correções:**
 
-- [ ] Adicionar constraints de validação em `UserRequestDTO` (`@NotBlank`, `@Email`, `@Size`) — hoje `@Valid` nos controllers é decorativo porque o DTO não tem anotações
 - [ ] Implementar alteração de senha em `updateUser` — `UserRequestDTO.password` existe mas `RegisterService.updateUser` nunca o usa; é dead code que cria expectativa falsa
-- [ ] Migrar injeção de `CacheManager` em `RegisterService` de `@Autowired` de campo para injeção por construtor, alinhando com o padrão do restante da classe
 - [ ] Proteger `InternalUserController` contra acesso direto à porta 8090 — expõe `passwordHash` e `roles` sem autenticação; adicionar validação por shared secret header (`X-Internal-Token`) em `SecurityConfig` ou restringir por IP
 - [ ] Fazer `AuthenticationService.getUserByEmail` usar o cache `usersByEmail` — hoje cada login via authorization-server gera query direta ao MongoDB, ignorando o cache existente em `SearchService.searchByEmail`
 

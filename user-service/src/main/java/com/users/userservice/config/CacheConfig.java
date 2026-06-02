@@ -13,6 +13,7 @@ import org.springframework.data.redis.serializer.JacksonJsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import com.users.userservice.dtos.AuthDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 
 @EnableCaching
@@ -22,18 +23,34 @@ public class CacheConfig {
     @Bean
     @Primary
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
-        JacksonJsonRedisSerializer<UserResponseDTO> serializer =
-            new JacksonJsonRedisSerializer<>(UserResponseDTO.class);
-        RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
+        StringRedisSerializer keySerializer = new StringRedisSerializer();
+
+        RedisCacheConfiguration userConfig = RedisCacheConfiguration.defaultCacheConfig()
             .serializeKeysWith(
-                RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer())
+                RedisSerializationContext.SerializationPair.fromSerializer(keySerializer)
             )
             .serializeValuesWith(
-                RedisSerializationContext.SerializationPair.fromSerializer(serializer)
+                RedisSerializationContext.SerializationPair.fromSerializer(
+                    new JacksonJsonRedisSerializer<>(UserResponseDTO.class)
+                )
             )
             .entryTtl(Duration.ofMinutes(5));
+
+        RedisCacheConfiguration authConfig = RedisCacheConfiguration.defaultCacheConfig()
+            .serializeKeysWith(
+                RedisSerializationContext.SerializationPair.fromSerializer(keySerializer)
+            )
+            .serializeValuesWith(
+                RedisSerializationContext.SerializationPair.fromSerializer(
+                    new JacksonJsonRedisSerializer<>(AuthDTO.class)
+                )
+            )
+            .entryTtl(Duration.ofMinutes(5));
+
         return RedisCacheManager.builder(connectionFactory)
-            .cacheDefaults(config)
+            .withCacheConfiguration("usersById", userConfig)
+            .withCacheConfiguration("usersByEmail", userConfig)
+            .withCacheConfiguration("authByEmail", authConfig)
             .build();
     }
 }
