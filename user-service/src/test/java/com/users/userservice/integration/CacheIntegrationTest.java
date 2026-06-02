@@ -11,18 +11,23 @@ import org.springframework.cache.CacheManager;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.repository.IUserRepository;
+import com.users.userservice.dtos.AuthDTO;
+import com.users.userservice.exceptions.DomainEntityNotFound;
+import com.users.userservice.services.AuthenticationService;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
 
 class CacheIntegrationTest extends AbstractIntegrationTest {
 
-    private static final String NOME  = "Fulano";
-    private static final String EMAIL = "fulano@email.com";
-    private static final String SENHA = "senha123";
-    private static final String NOVO_NOME = "Novo Nome";
+    private static final String NOME     = "Fulano";
+    private static final String EMAIL    = "fulano@email.com";
+    private static final String SENHA    = "senha123";
+    private static final String NOVO_NOME  = "Novo Nome";
+    private static final String NOVO_EMAIL = "novo@email.com";
 
     @Autowired RegisterService registerService;
     @Autowired SearchService searchService;
+    @Autowired AuthenticationService authenticationService;
     @Autowired CacheManager cacheManager;
     @Autowired IUserRepository userRepository;
 
@@ -152,5 +157,90 @@ class CacheIntegrationTest extends AbstractIntegrationTest {
         Cache.ValueWrapper wrapper = cacheByEmail.get(EMAIL);
         assertNotNull(wrapper);
         assertEquals(NOVO_NOME, ((UserResponseDTO) wrapper.get()).getName());
+    }
+
+    // ── authByEmail ──────────────────────────────────────────────────────────
+
+    @Test
+    void devePopularAuthCache_aposGetUserByEmail() {
+        registerService.registerUser(buildDTO(NOME, EMAIL, SENHA));
+        Cache authCache = cacheManager.getCache("authByEmail");
+
+        assertNull(authCache.get(EMAIL));
+
+        authenticationService.getUserByEmail(EMAIL);
+        authenticationService.getUserByEmail(EMAIL);
+
+        assertNotNull(authCache.get(EMAIL));
+    }
+
+    @Test
+    void devePreservarCamposDoAuthDTO_aposRoundTripRedis() {
+        registerService.registerUser(buildDTO(NOME, EMAIL, SENHA));
+
+        authenticationService.getUserByEmail(EMAIL);
+        authenticationService.getUserByEmail(EMAIL);
+
+        Cache authCache = cacheManager.getCache("authByEmail");
+        AuthDTO cached = (AuthDTO) authCache.get(EMAIL).get();
+
+        assertNotNull(cached.getId());
+        assertEquals(EMAIL, cached.getEmail());
+        assertNotNull(cached.getPasswordHash());
+        assertTrue(cached.getActive());
+        assertTrue(cached.getRoles().contains("USER"));
+    }
+
+    @Test
+    void deveEvictarAuthCache_aposDeactivateUser_eBloquearLogin() {
+        UserResponseDTO registrado = registerService.registerUser(buildDTO(NOME, EMAIL, SENHA));
+
+        authenticationService.getUserByEmail(EMAIL);
+        authenticationService.getUserByEmail(EMAIL);
+
+        registerService.deactivateUser(registrado.getId());
+
+        Cache authCache = cacheManager.getCache("authByEmail");
+        assertNull(authCache.get(EMAIL));
+        assertThrows(DomainEntityNotFound.class, () -> authenticationService.getUserByEmail(EMAIL));
+    }
+
+    @Test
+    void deveEvictarAuthCache_aposDeleteUser_eBloquearLogin() {
+        UserResponseDTO registrado = registerService.registerUser(buildDTO(NOME, EMAIL, SENHA));
+
+        authenticationService.getUserByEmail(EMAIL);
+        authenticationService.getUserByEmail(EMAIL);
+
+        registerService.deleteUser(registrado.getId());
+
+        Cache authCache = cacheManager.getCache("authByEmail");
+        assertNull(authCache.get(EMAIL));
+        assertThrows(DomainEntityNotFound.class, () -> authenticationService.getUserByEmail(EMAIL));
+    }
+
+    @Test
+    void deveEvictarAuthCacheDoEmailAntigo_aposUpdateUser() {
+        UserResponseDTO registrado = registerService.registerUser(buildDTO(NOME, EMAIL, SENHA));
+
+        authenticationService.getUserByEmail(EMAIL);
+        authenticationService.getUserByEmail(EMAIL);
+
+        registerService.updateUser(buildDTO(NOVO_NOME, NOVO_EMAIL, null), registrado.getId());
+
+        Cache authCache = cacheManager.getCache("authByEmail");
+        assertNull(authCache.get(EMAIL));
+    }
+
+    @Test
+    void deveNaoCachearExcecao_quandoEmailNaoExiste() {
+        Cache authCache = cacheManager.getCache("authByEmail");
+
+        assertThrows(DomainEntityNotFound.class, () -> authenticationService.getUserByEmail(EMAIL));
+        assertNull(authCache.get(EMAIL));
+
+        registerService.registerUser(buildDTO(NOME, EMAIL, SENHA));
+        AuthDTO resultado = authenticationService.getUserByEmail(EMAIL);
+        assertNotNull(resultado);
     }
 }

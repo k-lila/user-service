@@ -34,6 +34,9 @@ public class RegisterService {
     }
 
     public UserResponseDTO registerUser(@Valid UserRequestDTO userDTO) {
+        if (userDTO.getPassword() == null || userDTO.getPassword().isBlank()) {
+            throw new IllegalArgumentException("Password is required");
+        }
         if (userRepository.findByEmail(userDTO.getEmail()).isPresent()) {
             LOGGER.info(
                 "| email já cadastrado | email: {}",
@@ -73,6 +76,9 @@ public class RegisterService {
         String oldMail = existingUser.getEmail();
         existingUser.setName(userDTO.getName());
         existingUser.setEmail(userDTO.getEmail());
+        if (userDTO.getPassword() != null && !userDTO.getPassword().isBlank()) {
+            existingUser.setPasswordHash(passwordEncoder.encode(userDTO.getPassword()));
+        }
         User updated = userRepository.save(existingUser);
         UserResponseDTO updatedDTO = UserResponseDTO.toResponseDTO(updated);
         cacheService.evictByEmail(oldMail);

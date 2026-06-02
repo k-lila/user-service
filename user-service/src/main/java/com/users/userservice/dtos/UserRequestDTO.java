@@ -18,7 +18,6 @@ public class UserRequestDTO {
     @Email
     String email;
 
-    @NotBlank
     @Size(min = 8)
     String password;
 }

@@ -411,4 +411,25 @@ class UserControllerTest {
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void searchAll_deveRetornar403_quandoTokenComApenasRoleAdmin() throws Exception {
+        mockMvc.perform(get("/users")
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void register_deveRetornarBodyComDadosDoUsuario_quandoCadastroValido() throws Exception {
+        when(registerService.registerUser(any())).thenReturn(buildResponse());
+
+        mockMvc.perform(post("/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", "senha123"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(USER_ID))
+                .andExpect(jsonPath("$.name").value("Fulano"))
+                .andExpect(jsonPath("$.email").value("fulano@email.com"))
+                .andExpect(jsonPath("$.active").value(true));
+    }
 }

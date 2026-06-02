@@ -16,4 +16,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<String> handleEmailAlreadyRegistered(EmailAlreadyRegisteredException e) {
         return ResponseEntity.status(409).body(e.getMessage());
     }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<String> handleIllegalArgument(IllegalArgumentException e) {
+        return ResponseEntity.status(400).body(e.getMessage());
+    }
 }

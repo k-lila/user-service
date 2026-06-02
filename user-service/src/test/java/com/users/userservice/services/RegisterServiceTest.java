@@ -73,6 +73,7 @@ class RegisterServiceTest {
     void deveLancarEmailAlreadyRegisteredException_quandoEmailJaCadastrado() {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setEmail("existente@email.com");
+        dto.setPassword("senha123");
 
         when(userRepository.findByEmail("existente@email.com"))
                 .thenReturn(Optional.of(buildUser("id-1", "existente@email.com", true)));
@@ -180,6 +181,7 @@ class RegisterServiceTest {
     void deveLancarEmailAlreadyRegisteredException_quandoEmailPertenceAUsuarioInativo() {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setEmail("inativo@email.com");
+        dto.setPassword("senha123");
 
         when(userRepository.findByEmail("inativo@email.com"))
                 .thenReturn(Optional.of(buildUser("id-1", "inativo@email.com", false)));
@@ -222,5 +224,64 @@ class RegisterServiceTest {
         when(userRepository.findByEmail("outro@email.com")).thenReturn(Optional.of(outroUsuario));
 
         assertThrows(EmailAlreadyRegisteredException.class, () -> service.updateUser(dto, userId));
+    }
+
+    @Test
+    void deveAtualizarUsuario_quandoEmailPertenceAoProprioUsuario() {
+        String userId = "id-1";
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Novo Nome");
+        dto.setEmail("fulano@email.com");
+
+        User existing = buildUser(userId, "fulano@email.com", true);
+        User updated = buildUser(userId, "fulano@email.com", true);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
+        when(userRepository.findByEmail("fulano@email.com")).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenReturn(updated);
+
+        assertDoesNotThrow(() -> service.updateUser(dto, userId));
+        verify(userRepository).save(any(User.class));
+    }
+
+    @Test
+    void deveVerificar_evictByEmailAuth_quandoUpdateUser() {
+        String userId = "id-1";
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Novo Nome");
+        dto.setEmail("fulano@email.com");
+
+        User existing = buildUser(userId, "fulano@email.com", true);
+        User updated = buildUser(userId, "fulano@email.com", true);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenReturn(updated);
+
+        service.updateUser(dto, userId);
+
+        verify(cacheService).evictByEmailAuth("fulano@email.com");
+    }
+
+    @Test
+    void deveVerificar_evictByEmailAuth_quandoDeactivateUser() {
+        User user = buildUser("id-1", "fulano@email.com", true);
+
+        when(userRepository.findById("id-1")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenReturn(user);
+
+        service.deactivateUser("id-1");
+
+        verify(cacheService).evictByEmailAuth("fulano@email.com");
+    }
+
+    @Test
+    void deveVerificar_evictByEmailAuth_quandoDeleteUser() {
+        User user = buildUser("id-1", "fulano@email.com", true);
+
+        when(userRepository.findById("id-1")).thenReturn(Optional.of(user));
+
+        service.deleteUser("id-1");
+
+        verify(cacheService).evictByEmailAuth("fulano@email.com");
     }
 }
