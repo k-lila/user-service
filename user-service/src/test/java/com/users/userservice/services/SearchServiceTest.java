@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cache.CacheManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -28,6 +29,7 @@ import com.users.userservice.repository.IUserRepository;
 class SearchServiceTest {
 
     @Mock private IUserRepository userRepository;
+    @Mock private CacheManager cacheManager;
     @InjectMocks private SearchService service;
 
     private User buildUser(String id, String email) {

@@ -15,9 +15,6 @@ import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.repository.IUserRepository;
 
-import io.swagger.v3.oas.annotations.tags.Tag;
-
-@Tag(name = "Serviço de busca", description = "Serviços de busca de usuários")
 @Service
 public class SearchService {
     private static final Logger LOGGER = LoggerFactory.getLogger(SearchService.class);
@@ -45,13 +42,10 @@ public class SearchService {
     public UserResponseDTO searchById(String userID) {
         Optional<User> user = userRepository.findById(userID);
         if (user.isEmpty()) {
-            throw new DomainEntityNotFound(User.class,"ID" , userID);
+            throw new DomainEntityNotFound(User.class, "ID", userID);
         }
         User found = user.get();
-        LOGGER.info(
-            "| usuário encontrado | ID: {}",
-            found.getId()
-        );
+        LOGGER.info("| usuário encontrado | ID: {}", found.getId());
         return UserResponseDTO.toResponseDTO(found);
     }
 
@@ -59,13 +53,10 @@ public class SearchService {
     public UserResponseDTO searchByEmail(String email) {
         Optional<User> user = userRepository.findByEmail(email);
         if (user.isEmpty()) {
-            throw new DomainEntityNotFound(User.class,"Email" , email);
+            throw new DomainEntityNotFound(User.class, "Email", email);
         }
         User found = user.get();
-        LOGGER.info(
-            "| usuário encontrado | ID: {}",
-            found.getId()
-        );
-        return UserResponseDTO.toResponseDTO(found);    
+        LOGGER.info("| usuário encontrado | ID: {}", found.getId());
+        return UserResponseDTO.toResponseDTO(found);
     }
 }
