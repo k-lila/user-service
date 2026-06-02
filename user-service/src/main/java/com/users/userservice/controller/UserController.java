@@ -48,7 +48,7 @@ public class UserController {
     @PostMapping("/register")
     public ResponseEntity<UserResponseDTO> registerUser(@RequestBody @Valid UserRequestDTO userDTO) {
         LOGGER.info(
-            "| POST | Registrar novo usuário | nome: {}",
+            "| POST | registrar usuário | nome: {}",
             userDTO.getName()
         );
         UserResponseDTO newUser = registerService.registerUser(userDTO);
@@ -60,7 +60,7 @@ public class UserController {
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<Page<UserResponseDTO>> searchAll(Pageable pageable) {
         LOGGER.info(
-            "| GET | buscar todos | tamanho e número da página: {}x{}",
+            "| GET | buscar todos | página: {}x{}",
             pageable.getPageSize(),
             pageable.getPageNumber()
         );
@@ -83,7 +83,7 @@ public class UserController {
     @GetMapping(value = "/email/{email}")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<UserResponseDTO> searchByEmail(@PathVariable(value = "email", required = true) String email) {
-        LOGGER.info("| GET | busca por email");
+        LOGGER.info("| GET | buscar por email");
         
         return ResponseEntity.ok(searchService.searchByEmail(email));
     }
@@ -94,7 +94,7 @@ public class UserController {
     public ResponseEntity<UserResponseDTO> updateUser(@RequestBody @Valid UserRequestDTO userDTO, @AuthenticationPrincipal Jwt jwt) {
         String userID = jwt.getClaim("userID");
         LOGGER.info(
-            "| PUT | nome: {}, id: {}",
+            "| PUT | atualizar | nome: {}, ID: {}",
             userDTO.getName(),
             userID
         );
@@ -106,7 +106,7 @@ public class UserController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> removeUser(@PathVariable(value = "id", required = true) String userID) {
         LOGGER.info(
-            "| DESATIVADAR | id: {}",
+            "| DELETE | desativação (admin) | ID: {}",
             userID
         );
         registerService.deactivateUser(userID);
@@ -118,7 +118,7 @@ public class UserController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> deleteUser(@PathVariable(value = "id", required = true) String userID) {
         LOGGER.info(
-            "| DELETAR | id: {}",
+            "| DELETE | hard-delete (admin) | ID: {}",
             userID
         );
         registerService.deleteUser(userID);
@@ -131,7 +131,7 @@ public class UserController {
     public ResponseEntity<Void> removeCurrentUser(@AuthenticationPrincipal Jwt jwt) {
         String userID = jwt.getClaim("userID");
         LOGGER.info(
-            "| DESATIVADAR | id: {}",
+            "| DELETE | auto-remoção | ID: {}",
             userID
         );
         registerService.deactivateUser(userID);
@@ -143,7 +143,7 @@ public class UserController {
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<UserResponseDTO> getCurrentUser(@AuthenticationPrincipal Jwt jwt) {
         String userID = jwt.getClaim("userID");
-        LOGGER.info("| GET | usuário autenticado | id: {}", userID);
+        LOGGER.info("| GET | usuário autenticado | ID: {}", userID);
         UserResponseDTO user = searchService.searchById(userID);
         return ResponseEntity.ok(user);
     }

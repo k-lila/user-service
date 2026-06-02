@@ -67,7 +67,7 @@ login-interface (React)
 │   └── src/main/java/com/users/userservice/
 │       ├── config/          # SecurityConfig, CacheConfig, MongoConfig, OpenAPIConfig, WebConfig, CORSConfig
 │       ├── controller/      # UserController, InternalUserController
-│       ├── services/        # RegisterService, SearchService, AuthenticationService
+│       ├── services/        # RegisterService, SearchService, AuthenticationService, CacheService
 │       ├── domain/          # User.java (@Document MongoDB)
 │       ├── repository/      # IUserRepository (MongoRepository)
 │       ├── dtos/            # UserRequestDTO, UserResponseDTO, AuthDTO
@@ -123,7 +123,7 @@ login-interface (React)
 
 - Domínio central: CRUD de usuários
 - Banco: MongoDB, coleção `users`
-- Cache: Redis (TTL 5 min, caches: `"usersById"` e `"usersByEmail"`)
+- Cache: Redis (TTL 5 min, caches: `"usersById"`, `"usersByEmail"` e `"authByEmail"`)
 - Dois controllers:
   - `UserController` — endpoints públicos (via gateway)
   - `InternalUserController` — `GET /internal/users/email/{email}`, sem autenticação, **não exposto pelo gateway**, usado exclusivamente pelo authorization-server via Feign
@@ -158,9 +158,9 @@ login-interface (React)
 
 **Estratégia de cache:**
 
-- Dois caches Redis distintos: `usersById` (chave = ID) e `usersByEmail` (chave = e-mail)
-- Leitura (declarativa): `@Cacheable("usersById")` em `searchById` e `@Cacheable("usersByEmail")` em `searchByEmail`
-- Escrita (manual via `CacheManager`): `updateUser` atualiza `usersById` e evicta o e-mail antigo e o novo em `usersByEmail`; `deleteUser` e `deactivateUser` evictam ambos os caches. A escrita é manual (não declarativa) porque cada cache usa uma chave diferente — ID vs e-mail
+- Três caches Redis distintos: `usersById` (chave = ID, valor `UserResponseDTO`), `usersByEmail` (chave = e-mail, valor `UserResponseDTO`) e `authByEmail` (chave = e-mail, valor `AuthDTO` — usado pelo login interno via `AuthenticationService.getUserByEmail`)
+- Leitura (declarativa): `@Cacheable("usersById")` em `searchById`, `@Cacheable("usersByEmail")` em `searchByEmail` e `@Cacheable("authByEmail")` em `AuthenticationService.getUserByEmail`
+- Escrita (manual via `CacheService`, que encapsula o `CacheManager`): `updateUser` atualiza `usersById` e `usersByEmail` (novo e-mail) e evicta o e-mail antigo em `usersByEmail` e `authByEmail`; `deleteUser` e `deactivateUser` evictam os três caches. A escrita é manual (não declarativa) porque cada cache usa uma chave diferente — ID vs e-mail
 
 ### gateway (porta 8081)
 
@@ -282,22 +282,23 @@ docker compose up -d --build
 
 ## Estratégia de Testes
 
-**Estado atual:** 28 testes unitários + 35 testes de controller + 25 testes de integração (Testcontainers), BUILD SUCCESS em ambos os módulos.
+**Estado atual:** 32 testes unitários + 40 testes de controller + 31 testes de integração (Testcontainers), BUILD SUCCESS em ambos os módulos.
 
 **Unitários (Mockito):**
 
 | Serviço                                       | Arquivo de teste                                                  | Testes |
 | --------------------------------------------- | ----------------------------------------------------------------- | ------ |
-| `RegisterService`                             | `user-service/.../services/RegisterServiceTest.java`              | 12     |
+| `RegisterService`                             | `user-service/.../services/RegisterServiceTest.java`              | 16     |
 | `SearchService`                               | `user-service/.../services/SearchServiceTest.java`                | 7      |
 | `AuthenticationService` (user-service)        | `user-service/.../services/AuthenticationServiceTest.java`        | 3      |
 | `AuthorizationService` (authorization-server) | `authorization-server/.../services/AuthorizationServiceTest.java` | 6      |
 
 **Controller (`@WebMvcTest` — MockMvc + `SecurityMockMvcRequestPostProcessors.jwt()`):**
 
-| Foco                                                                        | Arquivo de teste                                             | Testes |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------ |
-| Status HTTP, autorização (`ROLE_USER`/`ROLE_ADMIN`/sem token), extração JWT | `user-service/.../controller/UserControllerTest.java`        | 35     |
+| Foco                                                                        | Arquivo de teste                                                 | Testes |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------ |
+| Status HTTP, autorização (`ROLE_USER`/`ROLE_ADMIN`/sem token), extração JWT | `user-service/.../controller/UserControllerTest.java`            | 37     |
+| Endpoint interno `/internal/users/email/{email}` (200/404, acesso sem token) | `user-service/.../controller/InternalUserControllerTest.java`   | 3      |
 
 > Usa `@Import({SecurityConfig.class, GlobalExceptionHandler.class})` — em Spring Boot 4.0 o slice `@WebMvcTest` não carrega essas classes automaticamente.
 
@@ -306,15 +307,73 @@ docker compose up -d --build
 | Foco                                                                             | Arquivo de teste                                            | Testes |
 | -------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------ |
 | Fluxo registro → busca → atualização → desativação/remoção e unicidade de e-mail | `user-service/.../integration/UserFlowIntegrationTest.java` | 17     |
-| Comportamento do cache Redis (popular/evictar `usersById` e `usersByEmail`)      | `user-service/.../integration/CacheIntegrationTest.java`    | 8      |
+| Comportamento do cache Redis (popular/evictar `usersById` e `usersByEmail`)      | `user-service/.../integration/CacheIntegrationTest.java`    | 14     |
 
 > Base comum: `AbstractIntegrationTest` sobe os containers, mocka o `JwtDecoder` e limpa Redis (`flushDb`) + os caches `usersById`/`usersByEmail` entre os testes.
 
 ---
 
+## Estratégia de Logs
+
+Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static final LOGGER` por classe), sempre **parametrizado** (`{}`, nunca concatenação).
+
+**Níveis (convenção):**
+
+- `INFO` — eventos de fluxo de negócio bem-sucedidos (entrada de endpoint, registro, atualização, busca encontrada, `auth` enviando credenciais) e a requisição recebida no gateway
+- `WARN` — anomalias esperadas e recuperáveis: e-mail já cadastrado, entidade não encontrada (404), argumento inválido (400), senha ausente, falha de login e rejeição por rate limit (429)
+- `ERROR` — falhas inesperadas com stacktrace: handler genérico 500 e falha de comunicação Feign (authorization-server → user-service)
+- `DEBUG` — alto volume / baixo valor operacional: operações de cache (`put`/`evict`) no `CacheService`
+
+**Formato e convenções de escrita:** padrão em pipe, fácil de filtrar via grep. Estrutura `"| [VERBO_HTTP] | ação | campo: valor"`:
+
+- Segmentos separados por ` | `; toda mensagem **começa** com `| `
+- Verbo HTTP, quando presente, em **maiúsculas** (`POST`, `GET`, `PUT`, `DELETE`); ações de domínio em **minúsculas e infinitivo/pt-br** (`registrar`, `buscar`, `atualizar`, `desativação`, `deleção`)
+- Chave de campo padronizada: `ID:` (sempre maiúsculo), `email:`, `nome:`, `motivo:`, `correlationId:`; múltiplos campos no mesmo segmento separados por `, ` (ex.: `nome: {}, ID: {}`)
+- Pares simétricos sucesso/falha compartilham o mesmo prefixo de ação (ex.: `| busca por ID | encontrado` ↔ `| busca por ID | não encontrado`)
+- Logs do fluxo de autenticação (em ambos os módulos) usam o namespace `| auth | ...` (`carregando usuário`, `enviando credenciais`, `login falhou`, `falha Feign user-service`, `inexistente ou inativo`)
+- Sem texto em CAIXA ALTA em inglês e sem concatenação — sempre `{}` parametrizado
+
+**Correlação entre serviços:** o `logging.pattern.level` (definido nos `*.yml` do config-server para user-service, gateway e authorization-server) inclui `traceId`/`spanId` do Micrometer — propagados via B3/Zipkin de ponta a ponta. O gateway também loga o `X-Correlation-ID` na borda. MDC não é usado no gateway (reativo) porque não propaga de forma confiável no WebFlux.
+
+**PII / LGPD:** e-mails nunca são logados em claro. `LogUtils.maskEmail()` (um por módulo: `user-service/.../util/` e `authorization-server/.../util/`) mascara para `f***@dominio`. IDs de usuário (não-PII) são logados normalmente.
+
+**Cobertura por classe (pontos logados):**
+
+| Classe | Camada | Destaque |
+| --- | --- | --- |
+| `UserController` | user-service / controller | entrada dos 9 endpoints |
+| `InternalUserController` | user-service / controller | entrada do auth interno (e-mail mascarado) |
+| `RegisterService` | user-service / service | registro/update/desativar/deletar + rejeições (WARN) |
+| `SearchService` | user-service / service | página/encontrado (INFO) + não encontrado (WARN) |
+| `AuthenticationService` | user-service / service | `auth` — enviando credenciais (INFO) / inexistente ou inativo (WARN) |
+| `CacheService` | user-service / service | put/evict dos 3 caches (DEBUG) |
+| `GlobalExceptionHandler` | user-service / exceptions | 404/409/400 (WARN), 500 (ERROR), 403 relançado p/ Spring Security |
+| `AuthorizationService` | authorization-server / service | `auth` — carregando usuário (INFO) + falha Feign user-service com stacktrace (ERROR) |
+| `AuthFailureListener` | authorization-server / listeners | falhas de login via `AbstractAuthenticationFailureEvent` (WARN) |
+| `CorrelationIdFilter` | gateway / filter | requisição recebida + `correlationId` |
+| `JwtHeaderPropagationFilter` | gateway / filter | DEBUG quando não há JWT |
+| `RateLimitLogFilter` | gateway / filter | rejeições 429 (WARN) |
+
+> Nota: o handler `@ExceptionHandler(AccessDeniedException.class)` no `GlobalExceptionHandler` **relança** a exceção — sem ele, o catch-all `Exception` transformaria os 403 do `@PreAuthorize` em 500.
+
+---
+
 ## Trabalho Pendente
 
-**Qualidade:**
+> Reorganizado por tema/prioridade. Decisões de contexto: o sistema rodará em **múltiplas instâncias** (escala horizontal) e serve de **base/template reutilizável**. Ordem sugerida de execução: 1 → 2 → 3 → 4 → 5.
+
+### 1. Escalabilidade horizontal (pré-requisito — hoje quebra com N instâncias)
+
+- [ ] **Chaves JWK persistentes** no authorization-server — `JWKConfig.java` gera um par RSA novo a cada boot, em memória. Os resource servers validam via `issuer-uri`/JWKS; um JWT assinado pela instância A não valida na JWKS da instância B, e todo restart/deploy invalida os tokens vigentes. Carregar o par de chaves de keystore/secret externo (PEM ou JKS), com `kid` fixo compartilhado entre instâncias.
+- [ ] **Persistir estado OAuth em DB relacional** — hoje `InMemoryRegisteredClientRepository` + os defaults `InMemoryOAuth2AuthorizationService`/`InMemoryOAuth2AuthorizationConsentService`. O `code` emitido por uma instância não pode ser trocado por token em outra. Migrar para `JdbcRegisteredClientRepository`, `JdbcOAuth2AuthorizationService` e `JdbcOAuth2AuthorizationConsentService` (schemas oficiais do Spring Authorization Server). Requer datasource novo (ex.: Postgres): `authorization-server/pom.xml` (`spring-boot-starter-jdbc` + driver), `docker-compose.yml` (serviço + volume), `config-server/.../authorization-server.yml` (`spring.datasource.*`)
+- [ ] **Sessão HTTP compartilhada** — o login/consent do authorization-server e o `oauth2Login` + `ServerOAuth2AuthorizedClientRepository` do gateway dependem de sessão em memória. Adicionar Spring Session Data Redis (servlet no auth-server, reactive no gateway — que já tem Redis) ou sticky sessions no load balancer
+- [ ] **Tratar `DuplicateKeyException` no registro → 409** — `RegisterService.registerUser` faz `findByEmail` e depois `insert`; entre instâncias concorrentes há corrida e o guard real é o índice único do Mongo. Hoje a corrida resultaria em 500; mapear no `GlobalExceptionHandler` para 409 (consistente com `EmailAlreadyRegisteredException`)
+- [ ] **Deploy rolling sem downtime** — `server.shutdown=graceful` + readiness/liveness probes (actuator) em todos os serviços
+- [ ] **(Infra) Eliminar SPOFs** — `discovery-server` em peer replication (Eureka HA), `config-server` replicado, MongoDB replica set e Redis Sentinel/Cluster
+
+> Já adequados para escala: validação JWT stateless no resource server, rate limiter no Redis e os caches (`usersById`/`usersByEmail`/`authByEmail`) no Redis.
+
+### 2. Resiliência e consistência
 
 - [ ] Adicionar Resilience4j como circuit breaker na chamada Feign do authorization-server → user-service
   - `authorization-server/pom.xml` — adicionar `spring-cloud-starter-circuitbreaker-resilience4j`
@@ -322,23 +381,27 @@ docker compose up -d --build
   - `clients/IUserClient.java` — adicionar `fallbackFactory = UserClientFallbackFactory.class` no `@FeignClient`
   - `services/AuthorizationService.java` — corrigir o `catch (Exception e)` que engole `UsernameNotFoundException` de usuário inativo junto com erros de comunicação
   - `config-server/.../authorization-server.yml` — habilitar `spring.cloud.openfeign.circuitbreaker.enabled=true` e adicionar bloco `resilience4j.circuitbreaker.instances.user-service` com `slidingWindowSize`, `failureRateThreshold`, `waitDurationInOpenState` e `permittedNumberOfCallsInHalfOpenState`
+- [ ] **Handler para `@Valid` no `GlobalExceptionHandler`** — adicionar tratamento de `MethodArgumentNotValidException` no mesmo formato dos demais erros (idealmente `ProblemDetail`/RFC 7807); hoje sai no formato default do Spring, inconsistente
+- [ ] **`permissions` derivadas das roles no `TokenCustomizerConfig`** — hoje `["users.read","users.write"]` é hardcoded para todo usuário; mapear roles → permissions (ex.: ADMIN ganha `users.delete`)
 
-**user-service — qualidade e correções:**
+### 3. Segurança / hardening
 
-- [ ] Implementar alteração de senha em `updateUser` — `UserRequestDTO.password` existe mas `RegisterService.updateUser` nunca o usa; é dead code que cria expectativa falsa
-- [ ] Proteger `InternalUserController` contra acesso direto à porta 8090 — expõe `passwordHash` e `roles` sem autenticação; adicionar validação por shared secret header (`X-Internal-Token`) em `SecurityConfig` ou restringir por IP
-- [ ] Fazer `AuthenticationService.getUserByEmail` usar o cache `usersByEmail` — hoje cada login via authorization-server gera query direta ao MongoDB, ignorando o cache existente em `SearchService.searchByEmail`
+- [ ] Proteger `InternalUserController` contra acesso direto à porta 8090 — expõe `passwordHash` e `roles` sem autenticação; adicionar validação por shared secret header (`X-Internal-Token`) em `SecurityConfig` ou restringir por IP. No authorization-server, um `RequestInterceptor` Feign injeta o header em toda chamada ao user-service
+- [ ] **CORS configurável** — externalizar as origens hardcoded (`localhost:*`) dos `CORSConfig.java` dos 3 módulos para properties lidas do config-server
+- [ ] **Secrets fora do `docker-compose.yml`** — mover credenciais do Mongo (`user_service:user_1234321`) e do Grafana (`admin/admin`) para `.env` git-ignored
+- [ ] TLS/HTTPS — manter como gap conhecido (decidido: configurar com a infra de produção)
 
-**Front-end:**
+### 4. Front-end
 
-- [ ] Reescrever `login-interface` como SPA redirect-based (authorization_code + PKCE)
+- [ ] Reescrever `login-interface` como SPA redirect-based (authorization_code + PKCE). Obs.: o front hoje chama `POST /authentication/login` (token direto), endpoint que **não existe** no backend — está quebrado, não apenas incompatível
 
-**Fluxos futuros (não imediatos):**
+### 5. Fluxos futuros (não imediatos)
 
 - [ ] Verificação de e-mail no cadastro
 - [ ] Recuperação de senha
+- [ ] **Gestão de admin** — decisão atual: criar/promover ADMIN manualmente no MongoDB (ex.: `db.users.updateOne({email: ...}, {$addToSet: {roles: "ADMIN"}})`). Sem automação por ora; sem isso as rotas `ROLE_ADMIN` ficam inalcançáveis
 
-**Próximas camadas de domínio:**
+### Próximas camadas de domínio
 
 - [ ] Outros microsserviços de negócio serão adicionados sobre esta base após o sistema de usuários estar estável
 

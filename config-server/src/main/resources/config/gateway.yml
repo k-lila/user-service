@@ -49,6 +49,10 @@ eureka:
     service-url:
       defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
 
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},traceId=%X{traceId:-},spanId=%X{spanId:-}]"
+
 springdoc:
   swagger-ui:
     enabled: true

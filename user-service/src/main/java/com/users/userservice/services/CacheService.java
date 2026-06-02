@@ -7,6 +7,7 @@ import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 
 import com.users.userservice.dtos.UserResponseDTO;
+import com.users.userservice.util.LogUtils;
 
 @Service
 public class CacheService {
@@ -23,7 +24,7 @@ public class CacheService {
         Cache cache = cacheManager.getCache("usersById");
         if (cache != null) {
             cache.put(userID, dto);
-            LOGGER.info("| cache usersById | put | id: {}", userID);
+            LOGGER.debug("| cache usersById | put | ID: {}", userID);
         }
     }
 
@@ -31,7 +32,7 @@ public class CacheService {
         Cache cache = cacheManager.getCache("usersById");
         if (cache != null) {
             cache.evict(userID);
-            LOGGER.info("| cache usersById | evict | id: {}", userID);
+            LOGGER.debug("| cache usersById | evict | ID: {}", userID);
         }
     }
 
@@ -39,7 +40,7 @@ public class CacheService {
         Cache cache = cacheManager.getCache("usersByEmail");
         if (cache != null) {
             cache.put(email, dto);
-            LOGGER.info("| cache usersByEmail | put | email: {}", email);
+            LOGGER.debug("| cache usersByEmail | put | email: {}", LogUtils.maskEmail(email));
         }
     }
 
@@ -47,7 +48,7 @@ public class CacheService {
         Cache cache = cacheManager.getCache("usersByEmail");
         if (cache != null) {
             cache.evict(email);
-            LOGGER.info("| cache usersByEmail | evict | email: {}", email);
+            LOGGER.debug("| cache usersByEmail | evict | email: {}", LogUtils.maskEmail(email));
         }
     }
 
@@ -55,7 +56,7 @@ public class CacheService {
         Cache cache = cacheManager.getCache("authByEmail");
         if (cache != null) {
             cache.evict(email);
-            LOGGER.info("| cache authByEmail | evict | email: {}", email);
+            LOGGER.debug("| cache authByEmail | evict | email: {}", LogUtils.maskEmail(email));
         }
     }
 }

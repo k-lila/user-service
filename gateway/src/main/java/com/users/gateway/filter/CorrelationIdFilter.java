@@ -2,6 +2,8 @@ package com.users.gateway.filter;
 
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.http.server.reactive.ServerHttpRequest;
@@ -12,6 +14,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 public class CorrelationIdFilter implements GlobalFilter {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CorrelationIdFilter.class);
     private static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -21,6 +24,12 @@ public class CorrelationIdFilter implements GlobalFilter {
         if (correlationId == null) {
             correlationId = UUID.randomUUID().toString();
         }
+        LOGGER.info(
+            "| requisição recebida | {} {} | correlationId: {}",
+            exchange.getRequest().getMethod(),
+            exchange.getRequest().getPath().value(),
+            correlationId
+        );
         ServerHttpRequest mutatedRequest = exchange.getRequest()
                 .mutate()
                 .header(CORRELATION_ID_HEADER, correlationId)

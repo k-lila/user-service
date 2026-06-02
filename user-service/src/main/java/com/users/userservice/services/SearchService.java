@@ -42,10 +42,11 @@ public class SearchService {
     public UserResponseDTO searchById(String userID) {
         Optional<User> user = userRepository.findById(userID);
         if (user.isEmpty()) {
+            LOGGER.warn("| busca por ID | não encontrado | ID: {}", userID);
             throw new DomainEntityNotFound(User.class, "ID", userID);
         }
         User found = user.get();
-        LOGGER.info("| usuário encontrado | ID: {}", found.getId());
+        LOGGER.info("| busca por ID | encontrado | ID: {}", found.getId());
         return UserResponseDTO.toResponseDTO(found);
     }
 
@@ -53,10 +54,11 @@ public class SearchService {
     public UserResponseDTO searchByEmail(String email) {
         Optional<User> user = userRepository.findByEmail(email);
         if (user.isEmpty()) {
+            LOGGER.warn("| busca por email | não encontrado");
             throw new DomainEntityNotFound(User.class, "Email", email);
         }
         User found = user.get();
-        LOGGER.info("| usuário encontrado | ID: {}", found.getId());
+        LOGGER.info("| busca por email | encontrado | ID: {}", found.getId());
         return UserResponseDTO.toResponseDTO(found);
     }
 }

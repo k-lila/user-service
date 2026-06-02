@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.users.userservice.dtos.AuthDTO;
 import com.users.userservice.services.AuthenticationService;
+import com.users.userservice.util.LogUtils;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,8 +32,8 @@ public class InternalUserController {
     @GetMapping("/email/{email}")
     public ResponseEntity<AuthDTO> findByEmail(@PathVariable String email) {
         LOGGER.info(
-            "| AUTH REQUEST | email: {}",
-            email
+            "| GET | auth interno | email: {}",
+            LogUtils.maskEmail(email)
         );
         AuthDTO authenticated = authenticationService.getUserByEmail(email);
         return ResponseEntity.ok(authenticated);

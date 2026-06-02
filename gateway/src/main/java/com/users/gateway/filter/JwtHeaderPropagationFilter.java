@@ -2,6 +2,8 @@ package com.users.gateway.filter;
 
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.http.server.reactive.ServerHttpRequest;
@@ -14,6 +16,8 @@ import reactor.core.publisher.Mono;
 
 @Component
 public class JwtHeaderPropagationFilter implements GlobalFilter {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(JwtHeaderPropagationFilter.class);
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -34,6 +38,9 @@ public class JwtHeaderPropagationFilter implements GlobalFilter {
                     exchange.mutate().request(request).build()
                 );
             })
-            .switchIfEmpty(chain.filter(exchange));
+            .switchIfEmpty(Mono.defer(() -> {
+                LOGGER.debug("| sem JWT | propagação de headers ignorada");
+                return chain.filter(exchange);
+            }));
     }
 }

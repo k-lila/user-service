@@ -15,6 +15,7 @@ import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.exceptions.EmailAlreadyRegisteredException;
 import com.users.userservice.repository.IUserRepository;
+import com.users.userservice.util.LogUtils;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -35,12 +36,13 @@ public class RegisterService {
 
     public UserResponseDTO registerUser(@Valid UserRequestDTO userDTO) {
         if (userDTO.getPassword() == null || userDTO.getPassword().isBlank()) {
+            LOGGER.warn("| registro rejeitado | senha ausente");
             throw new IllegalArgumentException("Password is required");
         }
         if (userRepository.findByEmail(userDTO.getEmail()).isPresent()) {
-            LOGGER.info(
+            LOGGER.warn(
                 "| email já cadastrado | email: {}",
-                userDTO.getEmail()
+                LogUtils.maskEmail(userDTO.getEmail())
             );
             throw new EmailAlreadyRegisteredException(userDTO.getEmail());
         }
@@ -62,14 +64,17 @@ public class RegisterService {
 
     public UserResponseDTO updateUser(@Valid UserRequestDTO userDTO, String userID) {
         User existingUser = userRepository.findById(userID)
-            .orElseThrow(() -> new DomainEntityNotFound(User.class, "ID", userID));
+            .orElseThrow(() -> {
+                LOGGER.warn("| atualização | usuário não encontrado | ID: {}", userID);
+                return new DomainEntityNotFound(User.class, "ID", userID);
+            });
         Optional<User> userWithEmail = userRepository.findByEmail(userDTO.getEmail());
 
 
         if (userWithEmail.isPresent() && !userWithEmail.get().getId().equals(userID)) {
-            LOGGER.info(
+            LOGGER.warn(
                 "| email já cadastrado | email: {}",
-                userDTO.getEmail()
+                LogUtils.maskEmail(userDTO.getEmail())
             );
             throw new EmailAlreadyRegisteredException(userDTO.getEmail());
         }
@@ -98,6 +103,7 @@ public class RegisterService {
     public void deactivateUser(String userID) {
         Optional<User> user = userRepository.findById(userID);
         if (user.isEmpty()) {
+            LOGGER.warn("| desativação | usuário não encontrado | ID: {}", userID);
             throw new DomainEntityNotFound(User.class,"ID" , userID);
         }
         User toDeactivate = user.get();
@@ -116,6 +122,7 @@ public class RegisterService {
     public void deleteUser(String userID) {
         Optional<User> user = userRepository.findById(userID);
         if (user.isEmpty()) {
+            LOGGER.warn("| deleção | usuário não encontrado | ID: {}", userID);
             throw new DomainEntityNotFound(User.class,"ID" , userID);
         }
         String email = user.get().getEmail();

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import authorizationserver.clients.IUserClient;
 import authorizationserver.dtos.AuthDTO;
+import authorizationserver.util.LogUtils;
 
 @Service
 public class AuthorizationService implements UserDetailsService {
@@ -24,7 +25,7 @@ public class AuthorizationService implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String email) {
-        LOGGER.info("auth acionado | email: {}", email);
+        LOGGER.info("| auth | carregando usuário | email: {}", LogUtils.maskEmail(email));
         AuthDTO user;
         try {
             user = userClient.getUserByEmail(email);
@@ -32,6 +33,11 @@ public class AuthorizationService implements UserDetailsService {
                 throw new UsernameNotFoundException("Usuário inativo: " + email);
             }
         } catch (Exception e) {
+            LOGGER.error(
+                "| auth | falha Feign user-service | email: {}",
+                LogUtils.maskEmail(email),
+                e
+            );
             throw new RuntimeException("Erro de comunicação interna entre serviços: " + e);
         }
         List<SimpleGrantedAuthority> authorities = user.getRoles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList();

@@ -11,6 +11,7 @@ import com.users.userservice.domain.User;
 import com.users.userservice.dtos.AuthDTO;
 import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.repository.IUserRepository;
+import com.users.userservice.util.LogUtils;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 
@@ -28,9 +29,9 @@ public class AuthenticationService {
     public AuthDTO getUserByEmail(String email) {
         Optional<User> user = userRepository.findByEmail(email);
         if (user.isEmpty() || user.get().getActive() == false) {
-            LOGGER.info(
-                "| não encontrado | email: {}",
-                email
+            LOGGER.warn(
+                "| auth | inexistente ou inativo | email: {}",
+                LogUtils.maskEmail(email)
             );
             throw new DomainEntityNotFound(User.class,"email" , email);
         }
@@ -42,8 +43,8 @@ public class AuthenticationService {
         authDTO.setRoles(user.get().getRoles());
 
         LOGGER.info(
-            "| enviando auth info | email: {}",
-            email
+            "| auth | enviando credenciais | email: {}",
+            LogUtils.maskEmail(email)
         );
 
         return authDTO;

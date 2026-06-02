@@ -21,6 +21,8 @@ logging:
   level:
     org.springframework.security: INFO
     org.springframework.oauth2: INFO
+  pattern:
+    level: "%5p [${spring.application.name:},traceId=%X{traceId:-},spanId=%X{spanId:-}]"
 
 management:
   tracing:
