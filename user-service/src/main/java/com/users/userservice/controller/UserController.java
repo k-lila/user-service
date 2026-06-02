@@ -76,13 +76,7 @@ public class UserController {
             "| GET | buscar por ID | ID: {}",
             userID
         );
-        try {
-            UserResponseDTO user = searchService.searchById(userID);
-            return ResponseEntity.ok(user);
-        } catch (Exception e) {
-            return ResponseEntity.notFound().build();
-
-        }
+        return ResponseEntity.ok(searchService.searchById(userID));
     }
 
     @Operation(summary = "Buscar usuário por Email")
@@ -91,12 +85,7 @@ public class UserController {
     public ResponseEntity<UserResponseDTO> searchByEmail(@PathVariable(value = "email", required = true) String email) {
         LOGGER.info("| GET | busca por email");
         
-        try {
-            UserResponseDTO user = searchService.searchByEmail(email);
-            return ResponseEntity.ok(user);
-        } catch (Exception e) {
-            return ResponseEntity.notFound().build();
-        }
+        return ResponseEntity.ok(searchService.searchByEmail(email));
     }
 
     @Operation(summary = "Modificar um usuário")
@@ -109,12 +98,7 @@ public class UserController {
             userDTO.getName(),
             userID
         );
-        try {
-            UserResponseDTO updated = registerService.updateUser(userDTO, userID);
-            return ResponseEntity.ok(updated);
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
-        }
+        return ResponseEntity.ok(registerService.updateUser(userDTO, userID));
     }
 
     @Operation(summary = "Desativar um usuário")
@@ -142,7 +126,7 @@ public class UserController {
     }
 
     @Operation(summary = "Desativar usuário atual")
-    @DeleteMapping(value = "/remove/{id}")
+    @DeleteMapping(value = "/remove/me")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<Void> removeCurrentUser(@AuthenticationPrincipal Jwt jwt) {
         String userID = jwt.getClaim("userID");

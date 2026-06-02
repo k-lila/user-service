@@ -14,15 +14,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.cache.Cache;
-import org.springframework.cache.CacheManager;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import com.users.userservice.domain.User;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.exceptions.DomainEntityNotFound;
+import com.users.userservice.exceptions.EmailAlreadyRegisteredException;
 import com.users.userservice.repository.IUserRepository;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,18 +28,13 @@ class RegisterServiceTest {
 
     @Mock private IUserRepository userRepository;
     @Mock private PasswordEncoder passwordEncoder;
-    @Mock private CacheManager cacheManager;
-    @Mock private Cache cacheById;
-    @Mock private Cache cacheByEmail;
+    @Mock private CacheService cacheService;
 
     private RegisterService service;
 
     @BeforeEach
     void setUp() {
-        service = new RegisterService(userRepository, passwordEncoder);
-        ReflectionTestUtils.setField(service, "cacheManager", cacheManager);
-        lenient().when(cacheManager.getCache("usersById")).thenReturn(cacheById);
-        lenient().when(cacheManager.getCache("usersByEmail")).thenReturn(cacheByEmail);
+        service = new RegisterService(userRepository, passwordEncoder, cacheService);
     }
 
     private User buildUser(String id, String email, boolean active) {
@@ -77,14 +70,14 @@ class RegisterServiceTest {
     }
 
     @Test
-    void deveLancarRuntimeException_quandoEmailJaCadastrado() {
+    void deveLancarEmailAlreadyRegisteredException_quandoEmailJaCadastrado() {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setEmail("existente@email.com");
 
         when(userRepository.findByEmail("existente@email.com"))
                 .thenReturn(Optional.of(buildUser("id-1", "existente@email.com", true)));
 
-        assertThrows(RuntimeException.class, () -> service.registerUser(dto));
+        assertThrows(EmailAlreadyRegisteredException.class, () -> service.registerUser(dto));
     }
 
     @Test
@@ -105,8 +98,8 @@ class RegisterServiceTest {
 
         assertNotNull(result);
         verify(userRepository).save(any(User.class));
-        verify(cacheById).put(eq(userId), any(UserResponseDTO.class));
-        verify(cacheByEmail, atLeastOnce()).evict("fulano@email.com");
+        verify(cacheService).putById(eq(userId), any(UserResponseDTO.class));
+        verify(cacheService).evictByEmail("fulano@email.com");
     }
 
     @Test
@@ -140,8 +133,10 @@ class RegisterServiceTest {
     @Test
     void deveDesativarUsuario_quandoIdExiste() {
         User user = buildUser("id-1", "fulano@email.com", true);
+        User deactivated = buildUser("id-1", "fulano@email.com", false);
 
         when(userRepository.findById("id-1")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenReturn(deactivated);
 
         service.deactivateUser("id-1");
 
@@ -182,14 +177,14 @@ class RegisterServiceTest {
     }
 
     @Test
-    void deveLancarRuntimeException_quandoEmailPertenceAUsuarioInativo() {
+    void deveLancarEmailAlreadyRegisteredException_quandoEmailPertenceAUsuarioInativo() {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setEmail("inativo@email.com");
 
         when(userRepository.findByEmail("inativo@email.com"))
                 .thenReturn(Optional.of(buildUser("id-1", "inativo@email.com", false)));
 
-        assertThrows(RuntimeException.class, () -> service.registerUser(dto));
+        assertThrows(EmailAlreadyRegisteredException.class, () -> service.registerUser(dto));
     }
 
     @Test
@@ -210,12 +205,12 @@ class RegisterServiceTest {
 
         assertNotNull(result);
         verify(userRepository).save(any(User.class));
-        verify(cacheByEmail).evict("antigo@email.com");
-        verify(cacheByEmail).evict("novo@email.com");
+        verify(cacheService).evictByEmail("antigo@email.com");
+        verify(cacheService).putByEmail(eq("novo@email.com"), any(UserResponseDTO.class));
     }
 
     @Test
-    void deveLancarRuntimeException_quandoNovoEmailPertenceAOutroUsuario_comportamentoCorreto() {
+    void deveLancarEmailAlreadyRegisteredException_quandoNovoEmailPertenceAOutroUsuario() {
         String userId = "id-1";
         UserRequestDTO dto = new UserRequestDTO();
         dto.setEmail("outro@email.com");
@@ -226,6 +221,6 @@ class RegisterServiceTest {
         when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
         when(userRepository.findByEmail("outro@email.com")).thenReturn(Optional.of(outroUsuario));
 
-        assertThrows(RuntimeException.class, () -> service.updateUser(dto, userId));
+        assertThrows(EmailAlreadyRegisteredException.class, () -> service.updateUser(dto, userId));
     }
 }
