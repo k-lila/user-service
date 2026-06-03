@@ -12,6 +12,10 @@ oauth:
   client:
     secret: ${OAUTH_CLIENT_SECRET}
 
+internal:
+  api:
+    token: ${INTERNAL_API_TOKEN}
+
 eureka:
   client:
     service-url:

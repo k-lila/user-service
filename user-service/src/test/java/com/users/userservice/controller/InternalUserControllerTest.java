@@ -26,9 +26,12 @@ import com.users.userservice.services.AuthenticationService;
 @Import({SecurityConfig.class, GlobalExceptionHandler.class})
 @TestPropertySource(properties = {
         "eureka.client.enabled=false",
-        "management.tracing.sampling.probability=0"
+        "management.tracing.sampling.probability=0",
+        "internal.api.token=test-internal-token"
 })
 class InternalUserControllerTest {
+
+    private static final String INTERNAL_TOKEN = "test-internal-token";
 
     @Autowired MockMvc mockMvc;
 
@@ -49,7 +52,8 @@ class InternalUserControllerTest {
     void findByEmail_deveRetornar200ComAuthDTO_quandoUsuarioAtivo() throws Exception {
         when(authenticationService.getUserByEmail("fulano@email.com")).thenReturn(buildAuthDTO());
 
-        mockMvc.perform(get("/internal/users/email/{email}", "fulano@email.com"))
+        mockMvc.perform(get("/internal/users/email/{email}", "fulano@email.com")
+                        .header("X-Internal-Token", INTERNAL_TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("fulano@email.com"))
                 .andExpect(jsonPath("$.passwordHash").value("$2a$10$hashed"))
@@ -61,15 +65,25 @@ class InternalUserControllerTest {
         when(authenticationService.getUserByEmail("nao@existe.com"))
                 .thenThrow(new DomainEntityNotFound(User.class, "email", "nao@existe.com"));
 
-        mockMvc.perform(get("/internal/users/email/{email}", "nao@existe.com"))
+        mockMvc.perform(get("/internal/users/email/{email}", "nao@existe.com")
+                        .header("X-Internal-Token", INTERNAL_TOKEN))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void findByEmail_deveSerAcessivelSemToken() throws Exception {
-        when(authenticationService.getUserByEmail("fulano@email.com")).thenReturn(buildAuthDTO());
-
+    void findByEmail_deveRetornar403_semToken() throws Exception {
         mockMvc.perform(get("/internal/users/email/{email}", "fulano@email.com"))
-                .andExpect(status().isOk());
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(authenticationService);
+    }
+
+    @Test
+    void findByEmail_deveRetornar403_comTokenInvalido() throws Exception {
+        mockMvc.perform(get("/internal/users/email/{email}", "fulano@email.com")
+                        .header("X-Internal-Token", "token-errado"))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(authenticationService);
     }
 }
