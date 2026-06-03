@@ -18,7 +18,8 @@ import org.testcontainers.containers.MongoDBContainer;
 @TestPropertySource(properties = {
         "eureka.client.enabled=false",
         "management.tracing.sampling.probability=0",
-        "spring.data.mongodb.database=testdb"
+        "spring.data.mongodb.database=testdb",
+        "internal.api.token=test-internal-token"
 })
 public abstract class AbstractIntegrationTest {
 

@@ -18,6 +18,10 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+internal:
+  api:
+    token: ${INTERNAL_API_TOKEN}
+
 eureka:
   client:
     service-url:

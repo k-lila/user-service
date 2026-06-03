@@ -77,6 +77,7 @@ services:
       OAUTH_SWAGGER_REDIRECT_URL: http://localhost:8081/swagger-ui/oauth2-redirect.html
       AUTH_ISSUER: http://authorization-server:8082
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-gateway-secret}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-internal-dev-token}
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
@@ -111,6 +112,7 @@ services:
       API_BASE_URL: http://localhost:8081
       REDIS_HOST: user-redis
       REDIS_PORT: 6379
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-internal-dev-token}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
       interval: 5s

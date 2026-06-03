@@ -29,16 +29,17 @@ public class AuthorizationService implements UserDetailsService {
         AuthDTO user;
         try {
             user = userClient.getUserByEmail(email);
-            if (!user.getActive()) {
-                throw new UsernameNotFoundException("Usuário inativo: " + email);
-            }
         } catch (Exception e) {
             LOGGER.error(
                 "| auth | falha Feign user-service | email: {}",
                 LogUtils.maskEmail(email),
                 e
             );
-            throw new RuntimeException("Erro de comunicação interna entre serviços: " + e);
+            throw new RuntimeException("Erro de comunicação interna entre serviços");
+        }
+        if (!user.getActive()) {
+            LOGGER.warn("| auth | inexistente ou inativo | email: {}", LogUtils.maskEmail(email));
+            throw new UsernameNotFoundException("Usuário inativo: " + email);
         }
         List<SimpleGrantedAuthority> authorities = user.getRoles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList();
         return new User(user.getEmail(), user.getPasswordHash(), authorities);
