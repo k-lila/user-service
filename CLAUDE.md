@@ -6,7 +6,7 @@
 - Não adicione tratamento de erro para cenários impossíveis
 - Não crie arquivos sem ser pedido explicitamente
 - Pergunte antes de agir se a tarefa tiver mais de 3 arquivos envolvidos
-- Ao aprensentar os códigos a serem implementados, sempre aponte claramente as razões dos novos códigos; e 1) arquivos a serem modificados, se houver e 2) arquivos a serem criados, se houver
+- Antes de cada alteração no código, apresente um relatório que aponte claramente 1) razões dos novos códigos; 2) arquivos a serem criados, se houver; 3) arquivos a serem modificados, se houver
 
 ---
 
@@ -14,7 +14,7 @@
 
 Sistema de microsserviços em Java + Spring para gerenciamento de usuários, pronto para produção. O objetivo central é fornecer uma base sólida de autenticação, registro e controle de acesso sobre a qual outras camadas de domínio serão adicionadas futuramente.
 
-O front-end React (`login-interface`) implementa a autenticação no padrão **BFF**: o gateway é o cliente OAuth2, o SPA usa sessão por cookie e **não** manuseia JWT. Login, registro e logout (RP-initiated) funcionam ponta a ponta no Docker. Detalhes na seção *login-interface*.
+O front-end React (`login-interface`) implementa a autenticação no padrão **BFF**: o gateway é o cliente OAuth2, o SPA usa sessão por cookie e **não** manuseia JWT. Login, registro e logout (RP-initiated) funcionam ponta a ponta no Docker. Detalhes na seção _login-interface_.
 
 ---
 
@@ -166,7 +166,7 @@ login-interface (React)
 
 - Spring Cloud Gateway (WebFlux/reativo) — artefato `spring-cloud-starter-gateway-server-webflux` (Spring Cloud 2025.x)
 - Único ponto de entrada externo — **nunca chame os serviços diretamente em produção**
-- **Cliente OAuth2 do BFF:** `oauth2Login` + `oauth2Client` (cliente confidencial `gateway-client`) + resource server JWT. Guarda o token na sessão e o relaya downstream — o SPA nunca vê o JWT (ver seção *login-interface*)
+- **Cliente OAuth2 do BFF:** `oauth2Login` + `oauth2Client` (cliente confidencial `gateway-client`) + resource server JWT. Guarda o token na sessão e o relaya downstream — o SPA nunca vê o JWT (ver seção _login-interface_)
 - Rate limiting via Redis (token bucket):
   - LOW: 2 req/s, capacity 5 (registro, por IP)
   - MED: 5 req/s, capacity 10 (OAuth2, por IP)
@@ -183,26 +183,26 @@ login-interface (React)
 
 **Arquitetura: BFF (Backend-for-Frontend) — o gateway é o cliente OAuth2, não o SPA.**
 
-O `gateway-client` é um cliente *confidencial* (com secret); o gateway usa `oauth2Login` + `oauth2Client`. O SPA **não manuseia JWT**: apoia-se numa sessão estabelecida pelo gateway (cookie) e o gateway injeta o token nas chamadas downstream via `TokenRelay`.
+O `gateway-client` é um cliente _confidencial_ (com secret); o gateway usa `oauth2Login` + `oauth2Client`. O SPA **não manuseia JWT**: apoia-se numa sessão estabelecida pelo gateway (cookie) e o gateway injeta o token nas chamadas downstream via `TokenRelay`.
 
 **Por que BFF (Opção A) e não SPA-com-PKCE (Opção B):**
 
-- **Segurança — o token nunca toca o browser.** Fica na sessão do gateway (servidor); o browser só carrega um cookie que pode ser `HttpOnly` + `Secure` + `SameSite`, inacessível ao JavaScript. Um XSS no front **não** consegue exfiltrar o JWT nem o refresh token. Isso **elimina de raiz** o gap conhecido "JWT em `localStorage`" (ver seção *Gaps de Segurança*), em vez de adiá-lo. PKCE protege apenas a *troca do código*; não protege o token depois de guardado no browser — que é exatamente o ponto fraco da Opção B.
+- **Segurança — o token nunca toca o browser.** Fica na sessão do gateway (servidor); o browser só carrega um cookie que pode ser `HttpOnly` + `Secure` + `SameSite`, inacessível ao JavaScript. Um XSS no front **não** consegue exfiltrar o JWT nem o refresh token. Isso **elimina de raiz** o gap conhecido "JWT em `localStorage`" (ver seção _Gaps de Segurança_), em vez de adiá-lo. PKCE protege apenas a _troca do código_; não protege o token depois de guardado no browser — que é exatamente o ponto fraco da Opção B.
 - **É a recomendação atual** do IETF (OAuth 2.0 for Browser-Based Apps / BCP): para apps com backend, o padrão é o BFF, não o SPA segurando tokens.
-- **O backend já está montado para isso.** A Opção B exigiria *registrar um segundo cliente público* no auth-server (redirect URI do SPA, sem secret) e divergir do desenho atual. A Opção A reaproveita o que já existe.
+- **O backend já está montado para isso.** A Opção B exigiria _registrar um segundo cliente público_ no auth-server (redirect URI do SPA, sem secret) e divergir do desenho atual. A Opção A reaproveita o que já existe.
 - **Menos peça móvel no front = menos bug e menos manutenção:** sem lógica de PKCE, sem rota `/callback`, sem refresh manual, sem controle de expiração no cliente. O gateway centraliza tudo.
-- **Alinha com a escala horizontal já planejada** (Spring Session Data Redis no gateway, ver *Trabalho Pendente §1*): concentrar a sessão no gateway segue esse plano; espalhar tokens pelo browser não ajuda na escala.
+- **Alinha com a escala horizontal já planejada** (Spring Session Data Redis no gateway, ver _Trabalho Pendente §1_): concentrar a sessão no gateway segue esse plano; espalhar tokens pelo browser não ajuda na escala.
 - **Trade-off (resolvido):** SPA e gateway em origens distintas → resolvido com **proxy same-origin** (Vite em dev, nginx no Docker), cookie first-party sem depender de `SameSite=None`. Em produção, front e API sob o mesmo domínio dispensam isso.
 
 **Mecânica implementada (pontos-chave):**
 
 - **Same-origin via proxy:** o SPA chama o gateway por caminho relativo na mesma origem (`:5173`) — proxy do **Vite** (dev) e **nginx** (Docker) para `/users`, `/oauth2`, `/login/oauth2`, `/logout` → gateway. (Só `/login/oauth2`, não `/login` puro, que é rota do SPA.)
 - **Sem token no browser:** `apiAxios` com `withCredentials`, sem `Authorization: Bearer`; estado de auth derivado de `GET /users/me` (200 vs 401, `retry: false`). "Login" = redirect para `/oauth2/authorization/gateway-client`.
-- **`TokenRelay` por rota:** declarado explicitamente na rota `user-service` do `GatewayRouter` (ver seção *gateway*).
+- **`TokenRelay` por rota:** declarado explicitamente na rota `user-service` do `GatewayRouter` (ver seção _gateway_).
 - **Hostname OAuth em Docker (front vs back channel):** o `authorization-uri` é sobrescrito para `localhost:8082` (alcançável pelo browser), enquanto `issuer-uri`/token/jwks ficam no hostname **interno** `authorization-server:8082`. Assim o browser chega ao endpoint de autorização e o `iss` do token continua interno — validação no gateway e no user-service intacta.
 - **CSRF:** habilitado no gateway; o axios envia `X-XSRF-TOKEN` (do cookie `XSRF-TOKEN`); `/users/register` é isento (público/pré-sessão).
 - **Logout (RP-Initiated):** form oculto `POST /logout` (token CSRF no parâmetro `_csrf`, navegação top-level) → gateway encerra a sessão → redireciona ao `end_session_endpoint` (`localhost:8082/connect/logout`, com `id_token_hint` + `post_logout_redirect_uri`) → volta ao SPA deslogado; o próximo login **pede credenciais**.
-- **CORS:** curativo (Opção A — user-service permite `http://localhost:5173`); endurecimento via C+D pendente (ver *Trabalho Pendente §3*).
+- **CORS:** curativo (Opção A — user-service permite `http://localhost:5173`); endurecimento via C+D pendente (ver _Trabalho Pendente §3_).
 
 **Fluxo BFF (implementado):**
 
@@ -244,7 +244,7 @@ O `gateway-client` é um cliente *confidencial* (com secret); o gateway usa `oau
 ## Convenções e Decisões de Design
 
 - **Separação de responsabilidades rígida**: authorization-server não acessa MongoDB diretamente — apenas via Feign para user-service
-- **Endpoint interno isolado**: `/internal/users/email/{email}` não está registrado nas rotas do gateway e não aparece no Swagger — é canal exclusivo entre authorization-server e user-service
+- **Endpoint interno isolado**: `/internal/users/email/{email}` não está registrado nas rotas do gateway e não aparece no Swagger — é canal exclusivo entre authorization-server e user-service. Protegido por shared secret `X-Internal-Token` (`InternalTokenFilter` valida; `FeignConfig` do auth-server injeta) — acesso direto à porta 8090 sem o header recebe 403
 - **Endpoints DELETE com semânticas distintas e intencionais**:
   - `DELETE /users/{id}` (ADMIN) → soft-delete (`deactivateUser`, seta `active = false`)
   - `DELETE /users/del/{id}` (ADMIN) → hard-delete (`deleteUser`, remove do banco)
@@ -280,6 +280,7 @@ docker compose up -d --build
 - `MONGODB_URI` / `MONGODB_DATABASE`
 - `REDIS_HOST` / `REDIS_PORT`
 - `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` (gateway e authorization-server)
+- `INTERNAL_API_TOKEN` (user-service e authorization-server) — shared secret do canal interno `/internal/**` (header `X-Internal-Token`). **Fail-fast:** sem default no config-server (o app não sobe sem ele); o `docker-compose.yml` injeta o default dev `internal-dev-token` para o `up` local. Deve ter o **mesmo** valor nos dois serviços; em produção, sobrescrever via env
 - `OAUTH_REDIRECT_URI` (gateway) — `redirect-uri` enviado no fluxo OAuth2. Default prod-safe `{baseUrl}/login/oauth2/code/gateway-client`. No fluxo BFF, em **dev manual** (`npm run dev`) exporte `OAUTH_REDIRECT_URI=http://localhost:5173/login/oauth2/code/gateway-client` para o callback aterrissar no SPA (`:5173`). O `RegisteredClient` no authorization-server já permite essa URI
 - `OAUTH_AUTHORIZATION_URI` (gateway) — endpoint de autorização **front-channel** (browser). Default `http://localhost:8082/oauth2/authorize`. Sobrescreve só esse endpoint; `issuer-uri`/token/jwks seguem o hostname interno
 - `OAUTH_END_SESSION_URI` (gateway) — endpoint de logout OIDC do IdP (browser). Default `http://localhost:8082/connect/logout`
@@ -309,7 +310,7 @@ docker compose up -d --build
 
 ## Estratégia de Testes
 
-**Estado atual:** 32 testes unitários + 40 testes de controller + 31 testes de integração (Testcontainers), BUILD SUCCESS em ambos os módulos.
+**Estado atual:** 32 testes unitários + 44 testes de controller + 32 testes de integração (Testcontainers), BUILD SUCCESS em ambos os módulos.
 
 **Unitários (Mockito):**
 
@@ -322,10 +323,10 @@ docker compose up -d --build
 
 **Controller (`@WebMvcTest` — MockMvc + `SecurityMockMvcRequestPostProcessors.jwt()`):**
 
-| Foco                                                                        | Arquivo de teste                                                 | Testes |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------ |
-| Status HTTP, autorização (`ROLE_USER`/`ROLE_ADMIN`/sem token), extração JWT | `user-service/.../controller/UserControllerTest.java`            | 37     |
-| Endpoint interno `/internal/users/email/{email}` (200/404, acesso sem token) | `user-service/.../controller/InternalUserControllerTest.java`   | 3      |
+| Foco                                                                         | Arquivo de teste                                              | Testes |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ------ |
+| Status HTTP, autorização (`ROLE_USER`/`ROLE_ADMIN`/sem token), extração JWT, validação `@Valid` (400) | `user-service/.../controller/UserControllerTest.java`         | 40     |
+| Endpoint interno `/internal/users/email/{email}` (200/404 com `X-Internal-Token`, 403 sem/errado) | `user-service/.../controller/InternalUserControllerTest.java` | 4      |
 
 > Usa `@Import({SecurityConfig.class, GlobalExceptionHandler.class})` — em Spring Boot 4.0 o slice `@WebMvcTest` não carrega essas classes automaticamente.
 
@@ -333,14 +334,14 @@ docker compose up -d --build
 
 | Foco                                                                             | Arquivo de teste                                            | Testes |
 | -------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------ |
-| Fluxo registro → busca → atualização → desativação/remoção e unicidade de e-mail | `user-service/.../integration/UserFlowIntegrationTest.java` | 17     |
+| Fluxo registro → busca → atualização → desativação/remoção, unicidade de e-mail e índice único no banco | `user-service/.../integration/UserFlowIntegrationTest.java` | 18     |
 | Comportamento do cache Redis (popular/evictar `usersById` e `usersByEmail`)      | `user-service/.../integration/CacheIntegrationTest.java`    | 14     |
 
 > Base comum: `AbstractIntegrationTest` sobe os containers, mocka o `JwtDecoder` e limpa Redis (`flushDb`) + os caches `usersById`/`usersByEmail` entre os testes.
 
 > **Visibilidade eventual do `RedisCache`:** neste stack (Spring Boot 4.0.1 / spring-data-redis 4.0.1 / Lettuce 6.8.1, sem `commons-pool2`), `cache.put(...)` fica visível para um `cache.get(...)` da mesma chave com atraso de ~1–3 ms. Por isso testes de cache **não fazem read-after-write direto**: as leituras declarativas (`@Cacheable`) chamam `search*` duas vezes (a 1ª dispara o put, a 2ª lê já visível) e as asserções sobre puts manuais via `CacheService` usam `await().atMost(...).untilAsserted(...)` (Awaitility, escopo `test`). O código de produção está correto — em produção a leitura vem em requisição HTTP posterior, então o atraso é irrelevante.
 
-**Front-end (`login-interface`):** **sem cobertura de testes hoje** — não há `vitest`/RTL nem script `test` no `package.json`. O único gate é o `npm run build` (`tsc -b` + `vite build`, typecheck). Bateria de testes planejada (ver *Trabalho Pendente §4*) para o front BFF, que já está implementado (ver seção *login-interface*).
+**Front-end (`login-interface`):** **sem cobertura de testes hoje** — não há `vitest`/RTL nem script `test` no `package.json`. O único gate é o `npm run build` (`tsc -b` + `vite build`, typecheck). Bateria de testes planejada (ver _Trabalho Pendente §4_) para o front BFF, que já está implementado (ver seção _login-interface_).
 
 ---
 
@@ -357,7 +358,7 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 
 **Formato e convenções de escrita:** padrão em pipe, fácil de filtrar via grep. Estrutura `"| [VERBO_HTTP] | ação | campo: valor"`:
 
-- Segmentos separados por ` | `; toda mensagem **começa** com `| `
+- Segmentos separados por `|`; toda mensagem **começa** com `| `
 - Verbo HTTP, quando presente, em **maiúsculas** (`POST`, `GET`, `PUT`, `DELETE`); ações de domínio em **minúsculas e infinitivo/pt-br** (`registrar`, `buscar`, `atualizar`, `desativação`, `deleção`)
 - Chave de campo padronizada: `ID:` (sempre maiúsculo), `email:`, `nome:`, `motivo:`, `correlationId:`; múltiplos campos no mesmo segmento separados por `, ` (ex.: `nome: {}, ID: {}`)
 - Pares simétricos sucesso/falha compartilham o mesmo prefixo de ação (ex.: `| busca por ID | encontrado` ↔ `| busca por ID | não encontrado`)
@@ -370,19 +371,19 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 
 **Cobertura por classe (pontos logados):**
 
-| Classe | Camada | Destaque |
-| --- | --- | --- |
-| `UserController` | user-service / controller | entrada dos 9 endpoints |
-| `InternalUserController` | user-service / controller | entrada do auth interno (e-mail mascarado) |
-| `RegisterService` | user-service / service | registro/update/desativar/deletar + rejeições (WARN) |
-| `SearchService` | user-service / service | página/encontrado (INFO) + não encontrado (WARN) |
-| `AuthenticationService` | user-service / service | `auth` — enviando credenciais (INFO) / inexistente ou inativo (WARN) |
-| `CacheService` | user-service / service | put/evict dos 3 caches (DEBUG) |
-| `GlobalExceptionHandler` | user-service / exceptions | 404/409/400 (WARN), 500 (ERROR), 403 relançado p/ Spring Security |
-| `AuthorizationService` | authorization-server / service | `auth` — carregando usuário (INFO) + falha Feign user-service com stacktrace (ERROR) |
-| `AuthFailureListener` | authorization-server / listeners | falhas de login via `AbstractAuthenticationFailureEvent` (WARN) |
-| `CorrelationIdFilter` | gateway / filter | requisição recebida + `correlationId` |
-| `RateLimitLogFilter` | gateway / filter | rejeições 429 (WARN) |
+| Classe                   | Camada                           | Destaque                                                                             |
+| ------------------------ | -------------------------------- | ------------------------------------------------------------------------------------ |
+| `UserController`         | user-service / controller        | entrada dos 9 endpoints                                                              |
+| `InternalUserController` | user-service / controller        | entrada do auth interno (e-mail mascarado)                                           |
+| `RegisterService`        | user-service / service           | registro/update/desativar/deletar + rejeições (WARN)                                 |
+| `SearchService`          | user-service / service           | página/encontrado (INFO) + não encontrado (WARN)                                     |
+| `AuthenticationService`  | user-service / service           | `auth` — enviando credenciais (INFO) / inexistente ou inativo (WARN)                 |
+| `CacheService`           | user-service / service           | put/evict dos 3 caches (DEBUG)                                                       |
+| `GlobalExceptionHandler` | user-service / exceptions        | 404/409/400 (WARN), 500 (ERROR), 403 relançado p/ Spring Security                    |
+| `AuthorizationService`   | authorization-server / service   | `auth` — carregando usuário (INFO) + falha Feign user-service com stacktrace (ERROR) |
+| `AuthFailureListener`    | authorization-server / listeners | falhas de login via `AbstractAuthenticationFailureEvent` (WARN)                      |
+| `CorrelationIdFilter`    | gateway / filter                 | requisição recebida + `correlationId`                                                |
+| `RateLimitLogFilter`     | gateway / filter                 | rejeições 429 (WARN)                                                                 |
 
 > Nota: o handler `@ExceptionHandler(AccessDeniedException.class)` no `GlobalExceptionHandler` **relança** a exceção — sem ele, o catch-all `Exception` transformaria os 403 do `@PreAuthorize` em 500.
 
@@ -390,7 +391,7 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 
 ## Trabalho Pendente
 
-> Reorganizado por tema/prioridade. Decisões de contexto: o sistema rodará em **múltiplas instâncias** (escala horizontal) e serve de **base/template reutilizável**. Ordem sugerida de execução: 1 → 2 → 3 → 4 → 5 (front-end e evolução de domínio vêm depois).
+> Reorganizado por tema/prioridade. Decisões de contexto: o sistema rodará em **múltiplas instâncias** (escala horizontal) e serve de **base/template reutilizável**. Ordem sugerida de execução: 1 → 2 → 3 → 4 → 5 (evolução de domínio vem depois).
 >
 > Cada item recebe **Severidade** (Alta/Média/Baixa — impacto no objetivo de base pronta para produção e multi-instância) e **Esforço** (P/M/G).
 
@@ -399,8 +400,7 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 - [ ] **Chaves JWK persistentes** no authorization-server — `JWKConfig.java` gera um par RSA novo a cada boot, em memória. Os resource servers validam via `issuer-uri`/JWKS; um JWT assinado pela instância A não valida na JWKS da instância B, e todo restart/deploy invalida os tokens vigentes. Carregar o par de chaves de keystore/secret externo (PEM ou JKS), com `kid` fixo compartilhado entre instâncias. · **Sev: Alta · Esforço: M**
 - [ ] **Persistir estado OAuth em DB relacional** — hoje `InMemoryRegisteredClientRepository` + os defaults `InMemoryOAuth2AuthorizationService`/`InMemoryOAuth2AuthorizationConsentService`. O `code` emitido por uma instância não pode ser trocado por token em outra. Migrar para `JdbcRegisteredClientRepository`, `JdbcOAuth2AuthorizationService` e `JdbcOAuth2AuthorizationConsentService` (schemas oficiais do Spring Authorization Server). Requer datasource novo (ex.: Postgres): `authorization-server/pom.xml` (`spring-boot-starter-jdbc` + driver), `docker-compose.yml` (serviço + volume), `config-server/.../authorization-server.yml` (`spring.datasource.*`) · **Sev: Alta · Esforço: G**
 - [ ] **Sessão HTTP compartilhada** — o login/consent do authorization-server e o `oauth2Login` + `ServerOAuth2AuthorizedClientRepository` do gateway dependem de sessão em memória. Adicionar Spring Session Data Redis (servlet no auth-server, reactive no gateway — que já tem Redis) ou sticky sessions no load balancer · **Sev: Alta · Esforço: M**
-- [ ] **Tratar `DuplicateKeyException` no registro → 409** — `RegisterService.registerUser` faz `findByEmail` e depois `insert`; entre instâncias concorrentes há corrida e o guard real é o índice único do Mongo. Hoje a corrida resultaria em 500; mapear no `GlobalExceptionHandler` para 409 (consistente com `EmailAlreadyRegisteredException`) · **Sev: Média · Esforço: P**
-- [ ] **Deploy rolling sem downtime** — `server.shutdown=graceful` + readiness/liveness probes (actuator) em todos os serviços. (Nota: o `docker-compose.yml` já tem healthchecks de *container* e `depends_on: condition: service_healthy`; falta o nível de aplicação.) · **Sev: Média · Esforço: M**
+- [ ] **Deploy rolling sem downtime** — `server.shutdown=graceful` + readiness/liveness probes (actuator) em todos os serviços. (Nota: o `docker-compose.yml` já tem healthchecks de _container_ e `depends_on: condition: service_healthy`; falta o nível de aplicação.) · **Sev: Média · Esforço: M**
 - [ ] **(Infra) Eliminar SPOFs** — `discovery-server` em peer replication (Eureka HA), `config-server` replicado, MongoDB replica set e Redis Sentinel/Cluster · **Sev: Média · Esforço: G**
 
 > Já adequados para escala: validação JWT stateless no resource server, rate limiter no Redis, os caches (`usersById`/`usersByEmail`/`authByEmail`) no Redis e os healthchecks de container + `depends_on` no `docker-compose.yml`.
@@ -411,14 +411,11 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
   - `authorization-server/pom.xml` — adicionar `spring-cloud-starter-circuitbreaker-resilience4j`
   - Criar `clients/UserClientFallbackFactory.java` — `FallbackFactory<IUserClient>` que lança `UsernameNotFoundException` ao acionar o fallback
   - `clients/IUserClient.java` — adicionar `fallbackFactory = UserClientFallbackFactory.class` no `@FeignClient`
-  - `services/AuthorizationService.java` — corrigir o `catch (Exception e)` que engole `UsernameNotFoundException` de usuário inativo junto com erros de comunicação
   - `config-server/.../authorization-server.yml` — habilitar `spring.cloud.openfeign.circuitbreaker.enabled=true` e adicionar bloco `resilience4j.circuitbreaker.instances.user-service` com `slidingWindowSize`, `failureRateThreshold`, `waitDurationInOpenState` e `permittedNumberOfCallsInHalfOpenState`
-- [ ] **Handler para `@Valid` no `GlobalExceptionHandler`** — adicionar tratamento de `MethodArgumentNotValidException`; hoje sai no formato default do Spring, inconsistente. Consolidar com a padronização RFC 7807 do tema 4. · **Sev: Média · Esforço: P**
 - [ ] **`permissions` derivadas das roles no `TokenCustomizerConfig`** — hoje `["users.read","users.write"]` é hardcoded para todo usuário; mapear roles → permissions (ex.: ADMIN ganha `users.delete`) · **Sev: Média · Esforço: P**
 
 ### 3. Segurança / hardening
 
-- [ ] Proteger `InternalUserController` contra acesso direto à porta 8090 — expõe `passwordHash` e `roles` sem autenticação; adicionar validação por shared secret header (`X-Internal-Token`) em `SecurityConfig` ou restringir por IP. No authorization-server, um `RequestInterceptor` Feign injeta o header em toda chamada ao user-service · **Sev: Alta · Esforço: M**
 - [ ] **CORS: fronteira única no gateway + origens configuráveis (C + D)** — hoje há CORS em 3 módulos (`CORSConfig.java` no gateway, user-service e auth-server) com origens hardcoded. O gateway repassa o header `Origin` do browser ao user-service, cujo `CorsFilter` (allowlist `8081/8082`) rejeitava `localhost:5173` → **403 "Invalid CORS request"** + CORS dobrado (`vary` duplicados). **Estado atual (curativo):** Opção A aplicada — `localhost:5173` adicionado à allowlist do `user-service/.../config/CORSConfig.java`. **Alvo:** CORS só no gateway (borda BFF) e configurável por ambiente. · **Sev: Média · Esforço: M**
   - **Princípio:** CORS é mecanismo de browser e só importa na borda que o browser toca (o gateway). Em serviço interno não agrega segurança (o guard real é JWT + isolamento de rede) — só atrito. Pré-condição de C: confirmar que o user-service **nunca** é chamado direto pelo browser (só via gateway); se houver acesso direto, usar a **Opção B** (gateway remove o header `Origin` ao rotear `/users/**` via `RemoveRequestHeader=Origin`) em vez de C.
   - **C — remover CORS do user-service:** apagar o bean `CorsFilter` (`user-service/.../config/CORSConfig.java`) **e** o `.cors(Customizer.withDefaults())` do `user-service/.../config/SecurityConfig.java` (deixar só um vira no-op sujo). Reverter o curativo da Opção A (a linha `localhost:5173` deixa de existir). Verificar que nenhum teste depende do bean `CorsFilter` (a suíte foca status/auth/cache — improvável).
@@ -433,13 +430,12 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 
 - [ ] **Padronizar respostas de erro em RFC 7807 / `ProblemDetail`** — hoje o `GlobalExceptionHandler` retorna `String` crua e o `@Valid` sai no formato default do Spring (inconsistente). Unificar 400/404/409/500 + validação num único formato. (Engloba o handler de `@Valid` do tema 2.) · **Sev: Média · Esforço: M**
 - [ ] **Cobrir gateway e authorization-server com testes** — o gateway tem só `contextLoads`; o authorization-server só `AuthorizationServiceTest`. Adicionar: roteamento + rate-limit (gateway), `TokenCustomizerConfig` / `JWKConfig` / `SecurityConfig` (auth-server). · **Sev: Média · Esforço: M**
-- [ ] **Criar bateria de testes do front-end (`login-interface`)** — hoje **zero cobertura** (só o typecheck do `npm run build`). Montar a stack de testes e cobrir a aplicação React (BFF já implementado, §6). · **Sev: Média · Esforço: M**
+- [ ] **Criar bateria de testes do front-end (`login-interface`)** — hoje **zero cobertura** (só o typecheck do `npm run build`). Montar a stack de testes e cobrir a aplicação React (BFF já implementado, ver seção _login-interface_). · **Sev: Média · Esforço: M**
   - **Stack:** `vitest` + `@testing-library/react` + `@testing-library/user-event` + `jsdom`; `msw` (Mock Service Worker) para simular o gateway; adicionar script `"test"` no `package.json` e config de testes no `vite.config.ts` (ou `vitest.config.ts`)
   - **Unitários/componente:** `authClient` (`register` → `POST /users/register` com `password`; helpers `login`/`logout` disparam redirect para `/oauth2/authorization/gateway-client` e `/logout`), hooks (`useCurrentUser` trata `401` como deslogado; `useRegister` navega no sucesso), componentes (`LoginBox` renderiza botão de redirect — sem form de senha; `RegisterBox` mapeia o campo `password`; `ProtectedLayout` redireciona em `401`; `NavBar` faz logout via redirect)
   - **Integração (MSW):** fluxo de registro e derivação do estado autenticado por `GET /users/me` (200 vs 401), sem depender de `localStorage`
   - **E2E (opcional, posterior):** Playwright cobrindo o fluxo de redirect OAuth2 ponta a ponta — exige o stack de serviços de pé (candidato ao item de CI/CD, §5)
-  - **CI:** incluir `npm ci && npm run test` (e `npm run build`) do `login-interface` no pipeline (ver *Trabalho Pendente §5*, hoje focado só nos 5 módulos Java)
-- [x] **Corrigir package do teste do gateway** — `com.memelandia.gateway` → `com.users.gateway` (resíduo de outro projeto). **Feito.** Isso desmascarou um defeito mais fundo (abaixo).
+  - **CI:** incluir `npm ci && npm run test` (e `npm run build`) do `login-interface` no pipeline (ver _Trabalho Pendente §5_, hoje focado só nos 5 módulos Java)
 - [ ] **Tornar o `contextLoads` do gateway hermético** — hoje o `@SpringBootTest` (`GatewayApplicationTests`) faz **OIDC discovery real** na subida (via `issuer-uri` vindo do config-server) e depende de um authorization-server alcançável e com issuer compatível — falha fora desse cenário (ex.: stack Docker no ar reporta issuer `http://authorization-server:8082`, mas o teste pede `http://localhost:8082`). Isolar com `gateway/src/test/resources/application.yml` (sem import do config-server; endpoints do provider explícitos ou autoconfig OAuth2 client/resource-server desabilitada no teste). Faz par com o item "Cobrir gateway e authorization-server com testes" acima. · **Sev: Baixa · Esforço: P**
 
 ### 5. Eficiência e CI/CD-operação
@@ -448,11 +444,7 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 - [ ] **Pipeline de CI** (ex.: GitHub Actions) — build + testes dos 5 módulos Java + do front-end (`login-interface`: `npm ci`, `npm run build` e `npm run test` quando a bateria do §4 existir) a cada push/PR; os testes de integração com Testcontainers exigem Docker no runner. · **Sev: Média · Esforço: M**
 - [ ] **Versionamento de API** (`/v1/...`) antes de adicionar novas camadas de domínio sobre a base. · **Sev: Baixa · Esforço: M**
 
-### 6. Front-end
-
-- [x] **Reescrever `login-interface` no padrão BFF** — **Feito e funcionando no Docker.** O gateway é o cliente OAuth2; o SPA usa sessão via cookie + `TokenRelay` e **não** manuseia JWT. Login → perfil, registro e **logout RP-initiated** validados ponta a ponta (detalhes na seção *login-interface*). Itens de front ainda abertos: **bateria de testes do front** (§4) e o endurecimento de **CORS C+D** (§3).
-
-### 7. Evolução de domínio (não imediatos)
+### 6. Evolução de domínio (não imediatos)
 
 - [ ] Verificação de e-mail no cadastro · **Sev: Baixa · Esforço: M**
 - [ ] Recuperação de senha · **Sev: Baixa · Esforço: M**
@@ -462,13 +454,37 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 
 ---
 
+## Correções Necessárias
+
+> Levantamento de **tecnologias já implementadas que precisam de correção ou de fechamento de implementação** — foco em solidez do que existe, não em novas tecnologias. Cada item tem **Dificuldade (1–10)** = esforço/risco da correção, e **Impacto (1–10)** = quanto a falha compromete a solidez/"produção" da base.
+>
+> _Tier 1 (C1–C5) concluído e removido. Itens restantes abaixo._
+
+### Tier 2 — tecnologias implementadas mas não sólidas
+
+- [ ] **C6 — OAuth2/JWT quebram com N instâncias.** `JWKConfig.java:24-34` gera RSA novo por boot (em memória, `kid` aleatório); `OAuth2ClientConfig.java:33` usa `InMemoryRegisteredClientRepository`; sessões de login/consent e `oauth2Login` em memória. Detalhamento e plano completos no _Trabalho Pendente §1_ (chaves JWK persistentes, estado OAuth em JDBC, Spring Session Redis). · **Dificuldade: 8/10 · Impacto: 9/10**
+- [ ] **C7 — Sem resiliência na chamada Feign.** `IUserClient.java:9` sem `fallbackFactory`; indisponibilidade do user-service derruba o login. Adicionar Resilience4j (ver _Trabalho Pendente §2_). · **Dificuldade: 5/10 · Impacto: 6/10**
+- [ ] **C8 — `permissions` hardcoded no JWT.** `TokenCustomizerConfig.java:34-37` injeta `["users.read","users.write"]` para todo usuário (inclusive ADMIN). Derivar das roles. · **Dificuldade: 3/10 · Impacto: 5/10**
+- [ ] **C9 — Erros não padronizados (RFC 7807).** `GlobalExceptionHandler` devolve `String` crua (inclusive o handler de `@Valid`, que já retorna 400 mas em texto). Unificar 400/404/409/500 + validação em `ProblemDetail`. · **Dificuldade: 4/10 · Impacto: 5/10**
+
+### Tier 3 — rede de proteção e acabamento
+
+- [ ] **C10 — Cobertura desigual de testes.** Gateway só `contextLoads` (e não-hermético — faz OIDC discovery real), auth-server só `AuthorizationServiceTest`, front-end zero. Cobrir roteamento/rate-limit, `TokenCustomizerConfig`/`JWKConfig`, e o BFF; isolar o `contextLoads` do gateway. · **Dificuldade: 5/10 · Impacto: 6/10**
+- [ ] **C11 — Secrets em claro no `docker-compose.yml`.** Mongo (`user_service:user_1234321`, linhas 184-185), `OAUTH_CLIENT_SECRET` (linha 145) e Grafana `admin/admin` (215-216). Mover para `.env` git-ignored. · **Dificuldade: 2/10 · Impacto: 5/10**
+- [ ] **C12 — CORS duplicado e hardcoded.** `CorsFilter` em 3 módulos com origens fixas (user-service `CORSConfig.java:19-23`); já causou 403/`vary` duplicado. Consolidar na borda (gateway) e externalizar por ambiente (ver _Trabalho Pendente §3_, opções C+D). Validar ao vivo. · **Dificuldade: 5/10 · Impacto: 4/10**
+- [ ] **C13 — Validação de senha dividida e fraca.** `UserRequestDTO.java:21` (`@Size(min=8)` nullable) + checagem manual de null em `RegisterService:38`; sem regra de complexidade. Unificar. · **Dificuldade: 3/10 · Impacto: 4/10**
+- [ ] **C14 — Dupla chamada Feign por login.** `loadUserByUsername` + `jwtCustomizer` chamam `getUserByEmail` separadamente (mitigado por cache `authByEmail`). Reaproveitar o resultado (ver _Trabalho Pendente §5_). · **Dificuldade: 4/10 · Impacto: 3/10**
+- [ ] **C15 — Higiene cosmética.** Campos `private` não-`final` + `@Autowired` redundante no construtor (`UserController.java:38-45`, `SearchService`); `RegisterService.updateUser:88,100` monta o `UserResponseDTO` duas vezes. · **Dificuldade: 1/10 · Impacto: 2/10**
+
+---
+
 ## Gaps de Segurança Conhecidos
 
 Identificados e com decisão de abordagem registrada:
 
-| Gap                                                          | Localização                             | Severidade | Decisão                                                                               |
-| ------------------------------------------------------------ | --------------------------------------- | ---------- | ------------------------------------------------------------------------------------- |
-| JWT armazenado em `localStorage` no front-end                | `login-interface/` (BFF)                | Resolvido  | **Resolvido:** o BFF mantém o JWT na sessão do gateway; o browser só recebe o cookie de sessão. O `localStorage` foi **eliminado** do front (ver seção *login-interface*) |
-| Grafana acessível com `admin/admin`                          | `docker-compose.yml`                    | Baixa      | Alterar credenciais e proteger o stack de observabilidade                             |
-| Sem HTTPS/TLS                                                | Todo o sistema                          | Alta       | Decidido: configurar junto com a infraestrutura de produção                           |
-| `InMemoryRegisteredClientRepository` no authorization-server | `OAuth2ClientConfig.java`               | Baixa      | Aceitável enquanto houver apenas um cliente (gateway). Migrar para JDBC se necessário |
+| Gap                                                          | Localização               | Severidade | Decisão                                                                                                                                                                   |
+| ------------------------------------------------------------ | ------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JWT armazenado em `localStorage` no front-end                | `login-interface/` (BFF)  | Resolvido  | **Resolvido:** o BFF mantém o JWT na sessão do gateway; o browser só recebe o cookie de sessão. O `localStorage` foi **eliminado** do front (ver seção _login-interface_) |
+| Grafana acessível com `admin/admin`                          | `docker-compose.yml`      | Baixa      | Alterar credenciais e proteger o stack de observabilidade                                                                                                                 |
+| Sem HTTPS/TLS                                                | Todo o sistema            | Alta       | Decidido: configurar junto com a infraestrutura de produção                                                                                                               |
+| `InMemoryRegisteredClientRepository` no authorization-server | `OAuth2ClientConfig.java` | Baixa      | Aceitável enquanto houver apenas um cliente (gateway). Migrar para JDBC se necessário                                                                                     |
