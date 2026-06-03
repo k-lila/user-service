@@ -6,6 +6,7 @@ import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -53,7 +54,16 @@ public class RegisterService {
         user.setRoles(Set.of("USER"));
         user.setRegistrationDate(Instant.now());
         user.setActive(true);
-        User registered = userRepository.insert(user);
+        User registered;
+        try {
+            registered = userRepository.insert(user);
+        } catch (DuplicateKeyException e) {
+            LOGGER.warn(
+                "| email já cadastrado (corrida) | email: {}",
+                LogUtils.maskEmail(userDTO.getEmail())
+            );
+            throw new EmailAlreadyRegisteredException(userDTO.getEmail());
+        }
         LOGGER.info(
             "| usuário registrado | nome: {}, ID: {}",
             registered.getName(),
