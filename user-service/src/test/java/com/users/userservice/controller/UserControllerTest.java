@@ -36,7 +36,8 @@ import com.users.userservice.services.SearchService;
 @Import({SecurityConfig.class, GlobalExceptionHandler.class})
 @TestPropertySource(properties = {
         "eureka.client.enabled=false",
-        "management.tracing.sampling.probability=0"
+        "management.tracing.sampling.probability=0",
+        "internal.api.token=test-internal-token"
 })
 class UserControllerTest {
 
@@ -92,6 +93,38 @@ class UserControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Ciclano", "fulano@email.com", "senha456"))))
                 .andExpect(status().isConflict());
+    }
+
+    // ── POST /users/register — validação de corpo (@Valid → 400, C3) ───────────
+
+    @Test
+    void register_deveRetornar400_quandoEmailInvalido() throws Exception {
+        mockMvc.perform(post("/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "email-invalido", "senha123"))))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
+    }
+
+    @Test
+    void register_deveRetornar400_quandoSenhaMenorQue8() throws Exception {
+        mockMvc.perform(post("/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", "123"))))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
+    }
+
+    @Test
+    void register_deveRetornar400_quandoNomeEmBranco() throws Exception {
+        mockMvc.perform(post("/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("", "fulano@email.com", "senha123"))))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
     }
 
     // ── GET /users ───────────────────────────────────────────────────────────

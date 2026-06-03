@@ -1,10 +1,13 @@
 package com.users.userservice.exceptions;
 
+import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
@@ -28,6 +31,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<String> handleIllegalArgument(IllegalArgumentException e) {
         LOGGER.warn("| 400 | argumento inválido | {}", e.getMessage());
         return ResponseEntity.status(400).body(e.getMessage());
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<String> handleValidation(MethodArgumentNotValidException e) {
+        String msg = e.getBindingResult().getFieldErrors().stream()
+            .map(err -> err.getField() + ": " + err.getDefaultMessage())
+            .collect(Collectors.joining("; "));
+        LOGGER.warn("| 400 | validação falhou | {}", msg);
+        return ResponseEntity.status(400).body(msg);
     }
 
     // Deixa o Spring Security traduzir negações de acesso (403) — não devem virar 500.
