@@ -2,10 +2,14 @@ package com.users.userservice.integration;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.time.Instant;
+import java.util.Set;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.annotation.DirtiesContext;
@@ -64,6 +68,27 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
 
         assertThrows(EmailAlreadyRegisteredException.class, () ->
                 registerService.registerUser(buildDTO("Ciclano", "fulano@email.com", "outrasenha")));
+    }
+
+    // Verifica o índice único de e-mail no nível do banco (C1), driblando a
+    // pré-checagem do serviço: insert direto pelo repositório com e-mail repetido.
+    @Test
+    void deveLancarDuplicateKeyException_quandoIndiceUnicoDeEmailAtivo() {
+        userRepository.insert(buildEntity("Fulano", "dup@email.com"));
+
+        assertThrows(DuplicateKeyException.class, () ->
+                userRepository.insert(buildEntity("Ciclano", "dup@email.com")));
+    }
+
+    private User buildEntity(String nome, String email) {
+        User user = new User();
+        user.setName(nome);
+        user.setEmail(email);
+        user.setPasswordHash("hash");
+        user.setRoles(Set.of("USER"));
+        user.setRegistrationDate(Instant.now());
+        user.setActive(true);
+        return user;
     }
 
     @Test
