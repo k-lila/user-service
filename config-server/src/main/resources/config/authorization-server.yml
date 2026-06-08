@@ -4,9 +4,38 @@ server:
 spring:
   application:
     name: authorization-server
+  # Estado OAuth (registered client, authorizations, consents) em Postgres — escala horizontal
+  datasource:
+    url: ${AUTH_DB_URL:jdbc:postgresql://localhost:5432/authdb}
+    username: ${AUTH_DB_USER:auth_service}
+    password: ${AUTH_DB_PASSWORD:auth_1234321}
+    driver-class-name: org.postgresql.Driver
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+      schema-locations:
+        - classpath:schema/oauth2-registered-client-schema.sql
+        - classpath:schema/oauth2-authorization-schema.sql
+        - classpath:schema/oauth2-authorization-consent-schema.sql
+  # Sessão HTTP (login/consent) compartilhada via Redis — escala horizontal
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  session:
+    store-type: redis
 
 auth:
   issuer: ${AUTH_ISSUER:http://localhost:8082}
+
+# Par de chaves de assinatura JWT (kid fixo, compartilhado entre instâncias).
+# Defaults de classpath são chaves DE DESENVOLVIMENTO — gap de segurança conhecido;
+# em produção sobrescrever JWK_PRIVATE_KEY/JWK_PUBLIC_KEY com secrets montados (file:...).
+jwk:
+  key-id: ${JWK_KEY_ID:user-service-key}
+  private-key: ${JWK_PRIVATE_KEY:classpath:keys/app.key}
+  public-key: ${JWK_PUBLIC_KEY:classpath:keys/app.pub}
 
 oauth:
   client:

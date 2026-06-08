@@ -1,5 +1,6 @@
 package authorizationserver.config;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.context.annotation.Bean;
@@ -31,10 +32,13 @@ public class TokenCustomizerConfig {
             context.getClaims().claims(claims -> {
                 claims.put("userID", user.getId());
                 claims.put("roles", user.getRoles());
-                claims.put("permissions", List.of(
+                // ArrayList (não List.of): o JdbcOAuth2AuthorizationService serializa os claims
+                // no Postgres com type-id, e o PolymorphicTypeValidator do SAS rejeita
+                // java.util.ImmutableCollections$List* na releitura (ex.: endpoint /userinfo).
+                claims.put("permissions", new ArrayList<>(List.of(
                         "users.read",
                         "users.write"
-                ));
+                )));
                 claims.put("scope", context.getAuthorizedScopes());
 
             });

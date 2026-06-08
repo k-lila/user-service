@@ -11,15 +11,35 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.session.data.redis.config.annotation.web.http.EnableRedisHttpSession;
+import org.springframework.session.web.http.CookieSerializer;
+import org.springframework.session.web.http.DefaultCookieSerializer;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 
 @Configuration
 @EnableWebSecurity
+// Sessão HTTP (login/consent) no Redis — escala horizontal.
+// Habilitação explícita: no Spring Boot 4.0 a autoconfig de Spring Session não dispara só pela dep.
+@EnableRedisHttpSession
 public class SecurityConfig {
 
 	@Value("${auth.issuer}")
 	private String issuer;
+
+	// Cookie de sessão com nome próprio (AUTHSESSION) para NÃO colidir com o cookie
+	// SESSION do gateway: gateway e auth-server compartilham o host "localhost" em dev
+	// (cookies ignoram a porta), e o default do Spring Session ("SESSION") nos dois faria
+	// o cookie do auth-server sobrescrever o do gateway, quebrando o callback OAuth2.
+	@Bean
+	public CookieSerializer cookieSerializer() {
+		DefaultCookieSerializer serializer = new DefaultCookieSerializer();
+		serializer.setCookieName("AUTHSESSION");
+		serializer.setCookiePath("/");
+		serializer.setUseHttpOnlyCookie(true);
+		serializer.setSameSite("Lax");
+		return serializer;
+	}
 
 	@Bean
 	@Order(1)
