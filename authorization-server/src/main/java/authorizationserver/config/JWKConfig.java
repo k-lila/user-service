@@ -1,14 +1,16 @@
 package authorizationserver.config;
 
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
+import java.io.IOException;
+import java.io.InputStream;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.Resource;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
+import org.springframework.security.converter.RsaKeyConverters;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 
 import com.nimbusds.jose.jwk.JWKSet;
@@ -20,30 +22,47 @@ import com.nimbusds.jose.proc.SecurityContext;
 @Configuration
 public class JWKConfig {
 
+	// Par RSA fixo carregado de PEM (kid estável compartilhado entre instâncias).
+	// Substitui a geração por boot, que quebrava a validação JWT com N instâncias e
+	// invalidava tokens a cada restart. Defaults de classpath são chaves DE DESENVOLVIMENTO
+	// (gap de segurança conhecido); em produção sobrescrever via JWK_* (secret montado).
+	@Value("${jwk.private-key}")
+	private Resource privateKeyPem;
+
+	@Value("${jwk.public-key}")
+	private Resource publicKeyPem;
+
+	@Value("${jwk.key-id}")
+	private String keyId;
+
 	@Bean
 	public JWKSource<SecurityContext> jwkSource() {
-		KeyPair keyPair = generateRsaKey();
-		RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
-		RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
+		RSAPrivateKey privateKey = readPrivateKey();
+		RSAPublicKey publicKey = readPublicKey();
 		RSAKey rsaKey = new RSAKey.Builder(publicKey)
 				.privateKey(privateKey)
-				.keyID(UUID.randomUUID().toString())
+				.keyID(keyId)
 				.build();
 		JWKSet jwkSet = new JWKSet(rsaKey);
 		return new ImmutableJWKSet<>(jwkSet);
 	}
 
-	private static KeyPair generateRsaKey() {
-		KeyPair keyPair;
-		try {
-			KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-			keyPairGenerator.initialize(2048);
-			keyPair = keyPairGenerator.generateKeyPair();
+	private RSAPrivateKey readPrivateKey() {
+		try (InputStream in = privateKeyPem.getInputStream()) {
+			return RsaKeyConverters.pkcs8().convert(in);
 		}
-		catch (Exception ex) {
-			throw new IllegalStateException(ex);
+		catch (IOException ex) {
+			throw new IllegalStateException("Falha ao carregar a chave privada JWK", ex);
 		}
-		return keyPair;
+	}
+
+	private RSAPublicKey readPublicKey() {
+		try (InputStream in = publicKeyPem.getInputStream()) {
+			return RsaKeyConverters.x509().convert(in);
+		}
+		catch (IOException ex) {
+			throw new IllegalStateException("Falha ao carregar a chave pública JWK", ex);
+		}
 	}
 
 	@Bean

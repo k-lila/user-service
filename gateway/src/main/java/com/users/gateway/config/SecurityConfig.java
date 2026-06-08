@@ -9,6 +9,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.session.data.redis.config.annotation.web.server.EnableRedisWebSession;
+import org.springframework.security.oauth2.client.registration.ReactiveClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
+import org.springframework.security.oauth2.client.web.server.DefaultServerOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.server.ServerOAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.server.DefaultServerRedirectStrategy;
 import org.springframework.security.web.server.SecurityWebFilterChain;
@@ -29,11 +34,15 @@ import reactor.core.publisher.Mono;
 
 @Configuration
 @EnableWebFluxSecurity
+// Sessão WebFlux (OAuth2AuthorizedClient/JWT) no Redis — escala horizontal.
+// Habilitação explícita: no Spring Boot 4.0 a autoconfig de Spring Session não dispara só pela dep.
+@EnableRedisWebSession
 public class SecurityConfig {
 
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http,
-            ServerLogoutSuccessHandler oidcLogoutSuccessHandler) {
+            ServerLogoutSuccessHandler oidcLogoutSuccessHandler,
+            ReactiveClientRegistrationRepository clientRegistrationRepository) {
         http
             // CSRF por token sincronizador: cookie XSRF-TOKEN legível pelo SPA (BFF + sessão).
             // Handler "plano" (não-XOR) para o token bruto do cookie casar com o header X-XSRF-TOKEN.
@@ -62,7 +71,11 @@ public class SecurityConfig {
                 ).permitAll()
                 .anyExchange().authenticated()
             )
-            .oauth2Login(Customizer.withDefaults())
+            // PKCE no oauth2Login: o gateway-client exige proof key (requireProofKey(true) no
+            // authorization-server). Sem isso, o cliente confidencial não envia code_challenge e
+            // o auth-server rejeita a autorização com invalid_request, quebrando o fluxo BFF.
+            .oauth2Login(oauth2 -> oauth2
+                .authorizationRequestResolver(pkceAuthorizationRequestResolver(clientRegistrationRepository)))
             .oauth2Client(Customizer.withDefaults())
             .oauth2ResourceServer(oauth2 ->
                 oauth2.jwt(Customizer.withDefaults())
@@ -75,6 +88,16 @@ public class SecurityConfig {
             // RP-Initiated Logout: POST /logout encerra a sessão e redireciona ao end_session do IdP.
             .logout(logout -> logout.logoutSuccessHandler(oidcLogoutSuccessHandler));
         return http.build();
+    }
+
+    // Resolver de authorization request com PKCE habilitado: adiciona code_challenge/code_challenge_method
+    // (S256) na ida ao authorization-server e guarda o code_verifier para a troca de código.
+    private ServerOAuth2AuthorizationRequestResolver pkceAuthorizationRequestResolver(
+            ReactiveClientRegistrationRepository clientRegistrationRepository) {
+        DefaultServerOAuth2AuthorizationRequestResolver resolver =
+                new DefaultServerOAuth2AuthorizationRequestResolver(clientRegistrationRepository);
+        resolver.setAuthorizationRequestCustomizer(OAuth2AuthorizationRequestCustomizers.withPkce());
+        return resolver;
     }
 
     // Após o logout local, redireciona o browser ao end_session do auth-server (encerra a sessão

@@ -10,10 +10,15 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
-import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationConsentService;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
+import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 
 @Configuration
@@ -27,12 +32,33 @@ public class OAuth2ClientConfig {
 	    return new BCryptPasswordEncoder();
 	}
 
+    // Estado OAuth persistido em JDBC (Postgres) para suportar N instâncias: o `code`
+    // emitido por uma instância precisa ser trocável por token em qualquer outra.
+    // Substitui InMemoryRegisteredClientRepository + os defaults InMemory de
+    // OAuth2AuthorizationService/OAuth2AuthorizationConsentService.
     @Bean
-    public RegisteredClientRepository registeredClientRepository() {
+    public RegisteredClientRepository registeredClientRepository(JdbcTemplate jdbcTemplate) {
+        JdbcRegisteredClientRepository repository = new JdbcRegisteredClientRepository(jdbcTemplate);
+        // Seeding idempotente do gateway-client (antes em memória). Preserva todos os
+        // redirectUri/scopes — incluindo o redirect do Swagger UI.
+        if (repository.findByClientId("gateway-client") == null) {
+            repository.save(gatewayClient());
+        }
+        return repository;
+    }
 
-        return new InMemoryRegisteredClientRepository(
-                gatewayClient()
-        );
+    // Nome do bean distinto de 'authorizationService' (o UserDetailsService
+    // authorizationserver.services.AuthorizationService já ocupa esse nome). Wiring é por tipo.
+    @Bean
+    public OAuth2AuthorizationService oauth2AuthorizationService(JdbcTemplate jdbcTemplate,
+            RegisteredClientRepository registeredClientRepository) {
+        return new JdbcOAuth2AuthorizationService(jdbcTemplate, registeredClientRepository);
+    }
+
+    @Bean
+    public OAuth2AuthorizationConsentService oauth2AuthorizationConsentService(JdbcTemplate jdbcTemplate,
+            RegisteredClientRepository registeredClientRepository) {
+        return new JdbcOAuth2AuthorizationConsentService(jdbcTemplate, registeredClientRepository);
     }
 
     private RegisteredClient gatewayClient() {
