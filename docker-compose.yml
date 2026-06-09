@@ -20,8 +20,7 @@ services:
     image: openzipkin/zipkin:latest
     networks:
       - user-service-net
-    ports:
-      - "9411:9411"
+    # Sem ports: em prod — observabilidade só na rede interna (G2). Republicado em dev no override.
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:9411/health"]
       interval: 5s
@@ -65,8 +64,7 @@ services:
     image: nginx:alpine
     networks:
       - user-service-net
-    ports:
-      - "8888:8888"
+    # Sem ports: em prod — config-server não publicado (G3). Republicado em dev no override.
     volumes:
       - ./infra/config-lb/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
@@ -89,8 +87,7 @@ services:
     build: ./discovery-server
     networks:
       - user-service-net
-    ports:
-      - "9091:9091"
+    # Sem ports: em prod — Eureka só na rede interna (G2). Republicado em dev no override.
     depends_on:
       config-lb:
         condition: service_healthy
@@ -113,8 +110,7 @@ services:
     build: ./discovery-server
     networks:
       - user-service-net
-    ports:
-      - "9092:9092"
+    # Sem ports: em prod — Eureka só na rede interna (G2). Republicado em dev no override.
     depends_on:
       config-lb:
         condition: service_healthy
@@ -363,8 +359,9 @@ services:
     build: ./authorization-server
     networks:
       - user-service-net
-    ports:
-      - "8082:8082"
+    # Sem ports: em prod. O front-channel (browser → /oauth2/authorize, /login, /connect/logout)
+    # é exposto pelo reverse-proxy de TLS/ingress (G1) num hostname dedicado (ex.: auth.<dominio>),
+    # restrito a esses paths — não pela publicação da porta inteira. Em dev, o override republica 8082.
     depends_on:
       discovery-server-1:
         condition: service_healthy
@@ -385,8 +382,8 @@ services:
       CONFIG_SERVER_URL: http://config-lb:8888
       EUREKA_URI: http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka
       MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
-      OAUTH_GATEWAY_CLIENT: http://localhost:8081/login/oauth2/code/gateway-client
-      OAUTH_SWAGGER_REDIRECT_URL: http://localhost:8081/swagger-ui/oauth2-redirect.html
+      OAUTH_GATEWAY_CLIENT: ${OAUTH_GATEWAY_CLIENT:-http://localhost:8081/login/oauth2/code/gateway-client}
+      OAUTH_SWAGGER_REDIRECT_URL: ${OAUTH_SWAGGER_REDIRECT_URL:-http://localhost:8081/swagger-ui/oauth2-redirect.html}
       AUTH_ISSUER: http://authorization-server:8082
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
@@ -407,8 +404,8 @@ services:
     build: ./user-service
     networks:
       - user-service-net
-    ports:
-      - "8090:8090"
+    # Sem ports: em prod — acesso só via gateway (G2: 8090 direto contorna rate limit/CORS).
+    # Republicado em dev no override.
     depends_on:
       discovery-server-1:
         condition: service_healthy
@@ -438,9 +435,9 @@ services:
       MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin
       MONGODB_DATABASE: user-db
       AUTH_ISSUER_URI: http://authorization-server:8082
-      AUTH_URL: http://localhost:8082/oauth2/authorize
-      AUTH_TOKEN: http://localhost:8082/oauth2/token
-      API_BASE_URL: http://localhost:8081
+      AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
+      AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
       REDIS_SENTINEL_MASTER: mymaster
       REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
@@ -481,14 +478,14 @@ services:
       EUREKA_URI: http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka
       MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       AUTH_ISSUER_URI: http://authorization-server:8082
-      OAUTH_AUTHORIZATION_URI: http://localhost:8082/oauth2/authorize
-      OAUTH2SWAGGER_REDIRECT_URL: http://localhost:8081/swagger-ui/oauth2-redirect.html
+      OAUTH_AUTHORIZATION_URI: ${OAUTH_AUTHORIZATION_URI:-http://localhost:8082/oauth2/authorize}
+      OAUTH2SWAGGER_REDIRECT_URL: ${OAUTH2SWAGGER_REDIRECT_URL:-http://localhost:8081/swagger-ui/oauth2-redirect.html}
       OAUTH_CLIENT_ID: gateway-client
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
-      OAUTH_REDIRECT_URI: http://localhost:5173/login/oauth2/code/gateway-client
-      AUTH_URL: http://localhost:8082/oauth2/authorize
-      AUTH_TOKEN: http://localhost:8082/oauth2/token
-      API_BASE_URL: http://localhost:8081
+      OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-http://localhost:5173/login/oauth2/code/gateway-client}
+      AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
+      AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
       REDIS_SENTINEL_MASTER: mymaster
       REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
     healthcheck:
@@ -505,8 +502,11 @@ services:
       context: ./login-interface
       args:
         VITE_API_URL: ""
+    # Borda pública (SPA + proxy BFF). Porta do host por env (listas de ports: são concatenadas
+    # entre base/override, então não dá para "remapear" via override): dev usa o default 5173
+    # (URL documentada); prod seta WEB_HOST_PORT (ex.: 80, atrás do TLS/ingress — G1).
     ports:
-      - "5173:80"
+      - "${WEB_HOST_PORT:-5173}:80"
     networks:
       - user-service-net
 
@@ -519,8 +519,7 @@ services:
     container_name: prometheus
     networks:
       - user-service-net
-    ports:
-      - "9090:9090"
+    # Sem ports: em prod — métricas só na rede interna (G2/G6). Republicado em dev no override.
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
     depends_on:
@@ -534,8 +533,7 @@ services:
     container_name: grafana
     networks:
       - user-service-net
-    ports:
-      - "3000:3000"
+    # Sem ports: em prod — dashboards só na rede interna (G2/G11). Republicado em dev no override.
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards

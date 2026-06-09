@@ -29,7 +29,7 @@ spring:
           gateway-client:
             provider: authorization-server
             client-id: ${OAUTH_CLIENT_ID:gateway-client}
-            client-secret: ${OAUTH_CLIENT_SECRET:gateway-secret}
+            client-secret: ${OAUTH_CLIENT_SECRET}
             authorization-grant-type: authorization_code
             redirect-uri: "${OAUTH_REDIRECT_URI:{baseUrl}/login/oauth2/code/gateway-client}"
             scope:
@@ -69,7 +69,7 @@ springdoc:
 
     oauth:
       client-id: ${OAUTH_CLIENT_ID:gateway-client}
-      client-secret: ${OAUTH_CLIENT_SECRET:gateway-secret}
+      client-secret: ${OAUTH_CLIENT_SECRET}
       use-pkce-with-authorization-code-grant: true
     oauth2-redirect-url: ${OAUTH2SWAGGER_REDIRECT_URL:http://localhost:8081/swagger-ui/oauth2-redirect.html}
 

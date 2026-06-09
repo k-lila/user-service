@@ -184,6 +184,8 @@ login-interface (React)
 docker compose up -d --build
 ```
 
+O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`.
+
 ### Ordem manual (sem Docker)
 
 1. config-server → 2. discovery-server → 3. authorization-server → 4. user-service → 5. gateway (`mvn spring-boot:run` em cada) → 6. login-interface (`npm run dev`)
@@ -231,7 +233,7 @@ Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/pri
 
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 12 gaps mapeados (G1–G12): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4 — **resolvido** via C11, `.env` git-ignored), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6 — **resolvido** via C18, porta de management interna), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8 — **resolvido** via C8, derivadas das roles), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10 — **resolvido** via C19, lockout por conta+IP no Redis), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). JWT em `localStorage` resolvido via BFF.
+Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 12 gaps mapeados (G1–G12): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2 — **resolvido** via C16, base prod-safe + `docker-compose.override.yml` de dev), config-server sem auth (média, G3 — curativo via C17, porta não publicada + defaults de secret removidos; Basic/mTLS pendente), secrets em claro no compose (média, G4 — **resolvido** via C11, `.env` git-ignored), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6 — **resolvido** via C18, porta de management interna), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8 — **resolvido** via C8, derivadas das roles), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10 — **resolvido** via C19, lockout por conta+IP no Redis), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). JWT em `localStorage` resolvido via BFF.
 
 ---
 

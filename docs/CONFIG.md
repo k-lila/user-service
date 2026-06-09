@@ -19,6 +19,8 @@
 - **Default dev** é o valor embutido (no `*.yml` do config-server ou em `@Value` no código) quando a variável não é exportada.
 - Variáveis **sem default** são _fail-fast_: o app não sobe sem elas (o `docker-compose.yml` injeta um valor de dev).
 - A coluna **Serviço(s)** indica quem consome a variável.
+- **Compose base prod-safe + override de dev (C16):** `docker-compose.yml` publica só a borda (`gateway:8081` e `interface`); `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas em dev. As URLs voltadas ao **browser** (front-channel/redirects) entram no compose como `${VAR:-localhost-default}` — em dev usam o default; em **prod** (`docker compose -f docker-compose.yml up`) um `.env` as sobrescreve com os hostnames públicos. Ver `.env.example`.
+- **Secrets sem default no config-server (C17):** `AUTH_DB_USER`, `AUTH_DB_PASSWORD` e `OAUTH_CLIENT_SECRET` deixaram de ter default nos YAMLs servidos → ausência da env no cliente derruba a subida (mesma filosofia do `INTERNAL_API_TOKEN`).
 
 ## Infraestrutura e descoberta
 
@@ -41,8 +43,8 @@
 | `REDIS_SENTINEL_MASTER` | user-service · gateway · auth-server | `mymaster`          | Nome do master monitorado pelos Sentinels. Substitui `REDIS_HOST`/`REDIS_PORT`.     |
 | `REDIS_SENTINEL_NODES`  | user-service · gateway · auth-server | `redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379` | Lista CSV de endereços dos processos Sentinel. |
 | `AUTH_DB_URL`       | authorization-server                | `jdbc:postgresql://localhost:5432/authdb`    | Datasource do Postgres que guarda o estado OAuth.                |
-| `AUTH_DB_USER`      | authorization-server                | `auth_service`                               |                                                                  |
-| `AUTH_DB_PASSWORD`  | authorization-server                | `auth_1234321`                               | Default dev; sobrescrever em produção.                           |
+| `AUTH_DB_USER`      | authorization-server                | — (fail-fast)                                | Sem default no config-server (C17); o compose injeta `${POSTGRES_USER}`. |
+| `AUTH_DB_PASSWORD`  | authorization-server                | — (fail-fast)                                | Sem default no config-server (C17); o compose injeta `${POSTGRES_PASSWORD}`. |
 
 ## OAuth2 e JWT
 
@@ -54,7 +56,7 @@
 | `JWK_PUBLIC_KEY`           | authorization-server  | `classpath:keys/app.pub`                             | Chave pública RSA (PEM). **Default dev**.                                                    |
 | `JWK_KEY_ID`               | authorization-server  | `user-service-key`                                   | `kid` estável da chave de assinatura.                                                        |
 | `OAUTH_CLIENT_ID`          | gateway · auth-server | `gateway-client`                                     | Client confidencial do BFF.                                                                  |
-| `OAUTH_CLIENT_SECRET`      | gateway · auth-server | `gateway-secret`                                     | Default dev; sobrescrever em produção.                                                       |
+| `OAUTH_CLIENT_SECRET`      | gateway · auth-server | — (fail-fast)                                        | Sem default no config-server (C17); o compose injeta via `.env`. Sobrescrever em produção.   |
 | `OAUTH_REDIRECT_URI`       | gateway               | `{baseUrl}/login/oauth2/code/gateway-client`         | `redirect-uri` do fluxo. Em **dev manual** (`npm run dev`), exporte `http://localhost:5173/login/oauth2/code/gateway-client`.² |
 | `OAUTH_AUTHORIZATION_URI`  | gateway               | `http://localhost:8082/oauth2/authorize`             | Endpoint de autorização **front-channel** (browser). Só este endpoint usa hostname externo. |
 | `OAUTH_END_SESSION_URI`    | gateway               | `http://localhost:8082/connect/logout`               | Endpoint de logout OIDC do IdP (browser). Lido em `gateway/.../SecurityConfig.java`.        |
@@ -104,3 +106,4 @@ Consumidas pelos próprios containers de banco na inicialização, não pelos se
 | `POSTGRES_PASSWORD`           | `auth-postgres`        | `auth_1234321`  |                                                    |
 | `MONGO_INITDB_ROOT_USERNAME`  | `mongo-1`              | `user_service`  | Só no nó primário; secundários recebem por replicação. |
 | `MONGO_INITDB_ROOT_PASSWORD`  | `mongo-1`              | `user_1234321`  |                                                    |
+| `WEB_HOST_PORT`               | `interface`            | `5173`          | Porta do **host** da borda pública (mapeia para `:80` do container). Dev usa `5173`; prod tipicamente `80` (C16). |

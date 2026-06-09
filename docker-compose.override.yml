@@ -1,0 +1,47 @@
+# docker-compose.override.yml — deltas APENAS de desenvolvimento.
+#
+# Auto-carregado por `docker compose up` (base + override). Republica no host as portas
+# dos serviços internos que o base (prod-safe) deixou só na rede interna, para facilitar
+# debug local. Cada serviço continua definido uma única vez no docker-compose.yml.
+#
+#   Dev:  docker compose up -d --build                 (base + este override)
+#   Prod: docker compose -f docker-compose.yml up -d    (ignora este override)
+
+services:
+
+  config-lb:
+    ports:
+      - "8888:8888"
+
+  discovery-server-1:
+    ports:
+      - "9091:9091"
+
+  discovery-server-2:
+    ports:
+      - "9092:9092"
+
+  user-service:
+    ports:
+      - "8090:8090"
+
+  # Front-channel OAuth2 direto em dev (browser → localhost:8082). Em prod, exposto
+  # pelo ingress/TLS restrito a /oauth2/authorize, /login e /connect/logout.
+  authorization-server:
+    ports:
+      - "8082:8082"
+
+  zipkin:
+    ports:
+      - "9411:9411"
+
+  prometheus:
+    ports:
+      - "9090:9090"
+
+  grafana:
+    ports:
+      - "3000:3000"
+
+  # interface: não republicado aqui — a porta do host vem de WEB_HOST_PORT no base
+  # (default 5173 em dev). Listas de ports: são concatenadas no merge, não substituídas.

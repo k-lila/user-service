@@ -26,8 +26,8 @@
 | #   | Gap                                                                            | Localização                                                       | Severidade | Status   | Ref |
 | --- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------- | -------- | --- |
 | G1  | Sem TLS/HTTPS (cookies de sessão sem flag `Secure` por consequência)           | Todo o sistema                                                   | Alta       | Aberto   | §3  |
-| G2  | Portas internas publicadas no host → acesso direto contorna o gateway          | `docker-compose.yml` (`8090`, `8082`, `8888`, `9091`)            | Alta       | Aberto   | —   |
-| G3  | config-server sem autenticação serve YAMLs com secrets default                 | config-server + porta `8888` publicada                          | Média      | Aberto   | —   |
+| G2  | Portas internas publicadas no host → acesso direto contorna o gateway          | `docker-compose.yml` (`8090`, `8082`, `8888`, `9091`)            | Alta       | **Resolvido** (C16) | C16 |
+| G3  | config-server sem autenticação serve YAMLs com secrets default                 | config-server + porta `8888` publicada                          | Média      | Curativo (C17) | C17 |
 | G4  | Secrets em claro (Mongo, Postgres, `OAUTH_CLIENT_SECRET`, internal token)      | `docker-compose.yml`                                            | Média      | **Resolvido** (C11) | C11 |
 | G5  | Chave privada JWK **dev** rastreada no classpath                               | `authorization-server/.../keys/app.key`                         | Média      | Aceito   | §1  |
 | G6  | Actuator exposto sem auth na borda pública (`/actuator/prometheus`, `/metrics`) | `gateway/.../SecurityConfig.java` + `gateway.yml`               | Média      | **Resolvido** (C18) | C18 |
@@ -56,12 +56,14 @@
 - **Risco:** o `docker-compose.yml` publica as portas dos serviços internos no host, permitindo chamá-los **sem passar pelo gateway** — o que contorna o rate limiting e o CORS da borda. Ex.: `POST localhost:8090/users/register` ignora o limite de 2 req/s (por IP) aplicado no gateway.
 - **Evidência:** `ports: "8090:8090"` (user-service), `"8082:8082"` (auth-server), `"8888:8888"` (config-server), `"9091:9091"` (discovery).
 - **Mitigação alvo:** em produção, expor **apenas o gateway** (e o auth-server no que o browser precisa do front-channel); manter os demais só na rede interna (sem `ports:`), confiando no isolamento de rede + JWT. O `8082` é exceção parcial: o browser precisa do `/oauth2/authorize` e `/connect/logout` — expor só esses caminhos, não a porta inteira.
+- **Status — Resolvido (C16):** `docker-compose.yml` virou **base prod-safe** (publica só `gateway:8081` e `interface`); todos os serviços internos — incl. o auth-server — ficaram **sem `ports:`**. `docker-compose.override.yml` (auto-carregado) republica as portas em **dev**. Prod roda com `docker compose -f docker-compose.yml up`. A exposição restrita do front-channel do auth-server (`/oauth2/authorize`, `/login`, `/connect/logout`) num hostname dedicado é delegada ao reverse-proxy de TLS/ingress (G1).
 
 ### G3 — config-server sem autenticação
 
 - **Risco:** o config-server não tem Spring Security; qualquer um que alcance a porta lê a configuração de todos os serviços. Os YAMLs trazem os **defaults de secret** embutidos em `${VAR:default}` (ex.: `auth_1234321`, `gateway-secret`), então a resposta divulga credenciais de dev.
 - **Evidência:** ausência de dependência/`SecurityFilterChain` no config-server; `ports: "8888:8888"` no compose; defaults em `config-server/.../config/*.yml`.
 - **Mitigação alvo:** não publicar a porta `8888` em produção; proteger o endpoint (Spring Security Basic/mTLS) e remover os defaults de secret dos YAMLs (forçar injeção por env/secret). Encadeia com G2 e G4.
+- **Status — Curativo (C17):** porta `8888` (`config-lb`) **não publicada** em prod (via C16) e **defaults de secret removidos** dos YAMLs servidos — `AUTH_DB_USER`/`AUTH_DB_PASSWORD` (`authorization-server.yml`) e `OAUTH_CLIENT_SECRET` ×2 (`gateway.yml`) viraram `${VAR}` sem fallback, então a env ausente no cliente derruba a subida (fail-fast). **Pendente:** autenticação no endpoint do config-server (Basic/mTLS) — nesta rodada confia-se no isolamento de rede.
 
 ### G6 — Actuator exposto sem auth na borda
 

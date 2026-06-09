@@ -10,8 +10,8 @@ spring:
   # Estado OAuth (registered client, authorizations, consents) em Postgres — escala horizontal
   datasource:
     url: ${AUTH_DB_URL:jdbc:postgresql://localhost:5432/authdb}
-    username: ${AUTH_DB_USER:auth_service}
-    password: ${AUTH_DB_PASSWORD:auth_1234321}
+    username: ${AUTH_DB_USER}
+    password: ${AUTH_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
   sql:
     init:
