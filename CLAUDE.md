@@ -6,13 +6,13 @@
 - Não adicione tratamento de erro para cenários impossíveis
 - Não crie arquivos sem ser pedido explicitamente
 - Pergunte antes de agir se a tarefa tiver mais de 3 arquivos envolvidos
-- Antes de cada alteração no código, apresente um relatório que aponte claramente: 1) razões dos novos códigos; 2) arquivos a serem criados, se houver; 3) arquivos a serem modificados, se houver
+- Antes de cada alteração no código, apresente um relatório que aponte claramente: 1) razões dos novos códigos e/ou das modificações; 2) arquivos a serem criados, se houver; 3) arquivos a serem modificados, se houver
 
 ---
 
 ## Visão Geral do Projeto
 
-Sistema de microsserviços em Java + Spring para gerenciamento de usuários, pronto para produção. O objetivo central é fornecer uma base sólida de autenticação, registro e controle de acesso, sobre a qual outras camadas de domínio serão adicionadas futuramente.
+Sistema de microsserviços em Java + Spring para gerenciamento de usuários, pronto para produção. O objetivo central é fornecer uma base sólida de autenticação, registro e controle de acesso, sobre a qual outras camadas de domínio serão adicionadas futuramente, ou seja, um blueprint de um sistema de usuários.
 
 O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o cliente OAuth2, o SPA usa sessão por cookie e **não** manuseia JWT.
 
@@ -24,7 +24,8 @@ O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o clie
 - [docs/TESTES.md](docs/TESTES.md) — estratégia de testes
 - [docs/LOGS.md](docs/LOGS.md) — estratégia de logs
 - [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md) — gaps de segurança conhecidos
-- [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) — roadmap e correções (C6–C15)
+- [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) — roadmap e correções (C7–C19)
+- [docs/AVALIACAO.md](docs/AVALIACAO.md) — avaliação técnica do projeto por nível
 
 ---
 
@@ -98,7 +99,7 @@ login-interface (React)
 - **Domínio central:** CRUD de usuários. MongoDB (coleção `users`). Cache Redis: `usersById`, `usersByEmail`, `authByEmail`.
 - **Controllers:**
   - `UserController` — público, via gateway.
-  - `InternalUserController` — `GET /internal/users/email/{email}`, sem autenticação, **não exposto pelo gateway**, só para o auth-server via Feign.
+  - `InternalUserController` — `GET /internal/users/email/{email}`, **não exposto pelo gateway**, só para o auth-server via Feign. Protegido por `X-Internal-Token` (`InternalTokenFilter`); acesso sem o header → 403.
 
 ### gateway (8081)
 
@@ -113,7 +114,7 @@ login-interface (React)
 ### login-interface (5173 dev / 80 Docker)
 
 - **Stack:** React 19 + TypeScript + Vite + TailwindCSS 4.
-- **Estado: BFF implementado** — registro/login/perfil/logout ponta a ponta. ⚠️ Após a migração para sessão no Redis, **reconfirmar o login no browser** (ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) §1, pendência de verificação).
+- **Estado: BFF implementado e confirmado** — registro/login/perfil/logout funcionando ponta a ponta. Token nunca toca o browser; zero `localStorage`.
 - **Por que BFF (e não SPA-com-PKCE):**
   - **Token nunca toca o browser** (fica na sessão do gateway; cookie `HttpOnly`+`Secure`+`SameSite`) → XSS não exfiltra JWT/refresh, eliminando de raiz o gap "JWT em `localStorage`".
   - É a **recomendação do IETF** (BCP OAuth para apps com backend).
@@ -204,7 +205,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 
 ## Estratégia de Testes
 
-Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 32 unitários (Mockito) + 44 controller (`@WebMvcTest`) + 32 integração (Testcontainers Mongo+Redis); front-end sem cobertura hoje.
+Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 32 unitários (Mockito) + 46 controller (`@WebMvcTest` — 41 `UserControllerTest` + 5 `InternalUserControllerTest`) + 32 integração (Testcontainers Mongo+Redis); front-end sem cobertura hoje.
 
 ---
 
@@ -216,10 +217,10 @@ Ver [docs/LOGS.md](docs/LOGS.md). Resumo: SLF4J parametrizado (`{}`), formato em
 
 ## Trabalho Pendente e Correções Necessárias
 
-Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/prioridade + correções C6–C15).
+Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/prioridade + correções C7–C19).
 
 ---
 
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). Resumo: JWT em `localStorage` (resolvido via BFF), Grafana `admin/admin` (baixa), sem HTTPS/TLS (alta) e chave JWK dev commitada (média, aceita — override em prod via `JWK_*`).
+Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 11 gaps mapeados (G1–G11): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10), Grafana `admin/admin` (baixa, G11). JWT em `localStorage` resolvido via BFF.
