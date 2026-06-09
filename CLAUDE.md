@@ -224,3 +224,31 @@ Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/pri
 ## Gaps de Segurança Conhecidos
 
 Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 11 gaps mapeados (G1–G11): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10), Grafana `admin/admin` (baixa, G11). JWT em `localStorage` resolvido via BFF.
+
+---
+
+## Agentes Disponíveis
+
+Subagentes especializados em `.claude/agents/`. Use via Claude Code quando a tarefa se encaixar no escopo de cada um.
+
+| Agente | Arquivo | Quando usar |
+|--------|---------|-------------|
+| `security-auditor` | `.claude/agents/security-auditor.md` | Antes de PRs de hardening; "qual gap (G1–G11) fechar agora?" |
+| `doc-keeper` | `.claude/agents/doc-keeper.md` | Após commits que alteram endpoints, schema, testes ou itens do roadmap |
+| `backlog-driver` | `.claude/agents/backlog-driver.md` | "Execute o próximo item do backlog" ou "implemente C\<n\>" |
+| `error-analyst` | `.claude/agents/error-analyst.md` | Após sessão de mudanças grandes; testes quebrando; auditoria preventiva |
+
+**Fluxo típico entre agentes:**
+
+```
+backlog-driver (implementa C7–C19)
+       ├─► doc-keeper      (atualiza TRABALHO_PENDENTE.md e docs afetados)
+       └─► error-analyst   (verifica se a mudança introduz nova falha)
+
+security-auditor (fecha G1–G11)
+       └─► error-analyst   (valida que o patch não quebra comportamento existente)
+
+error-analyst (auditoria diagnóstica)
+       ├─► backlog-driver  (se o erro tem correção mapeada em C7–C19)
+       └─► security-auditor (se o erro tem implicação de segurança)
+```
