@@ -21,6 +21,8 @@ import authorizationserver.dtos.AuthDTO;
 class AuthorizationServiceTest {
 
     @Mock private IUserClient userClient;
+    // isBlocked() retorna false por padrão (mock) → accountNonLocked=true; não afeta os casos abaixo.
+    @Mock private LoginAttemptService loginAttempts;
     @InjectMocks private AuthorizationService service;
 
     private AuthDTO buildAuthDTO(String email, boolean active, Set<String> roles) {

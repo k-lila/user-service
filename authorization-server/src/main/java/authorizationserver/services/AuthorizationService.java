@@ -13,14 +13,17 @@ import org.springframework.stereotype.Service;
 
 import authorizationserver.clients.IUserClient;
 import authorizationserver.dtos.AuthDTO;
+import authorizationserver.util.ClientIpResolver;
 import authorizationserver.util.LogUtils;
 
 @Service
 public class AuthorizationService implements UserDetailsService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthorizationService.class);
     private final IUserClient userClient;
-    public AuthorizationService(IUserClient userClient) {
+    private final LoginAttemptService loginAttempts;
+    public AuthorizationService(IUserClient userClient, LoginAttemptService loginAttempts) {
         this.userClient = userClient;
+        this.loginAttempts = loginAttempts;
     }
 
     @Override
@@ -42,7 +45,12 @@ public class AuthorizationService implements UserDetailsService {
             throw new UsernameNotFoundException("Usuário inativo: " + email);
         }
         List<SimpleGrantedAuthority> authorities = user.getRoles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList();
-        return new User(user.getEmail(), user.getPasswordHash(), authorities);
+        // Lockout anti-brute-force: se o par (conta, IP) atingiu o limite de falhas,
+        // accountNonLocked=false faz o DaoAuthenticationProvider lançar LockedException
+        // antes de checar a senha. Chaveado pelo email submetido (mesmo valor do listener).
+        boolean accountNonLocked = !loginAttempts.isBlocked(email, ClientIpResolver.currentIp());
+        return new User(user.getEmail(), user.getPasswordHash(),
+                true, true, true, accountNonLocked, authorities);
     }
 
 }

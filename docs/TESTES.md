@@ -13,7 +13,7 @@
 
 ## Estado atual
 
-**38 unitários + 46 de controller + 32 de integração** (Testcontainers), BUILD SUCCESS em ambos os módulos.
+**45 unitários + 46 de controller + 32 de integração** (Testcontainers), BUILD SUCCESS em ambos os módulos.
 
 ## Unitários (Mockito)
 
@@ -24,6 +24,7 @@
 | `AuthenticationService` (user-service)        | `user-service/.../services/AuthenticationServiceTest.java`        | 3      |
 | `AuthorizationService` (authorization-server) | `authorization-server/.../services/AuthorizationServiceTest.java` | 6      |
 | `UserClientFallbackFactory` (authorization-server) | `authorization-server/.../clients/UserClientFallbackFactoryTest.java` | 6      |
+| `LoginAttemptService` (authorization-server)  | `authorization-server/.../services/LoginAttemptServiceTest.java`  | 7      |
 
 ## Controller (`@WebMvcTest`)
 

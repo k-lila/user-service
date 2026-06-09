@@ -34,7 +34,7 @@
 | G7  | CORS duplicado e hardcoded em 3 módulos                                        | `CORSConfig.java` (gateway / user-service / auth-server)         | Média      | Curativo | C12 |
 | G8  | Autorização grosseira: `permissions` hardcoded para todo usuário               | `TokenCustomizerConfig.java`                                    | Média      | **Resolvido** (C8) | C8  |
 | G9  | Validação de senha fraca e dividida (sem complexidade, nullable)               | `UserRequestDTO.java:21` + `RegisterService`                    | Baixa      | Aberto   | C13 |
-| G10 | Sem proteção a brute-force / lockout de conta no login                         | auth-server (form login) + rate limit do gateway                | Média      | Aberto   | —   |
+| G10 | Sem proteção a brute-force / lockout de conta no login                         | auth-server (form login) + rate limit do gateway                | Média      | **Resolvido** (C19) | C19 |
 | G11 | Grafana `admin/admin`                                                          | `docker-compose.yml` (`GF_SECURITY_ADMIN_*`)                    | Baixa      | Curativo (C11) | C11 |
 | G12 | Keyfile MongoDB de dev rastreado no repositório                                | `infra/mongo/keyfile`                                           | Média      | Aceito   | —   |
 | —   | JWT armazenado em `localStorage` no front-end                                  | `login-interface/`                                              | —          | **Resolvido** (BFF) | — |
@@ -80,8 +80,9 @@
 ### G10 — Sem proteção a brute-force no login
 
 - **Risco:** o login no auth-server (form login) não tem lockout nem backoff por conta; a única barreira é o rate limit por IP no gateway (MED, 5 req/s). Um atacante distribuído (vários IPs) ou com baixa taxa por IP pode tentar senhas sem bloqueio de conta.
-- **Evidência:** `authorization-server/.../SecurityConfig.java` usa `formLogin(Customizer.withDefaults())` sem listener de bloqueio; rate limit só por IP no gateway.
-- **Mitigação alvo:** lockout/backoff por conta após N falhas (ex.: contador no Redis, já disponível), CAPTCHA após limite, e alertas. Encaixa com a Auditoria de eventos (TRABALHO_PENDENTE §6).
+- **Evidência (original):** `authorization-server/.../SecurityConfig.java` usa `formLogin(Customizer.withDefaults())` sem listener de bloqueio; rate limit só por IP no gateway.
+- **Mitigação alvo:** lockout/backoff por conta após N falhas (ex.: contador no Redis, já disponível), CAPTCHA após limite, e alertas. Encaixa com a Auditoria de eventos (TRABALHO_PENDENTE §5).
+- **Status — Resolvido (C19):** contador de falhas no Redis por par **(conta, IP)**, janela fixa (TTL 15 min na 1ª falha), lockout após **5 falhas**. `LoginAttemptService`/`LoginAttemptListener` (conta só `AuthenticationFailureBadCredentialsEvent`) + `accountNonLocked=false` no `AuthorizationService` → `LockedException` antes da checagem de senha. Mensagem genérica (sem enumeração); chave `sha256(emailLower|ip)`. CAPTCHA e auditoria de eventos seguem como evolução. **Prod:** exige `server.forward-headers-strategy` + proxy sobrescrevendo `X-Forwarded-For` para o IP por trás do proxy não colapsar (header spoofável se confiado sem sanitização).
 
 ## Controles de segurança já implementados
 

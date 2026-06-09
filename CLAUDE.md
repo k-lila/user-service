@@ -97,6 +97,7 @@ login-interface (React)
   - Cookie renomeado para **`AUTHSESSION`** (`CookieSerializer`) para não colidir com o `SESSION` do gateway (ver _Convenções_).
 - **Credenciais e token:** busca credenciais via Feign (`GET /internal/users/email/{email}`); customiza o JWT em `TokenCustomizerConfig.java` (**arquivo crítico**) com `userID`, `roles`, `permissions`.
 - **Resiliência Feign (C7):** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com instância `user-service`: janela 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout.
+- **Lockout anti-brute-force (C19):** `LoginAttemptService` mantém contador de falhas no Redis por par **(conta, IP)** — chave `sha256(emailLower|ip)`, janela fixa (TTL 15 min na 1ª falha), lockout após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha (mensagem genérica). Prod exige `server.forward-headers-strategy` + proxy sanitizando `X-Forwarded-For`.
 
 ### user-service (8090)
 
@@ -212,7 +213,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 
 ## Estratégia de Testes
 
-Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 38 unitários (Mockito) + 46 controller (`@WebMvcTest` — 41 `UserControllerTest` + 5 `InternalUserControllerTest`) + 32 integração (Testcontainers Mongo+Redis); front-end sem cobertura hoje.
+Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 45 unitários (Mockito) + 46 controller (`@WebMvcTest` — 41 `UserControllerTest` + 5 `InternalUserControllerTest`) + 32 integração (Testcontainers Mongo+Redis); front-end sem cobertura hoje.
 
 ---
 
@@ -230,7 +231,7 @@ Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/pri
 
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 12 gaps mapeados (G1–G12): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4 — **resolvido** via C11, `.env` git-ignored), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6 — **resolvido** via C18, porta de management interna), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8 — **resolvido** via C8, derivadas das roles), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). JWT em `localStorage` resolvido via BFF.
+Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 12 gaps mapeados (G1–G12): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4 — **resolvido** via C11, `.env` git-ignored), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6 — **resolvido** via C18, porta de management interna), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8 — **resolvido** via C8, derivadas das roles), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10 — **resolvido** via C19, lockout por conta+IP no Redis), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). JWT em `localStorage` resolvido via BFF.
 
 ---
 

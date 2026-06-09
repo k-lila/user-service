@@ -56,6 +56,12 @@ internal:
   api:
     token: ${INTERNAL_API_TOKEN}
 
+# Lockout anti-brute-force no login (por par conta+IP, estado no Redis).
+security:
+  lockout:
+    max-attempts: ${LOCKOUT_MAX_ATTEMPTS:5}
+    duration: ${LOCKOUT_DURATION:15m}
+
 eureka:
   client:
     service-url:
