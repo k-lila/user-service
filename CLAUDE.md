@@ -26,6 +26,7 @@ O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o clie
 - [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md) — gaps de segurança conhecidos
 - [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) — roadmap e correções (C7–C19)
 - [docs/AVALIACAO.md](docs/AVALIACAO.md) — avaliação técnica do projeto por nível
+- [docs/CHECKLIST.md](docs/CHECKLIST.md) — checklist de features obrigatórias de um blueprint de sistema de usuários + tabela de números-chave
 
 ---
 
