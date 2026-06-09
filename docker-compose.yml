@@ -68,7 +68,7 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - ./config-lb/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./infra/config-lb/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       config-server-1:
         condition: service_healthy
@@ -146,7 +146,7 @@ services:
       - -c
       - "cp /tmp/keyfile /tmp/mongo.key && chmod 400 /tmp/mongo.key && chown 999:999 /tmp/mongo.key && exec docker-entrypoint.sh mongod --replSet rs0 --bind_ip_all --keyFile /tmp/mongo.key"
     volumes:
-      - ./mongo/keyfile:/tmp/keyfile:ro
+      - ./infra/mongo/keyfile:/tmp/keyfile:ro
       - mongo_1_data:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: user_service
@@ -167,7 +167,7 @@ services:
       - -c
       - "cp /tmp/keyfile /tmp/mongo.key && chmod 400 /tmp/mongo.key && chown 999:999 /tmp/mongo.key && exec docker-entrypoint.sh mongod --replSet rs0 --bind_ip_all --keyFile /tmp/mongo.key"
     volumes:
-      - ./mongo/keyfile:/tmp/keyfile:ro
+      - ./infra/mongo/keyfile:/tmp/keyfile:ro
       - mongo_2_data:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
@@ -185,7 +185,7 @@ services:
       - -c
       - "cp /tmp/keyfile /tmp/mongo.key && chmod 400 /tmp/mongo.key && chown 999:999 /tmp/mongo.key && exec docker-entrypoint.sh mongod --replSet rs0 --bind_ip_all --keyFile /tmp/mongo.key"
     volumes:
-      - ./mongo/keyfile:/tmp/keyfile:ro
+      - ./infra/mongo/keyfile:/tmp/keyfile:ro
       - mongo_3_data:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
@@ -277,7 +277,7 @@ services:
       - user-service-net
     command: sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"
     volumes:
-      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+      - ./infra/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
     depends_on:
       redis-1:
         condition: service_healthy
@@ -298,7 +298,7 @@ services:
       - user-service-net
     command: sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"
     volumes:
-      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+      - ./infra/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
     depends_on:
       redis-1:
         condition: service_healthy
@@ -319,7 +319,7 @@ services:
       - user-service-net
     command: sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"
     volumes:
-      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+      - ./infra/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
     depends_on:
       redis-1:
         condition: service_healthy
@@ -521,7 +521,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
     depends_on:
       - gateway
       - user-service
@@ -536,8 +536,8 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
     environment:

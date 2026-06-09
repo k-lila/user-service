@@ -36,7 +36,7 @@
 | G9  | Validação de senha fraca e dividida (sem complexidade, nullable)               | `UserRequestDTO.java:21` + `RegisterService`                    | Baixa      | Aberto   | C13 |
 | G10 | Sem proteção a brute-force / lockout de conta no login                         | auth-server (form login) + rate limit do gateway                | Média      | Aberto   | —   |
 | G11 | Grafana `admin/admin`                                                          | `docker-compose.yml` (`GF_SECURITY_ADMIN_*`)                    | Baixa      | Aberto   | C11 |
-| G12 | Keyfile MongoDB de dev rastreado no repositório                                | `mongo/keyfile`                                                 | Média      | Aceito   | —   |
+| G12 | Keyfile MongoDB de dev rastreado no repositório                                | `infra/mongo/keyfile`                                           | Média      | Aceito   | —   |
 | —   | JWT armazenado em `localStorage` no front-end                                  | `login-interface/`                                              | —          | **Resolvido** (BFF) | — |
 
 **Notas dos gaps diretos (sem subseção):**
@@ -47,7 +47,7 @@
 - **G7 — CORS:** `CorsFilter`/`CorsConfigurationSource` repetido nos 3 módulos com origens fixas; já causou `403 Invalid CORS request` + `vary` duplicado. Curativo: `localhost:5173` na allowlist do user-service. Alvo: CORS só na borda (gateway) e configurável por ambiente. Ver C12.
 - **G9 — Senha:** `@Size(min=8)` é nullable (sem `@NotBlank`) e a ausência é checada manualmente no `RegisterService`; sem regra de complexidade. Unificar na validação declarativa. Ver C13.
 - **G11 — Grafana:** trocar `admin/admin` e proteger o stack de observabilidade (Prometheus `:9090` e Grafana `:3000` hoje sem auth). Ver C11.
-- **G12 — Keyfile MongoDB:** `mongo/keyfile` (string base64 aleatória) está rastreado no repositório para permitir o `docker compose up` sem setup externo. **Aceito (Opção A)** — padrão idêntico ao G5 (chave JWK dev no classpath); em produção, montar o keyfile via secret externo e remover o arquivo do repo (ou adicionar ao `.gitignore`).
+- **G12 — Keyfile MongoDB:** `infra/mongo/keyfile` (string base64 aleatória) está rastreado no repositório para permitir o `docker compose up` sem setup externo. **Aceito (Opção A)** — padrão idêntico ao G5 (chave JWK dev no classpath); em produção, montar o keyfile via secret externo e remover o arquivo do repo (ou adicionar ao `.gitignore`).
 
 ## Detalhamento dos gaps
 
