@@ -33,7 +33,7 @@
 
 - [x] RBAC com pelo menos dois níveis: usuário comum e administrador
 - [x] Autorização por endpoint — não apenas autenticação (`@PreAuthorize` ou equivalente)
-- [~] Claims de autorização no token: roles + permissions derivadas de roles, nunca hardcoded _(roles ✓; `permissions` hardcoded `["users.read","users.write"]` para todos os usuários — G8/C8)_
+- [x] Claims de autorização no token: roles + permissions derivadas de roles, nunca hardcoded _(C8 — `permissions` derivadas das roles: `USER`→`users.read`/`users.write`, `ADMIN`+`users.delete`)_
 - [x] Endpoint de administração separado com controle de acesso próprio
 - [x] Canal interno entre serviços isolado da borda pública e autenticado (shared secret ou mTLS)
 
@@ -48,14 +48,14 @@
 ## 4. Segurança Operacional
 
 - [ ] TLS/HTTPS em todas as comunicações externas _(G1 — aberto)_
-- [ ] Segredos fora do repositório: variáveis de ambiente ou secret manager, nunca hardcoded _(G4/C11 — credenciais em claro no `docker-compose.yml`)_
+- [x] Segredos fora do repositório: variáveis de ambiente ou secret manager, nunca hardcoded _(C11 — Mongo/Postgres/`OAUTH_CLIENT_SECRET`/`INTERNAL_API_TOKEN` em `.env` git-ignored; C17 removeu os defaults de secret dos YAMLs)_
 - [x] Rate limiting por tier: por IP em endpoints públicos e por usuário em endpoints autenticados
 - [x] Proteção CSRF nos endpoints de mutação acessados pelo browser
 - [~] Política de CORS definida na borda e configurável por ambiente, não hardcoded _(G7/C12 — CORS duplicado em 3 módulos com origens fixas; curativo aplicado, solução completa pendente)_
-- [ ] Proteção anti-brute-force com lockout/backoff por conta no login _(G10/C19 — aberto; só rate limit por IP no gateway)_
+- [x] Proteção anti-brute-force com lockout/backoff por conta no login _(C19 — lockout por (conta, IP) no Redis, 5 falhas; CAPTCHA/auditoria como evolução)_
 - [x] Comparação de tokens e secrets em tempo constante (sem vulnerabilidade de timing)
 - [x] Mascaramento de PII em logs — e-mails e dados pessoais nunca em claro
-- [ ] Endpoints de métricas e actuator restritos na borda pública _(G6/C18 — `/actuator/**` é `permitAll` no gateway)_
+- [x] Endpoints de métricas e actuator restritos na borda pública _(C18 — actuator do gateway na porta de management interna `8181`, não publicada; C16 fecha métricas internas em prod)_
 
 ## 5. Escalabilidade Horizontal
 
