@@ -45,19 +45,19 @@ Ordem sugerida: **1 → 2 → 3 → 4 → 5** (a evolução de domínio vem depo
 | —   | Pipeline de CI                                   | Média      | M       | —        |
 | C15 | Higiene cosmética                                | Baixa      | P       | —        |
 
-> Já adequados para escala (não há trabalho pendente): chave JWK persistente (`kid` fixo), estado OAuth em Postgres (JDBC), sessão no Redis (Spring Session), validação JWT stateless, rate limiter e caches no Redis, healthchecks de container + `depends_on` no `docker-compose.yml`.
+> Já adequados para escala (não há trabalho pendente): chave JWK persistente (`kid` fixo), estado OAuth em Postgres (JDBC), sessão no Redis (Spring Session), validação JWT stateless, rate limiter e caches no Redis, healthchecks de container + `depends_on` no `docker-compose.yml`, Eureka HA (peer replication), config-server HA (nginx LB), MongoDB replica set (`rs0`), Redis Sentinel, graceful shutdown (`server.shutdown=graceful`) + readiness/liveness probes, circuit breaker Resilience4j (auth-server → user-service via `UserClientFallbackFactory`).
 
 ## 1. Resiliência e escalabilidade
 
-- [ ] **C7 — Circuit breaker na chamada Feign** (auth-server → user-service). Hoje a indisponibilidade do user-service derruba o login (`IUserClient` sem fallback). · **Prioridade: Alta · Esforço: M**
+- [x] **C7 — Circuit breaker na chamada Feign** (auth-server → user-service). Hoje a indisponibilidade do user-service derruba o login (`IUserClient` sem fallback). · **Prioridade: Alta · Esforço: M**
   - `authorization-server/pom.xml` — adicionar `spring-cloud-starter-circuitbreaker-resilience4j`.
   - Criar `clients/UserClientFallbackFactory.java` — `FallbackFactory<IUserClient>` que lança `UsernameNotFoundException` ao acionar o fallback.
   - `clients/IUserClient.java` — adicionar `fallbackFactory = UserClientFallbackFactory.class` no `@FeignClient`.
   - `config-server/.../authorization-server.yml` — `spring.cloud.openfeign.circuitbreaker.enabled=true` + bloco `resilience4j.circuitbreaker.instances.user-service` (`slidingWindowSize`, `failureRateThreshold`, `waitDurationInOpenState`, `permittedNumberOfCallsInHalfOpenState`).
 
-- [ ] **Deploy rolling sem downtime** — `server.shutdown=graceful` + readiness/liveness probes (actuator) em todos os serviços. _(O compose já tem healthchecks de container + `depends_on: service_healthy`; falta o nível de aplicação.)_ · **Prioridade: Média · Esforço: M**
+- [x] **Deploy rolling sem downtime** — `server.shutdown=graceful` + readiness/liveness probes (actuator) em todos os serviços. _(O compose já tem healthchecks de container + `depends_on: service_healthy`; falta o nível de aplicação.)_ · **Prioridade: Média · Esforço: M**
 
-- [ ] **Eliminar SPOFs (infra)** — `discovery-server` em peer replication (Eureka HA), `config-server` replicado, MongoDB replica set e Redis Sentinel/Cluster. · **Prioridade: Média · Esforço: G**
+- [x] **Eliminar SPOFs (infra)** — `discovery-server` em peer replication (Eureka HA), `config-server` replicado, MongoDB replica set e Redis Sentinel/Cluster. · **Prioridade: Média · Esforço: G**
 
 ## 2. Hardening de segurança
 
@@ -89,7 +89,8 @@ Ordem sugerida: **1 → 2 → 3 → 4 → 5** (a evolução de domínio vem depo
 
 - [ ] **C9 — Erros padronizados (RFC 7807 / `ProblemDetail`)**. Hoje o `GlobalExceptionHandler` devolve `String` crua e o `@Valid` sai no formato default do Spring (inconsistente). Unificar 400/404/409/500 + validação num único formato `ProblemDetail`. · **Prioridade: Média · Esforço: M**
 
-- [ ] **C10 — Cobertura de testes desigual**. Gateway só `contextLoads` (e não-hermético), auth-server só `AuthorizationServiceTest`, front-end zero. · **Prioridade: Média · Esforço: M**
+- [ ] **C10 — Cobertura de testes desigual**. Gateway só `contextLoads` (e não-hermético), auth-server com `AuthorizationServiceTest` + `UserClientFallbackFactoryTest` (adicionado com C7), front-end zero. · **Prioridade: Média · Esforço: M**
+  - **Circuit breaker — teste de integração pendente:** `UserClientFallbackFactory` está coberta por unitários, mas falta um teste que simule o `user-service` fora do ar de ponta a ponta. Abordagem recomendada: WireMock (stub do endpoint `/internal/users/email/{email}` retornando 500 ou timeout) + Resilience4j em modo de teste (`slidingWindowSize` mínimo para abrir o circuito rapidamente) + assert que o fallback lança `UsernameNotFoundException` sem timeout. Encaixa no mesmo esforço de C10 quando a infraestrutura de testes do auth-server for montada.
   - **Gateway/auth-server:** roteamento + rate-limit (gateway); `TokenCustomizerConfig` / `JWKConfig` / `SecurityConfig` (auth-server).
   - **`contextLoads` hermético:** hoje o `@SpringBootTest` faz **OIDC discovery real** (via `issuer-uri` do config-server) e falha fora do cenário com auth-server alcançável (ex.: Docker reporta issuer `authorization-server:8082`, teste pede `localhost:8082`). Isolar com `gateway/src/test/resources/application.yml` (sem import do config-server; provider explícito ou autoconfig OAuth2 desabilitada no teste).
   - **Front-end (`login-interface`)** — zero cobertura (só o typecheck do `npm run build`).

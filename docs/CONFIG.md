@@ -25,8 +25,10 @@
 | Variável            | Serviço(s)             | Default dev                     | Observação                                                            |
 | ------------------- | ---------------------- | ------------------------------- | -------------------------------------------------------------------- |
 | `SERVER_PORT`       | todos                  | por serviço¹                    | Porta HTTP do serviço.                                                |
-| `CONFIG_SERVER_URL` | todos (exceto config)  | —                               | `spring.config.import=optional:configserver:...`. Compose: `http://config-server:8888`. |
-| `EUREKA_URI`        | todos                  | `http://localhost:9091/eureka`  | `defaultZone` do Eureka.                                              |
+| `CONFIG_SERVER_URL` | todos (exceto config)  | —                               | `spring.config.import=optional:configserver:...`. Compose: `http://config-lb:8888` (nginx LB na frente de `config-server-1` e `config-server-2`). |
+| `EUREKA_URI`        | todos (exceto discovery) | `http://localhost:9091/eureka` | `defaultZone` do Eureka. Compose: lista CSV com ambas as instâncias HA (`http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka`). |
+| `EUREKA_PEER_URL`   | discovery-server       | `http://localhost:9091/eureka`  | URL do **peer** Eureka (a outra instância). Cada nó aponta para o outro. |
+| `EUREKA_HOSTNAME`   | discovery-server       | `localhost`                     | Hostname que a instância anuncia ao peer. Compose: `discovery-server-1` / `discovery-server-2`. |
 
 > ¹ Defaults de porta: gateway `8081`, authorization-server `8082`, user-service `8090`, discovery-server `9091`, config-server `8888`.
 
@@ -34,10 +36,10 @@
 
 | Variável            | Serviço(s)                          | Default dev                                  | Observação                                                       |
 | ------------------- | ----------------------------------- | -------------------------------------------- | ---------------------------------------------------------------- |
-| `MONGODB_URI`       | user-service                        | — (obrigatória)                              | Compose: `mongodb://user_service:...@user-mongo:27017/...`.      |
-| `MONGODB_DATABASE`  | user-service                        | `user-db`                                    | Base de dados de usuários.                                        |
-| `REDIS_HOST`        | user-service · gateway · auth-server | `localhost`                                  | Cache + rate limit (user), rate limit + **sessão** (gw/auth).    |
-| `REDIS_PORT`        | user-service · gateway · auth-server | `6379`                                       |                                                                  |
+| `MONGODB_URI`           | user-service                        | — (obrigatória)      | Compose: URI de replica set `mongodb://user_service:...@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin`. |
+| `MONGODB_DATABASE`      | user-service                        | `user-db`            | Base de dados de usuários.                                                          |
+| `REDIS_SENTINEL_MASTER` | user-service · gateway · auth-server | `mymaster`          | Nome do master monitorado pelos Sentinels. Substitui `REDIS_HOST`/`REDIS_PORT`.     |
+| `REDIS_SENTINEL_NODES`  | user-service · gateway · auth-server | `redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379` | Lista CSV de endereços dos processos Sentinel. |
 | `AUTH_DB_URL`       | authorization-server                | `jdbc:postgresql://localhost:5432/authdb`    | Datasource do Postgres que guarda o estado OAuth.                |
 | `AUTH_DB_USER`      | authorization-server                | `auth_service`                               |                                                                  |
 | `AUTH_DB_PASSWORD`  | authorization-server                | `auth_1234321`                               | Default dev; sobrescrever em produção.                           |
@@ -95,10 +97,10 @@
 
 Consumidas pelos próprios containers de banco na inicialização, não pelos serviços Spring:
 
-| Variável                      | Container       | Compose         |
-| ----------------------------- | --------------- | --------------- |
-| `POSTGRES_DB`                 | `auth-postgres` | `authdb`        |
-| `POSTGRES_USER`               | `auth-postgres` | `auth_service`  |
-| `POSTGRES_PASSWORD`           | `auth-postgres` | `auth_1234321`  |
-| `MONGO_INITDB_ROOT_USERNAME`  | `user-mongo`    | `user_service`  |
-| `MONGO_INITDB_ROOT_PASSWORD`  | `user-mongo`    | `user_1234321`  |
+| Variável                      | Container              | Compose         | Observação                                         |
+| ----------------------------- | ---------------------- | --------------- | -------------------------------------------------- |
+| `POSTGRES_DB`                 | `auth-postgres`        | `authdb`        |                                                    |
+| `POSTGRES_USER`               | `auth-postgres`        | `auth_service`  |                                                    |
+| `POSTGRES_PASSWORD`           | `auth-postgres`        | `auth_1234321`  |                                                    |
+| `MONGO_INITDB_ROOT_USERNAME`  | `mongo-1`              | `user_service`  | Só no nó primário; secundários recebem por replicação. |
+| `MONGO_INITDB_ROOT_PASSWORD`  | `mongo-1`              | `user_1234321`  |                                                    |

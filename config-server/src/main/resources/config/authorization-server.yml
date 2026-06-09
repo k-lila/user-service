@@ -1,7 +1,10 @@
 server:
   port: ${SERVER_PORT:8082}
+  shutdown: graceful
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   application:
     name: authorization-server
   # Estado OAuth (registered client, authorizations, consents) em Postgres — escala horizontal
@@ -21,10 +24,18 @@ spring:
   # Sessão HTTP (login/consent) compartilhada via Redis — escala horizontal
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      sentinel:
+        master: ${REDIS_SENTINEL_MASTER:mymaster}
+        nodes: ${REDIS_SENTINEL_NODES:redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379}
   session:
     store-type: redis
+
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+        group:
+          enabled: true
 
 auth:
   issuer: ${AUTH_ISSUER:http://localhost:8082}
@@ -57,6 +68,20 @@ logging:
   pattern:
     level: "%5p [${spring.application.name:},traceId=%X{traceId:-},spanId=%X{spanId:-}]"
 
+resilience4j:
+  circuitbreaker:
+    instances:
+      user-service:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+  timelimiter:
+    instances:
+      user-service:
+        timeoutDuration: 3s
+
 management:
   tracing:
     enabled: true
@@ -74,7 +99,15 @@ management:
       exposure:
         include: health, info, metrics, prometheus
   endpoint:
+    health:
+      probes:
+        enabled: true
     prometheus:
+      enabled: true
+  health:
+    readiness-state:
+      enabled: true
+    liveness-state:
       enabled: true
   metrics:
     tags:

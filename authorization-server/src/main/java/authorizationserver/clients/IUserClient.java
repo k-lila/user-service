@@ -6,7 +6,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 
 import authorizationserver.dtos.AuthDTO;
 
-@FeignClient(name = "user-service")
+@FeignClient(name = "user-service", fallbackFactory = UserClientFallbackFactory.class)
 public interface IUserClient {
     @GetMapping("/internal/users/email/{email}")
     AuthDTO getUserByEmail(@PathVariable("email") String email);

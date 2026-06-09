@@ -1,13 +1,17 @@
 server:
   port: ${SERVER_PORT:8081}
+  shutdown: graceful
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   application:
     name: gateway
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      sentinel:
+        master: ${REDIS_SENTINEL_MASTER:mymaster}
+        nodes: ${REDIS_SENTINEL_NODES:redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379}
 
   cloud:
     config:
@@ -84,7 +88,15 @@ management:
   endpoint:
     gateway:
       enabled: true
+    health:
+      probes:
+        enabled: true
     prometheus:
+      enabled: true
+  health:
+    readiness-state:
+      enabled: true
+    liveness-state:
       enabled: true
 
   endpoints:

@@ -108,6 +108,12 @@
 	      <scope>test</scope>
 	    </dependency>
 
+	    <!-- Circuit breaker para chamada Feign ao user-service -->
+	    <dependency>
+	      <groupId>org.springframework.cloud</groupId>
+	      <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+	    </dependency>
+
 	    <!-- Estado OAuth persistido em Postgres (escala horizontal) -->
 	    <dependency>
 	      <groupId>org.springframework.boot</groupId>

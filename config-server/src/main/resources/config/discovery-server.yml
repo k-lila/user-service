@@ -1,7 +1,10 @@
 server:
   port: ${SERVER_PORT:9091}
+  shutdown: graceful
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   application:
     name: discovery-server
   cloud:
@@ -15,10 +18,12 @@ spring:
 
 eureka:
   client:
-    register-with-eureka: false
-    fetch-registry: false
+    register-with-eureka: true
+    fetch-registry: true
     service-url:
-      defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
+      defaultZone: ${EUREKA_PEER_URL:http://localhost:9091/eureka}
+  instance:
+    hostname: ${EUREKA_HOSTNAME:localhost}
   server:
     wait-time-in-ms-when-sync-empty: 3000
 
@@ -28,7 +33,15 @@ management:
       exposure:
         include: health, info, metrics, prometheus
   endpoint:
+    health:
+      probes:
+        enabled: true
     prometheus:
+      enabled: true
+  health:
+    readiness-state:
+      enabled: true
+    liveness-state:
       enabled: true
   metrics:
     tags:

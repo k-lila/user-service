@@ -42,16 +42,16 @@ login-interface (React)
     └── /users/**        → user-service
         │
         ├── authorization-server :8082
-        │       ├── chama user-service via Feign (endpoint interno)
+        │       ├── chama user-service via Feign (circuit breaker Resilience4j + UserClientFallbackFactory)
         │       ├── PostgreSQL (auth-postgres :5432 — estado OAuth: client/authorizations/consents)
-        │       └── Redis (sessão de login/consent)
+        │       └── Redis Sentinel (sessão de login/consent)
         │
         ├── user-service :8090
-        │       ├── MongoDB (persistência)
-        │       └── Redis (cache + rate limiting)
+        │       ├── MongoDB replica set rs0 (mongo-1/2/3 — persistência)
+        │       └── Redis Sentinel (cache + rate limiting)
         │
-        ├── discovery-server :9091  (Eureka)
-        ├── config-server :8888     (Spring Cloud Config)
+        ├── discovery-server-1 :9091 · discovery-server-2 :9092  (Eureka HA — peer replication)
+        ├── config-lb :8888 → config-server-1 · config-server-2  (Config HA — nginx upstream)
         ├── zipkin :9411 · prometheus :9090 · grafana :3000
 ```
 
@@ -72,12 +72,14 @@ login-interface (React)
 
 - **Config centralizada** via `classpath:/config`; os demais serviços importam com `spring.config.import=optional:configserver:${CONFIG_SERVER_URL}`.
 - Arquivos em `config-server/.../config/{servico}.yml`.
-- **Deve subir primeiro** — todos os demais dependem dele.
+- **HA:** duas instâncias (`config-server-1`, `config-server-2`) atrás de `config-lb` (nginx). `CONFIG_SERVER_URL` aponta para `config-lb:8888`. Stateless — qualquer instância serve a mesma config.
+- **Deve subir primeiro** — todos os demais dependem dele via `config-lb`.
 
-### discovery-server (9091)
+### discovery-server (9091 / 9092)
 
-- **Netflix Eureka** — registra e descobre serviços; ele próprio **não** se registra.
-- Sobe logo após o config-server.
+- **Netflix Eureka HA** — dois nós em peer replication (`discovery-server-1:9091`, `discovery-server-2:9092`); cada instância se registra na outra via `EUREKA_PEER_URL`.
+- `EUREKA_URI` nos demais serviços lista ambas as instâncias (CSV).
+- Sobe após `config-lb`.
 
 ### authorization-server (8082)
 
@@ -93,6 +95,7 @@ login-interface (React)
   - `@EnableRedisHttpSession` no `SecurityConfig` — exige anotação explícita no Spring Boot 4.0.
   - Cookie renomeado para **`AUTHSESSION`** (`CookieSerializer`) para não colidir com o `SESSION` do gateway (ver _Convenções_).
 - **Credenciais e token:** busca credenciais via Feign (`GET /internal/users/email/{email}`); customiza o JWT em `TokenCustomizerConfig.java` (**arquivo crítico**) com `userID`, `roles`, `permissions`.
+- **Resiliência Feign (C7):** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com instância `user-service`: janela 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout.
 
 ### user-service (8090)
 
@@ -165,6 +168,9 @@ login-interface (React)
   - Em dev/Docker ambos compartilham `localhost` e os cookies **ignoram a porta**; com o mesmo nome, o cookie do auth-server sobrescreveria o do gateway no salto front-channel → o callback lê a sessão errada → `authorization_request_not_found`.
   - Nomes distintos evitam a colisão (em prod, domínios separados também resolveriam).
 - **Spring Session exige habilitação explícita no Spring Boot 4.0:** `@EnableRedisWebSession` (gateway, reativo) e `@EnableRedisHttpSession` (auth-server, servlet) — a autoconfig não dispara só pela dependência.
+- **Arquivos de configuração mutáveis em containers (Redis Sentinel e MongoDB):** ambos precisam gravar no arquivo de config em runtime, o que impede o mount simples com `:ro`.
+  - **Redis Sentinel** regrava o arquivo para persistir estado (master atual, sentinel IDs). Fix: `command: sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"` — copia o mount `:ro` para `/tmp` gravável antes de iniciar.
+  - **MongoDB keyfile** precisa de `chmod 400` e `chown 999` antes que o mongod o leia. Fix: `entrypoint:` override (não `command:`) que copia para `/tmp/mongo.key`, ajusta permissões e chama `exec docker-entrypoint.sh mongod`. Usar `command:` em vez de `entrypoint:` contornaria o `docker-entrypoint.sh` original e `MONGO_INITDB_ROOT_USERNAME` nunca seria processado.
 
 ---
 
@@ -205,7 +211,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 
 ## Estratégia de Testes
 
-Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 32 unitários (Mockito) + 46 controller (`@WebMvcTest` — 41 `UserControllerTest` + 5 `InternalUserControllerTest`) + 32 integração (Testcontainers Mongo+Redis); front-end sem cobertura hoje.
+Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 38 unitários (Mockito) + 46 controller (`@WebMvcTest` — 41 `UserControllerTest` + 5 `InternalUserControllerTest`) + 32 integração (Testcontainers Mongo+Redis); front-end sem cobertura hoje.
 
 ---
 
@@ -223,7 +229,7 @@ Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/pri
 
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 11 gaps mapeados (G1–G11): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10), Grafana `admin/admin` (baixa, G11). JWT em `localStorage` resolvido via BFF.
+Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 12 gaps mapeados (G1–G12): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10), Grafana `admin/admin` (baixa, G11), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). JWT em `localStorage` resolvido via BFF.
 
 ---
 
@@ -233,7 +239,7 @@ Subagentes especializados em `.claude/agents/`. Use via Claude Code quando a tar
 
 | Agente | Arquivo | Quando usar |
 |--------|---------|-------------|
-| `security-auditor` | `.claude/agents/security-auditor.md` | Antes de PRs de hardening; "qual gap (G1–G11) fechar agora?" |
+| `security-auditor` | `.claude/agents/security-auditor.md` | Antes de PRs de hardening; "qual gap (G1–G12) fechar agora?" |
 | `doc-keeper` | `.claude/agents/doc-keeper.md` | Após commits que alteram endpoints, schema, testes ou itens do roadmap |
 | `backlog-driver` | `.claude/agents/backlog-driver.md` | "Execute o próximo item do backlog" ou "implemente C\<n\>" |
 | `error-analyst` | `.claude/agents/error-analyst.md` | Após sessão de mudanças grandes; testes quebrando; auditoria preventiva |
