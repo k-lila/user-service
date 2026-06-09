@@ -149,8 +149,8 @@ services:
       - ./infra/mongo/keyfile:/tmp/keyfile:ro
       - mongo_1_data:/data/db
     environment:
-      MONGO_INITDB_ROOT_USERNAME: user_service
-      MONGO_INITDB_ROOT_PASSWORD: user_1234321
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
       interval: 5s
@@ -207,7 +207,7 @@ services:
         condition: service_healthy
     command: >
       mongosh --host mongo-1:27017
-              -u user_service -p user_1234321
+              -u ${MONGO_USER} -p ${MONGO_PASSWORD}
               --authenticationDatabase admin
               --eval "try {
                 rs.initiate({
@@ -346,10 +346,10 @@ services:
       - auth_db_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: authdb
-      POSTGRES_USER: auth_service
-      POSTGRES_PASSWORD: auth_1234321
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U auth_service -d authdb"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d authdb"]
       interval: 5s
       timeout: 3s
       retries: 25
@@ -388,11 +388,11 @@ services:
       OAUTH_GATEWAY_CLIENT: http://localhost:8081/login/oauth2/code/gateway-client
       OAUTH_SWAGGER_REDIRECT_URL: http://localhost:8081/swagger-ui/oauth2-redirect.html
       AUTH_ISSUER: http://authorization-server:8082
-      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-gateway-secret}
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-internal-dev-token}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
       AUTH_DB_URL: jdbc:postgresql://auth-postgres:5432/authdb
-      AUTH_DB_USER: auth_service
-      AUTH_DB_PASSWORD: auth_1234321
+      AUTH_DB_USER: ${POSTGRES_USER}
+      AUTH_DB_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_SENTINEL_MASTER: mymaster
       REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
     healthcheck:
@@ -435,7 +435,7 @@ services:
       CONFIG_SERVER_URL: http://config-lb:8888
       EUREKA_URI: http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka
       MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
-      MONGODB_URI: mongodb://user_service:user_1234321@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin
+      MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin
       MONGODB_DATABASE: user-db
       AUTH_ISSUER_URI: http://authorization-server:8082
       AUTH_URL: http://localhost:8082/oauth2/authorize
@@ -443,7 +443,7 @@ services:
       API_BASE_URL: http://localhost:8081
       REDIS_SENTINEL_MASTER: mymaster
       REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-internal-dev-token}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
       interval: 5s
@@ -484,7 +484,7 @@ services:
       OAUTH_AUTHORIZATION_URI: http://localhost:8082/oauth2/authorize
       OAUTH2SWAGGER_REDIRECT_URL: http://localhost:8081/swagger-ui/oauth2-redirect.html
       OAUTH_CLIENT_ID: gateway-client
-      OAUTH_CLIENT_SECRET: gateway-secret
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       OAUTH_REDIRECT_URI: http://localhost:5173/login/oauth2/code/gateway-client
       AUTH_URL: http://localhost:8082/oauth2/authorize
       AUTH_TOKEN: http://localhost:8082/oauth2/token
@@ -492,7 +492,8 @@ services:
       REDIS_SENTINEL_MASTER: mymaster
       REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      # Actuator do gateway vive na porta de management interna (8181), não na 8081 pública.
+      test: ["CMD", "curl", "-f", "http://localhost:8181/actuator/health"]
       interval: 5s
       timeout: 3s
       retries: 25
@@ -541,6 +542,6 @@ services:
     depends_on:
       - prometheus
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     restart: unless-stopped

@@ -74,6 +74,12 @@ springdoc:
     oauth2-redirect-url: ${OAUTH2SWAGGER_REDIRECT_URL:http://localhost:8081/swagger-ui/oauth2-redirect.html}
 
 management:
+  # Actuator numa porta de management interna (não publicada no host): o ponto de
+  # entrada externo (8081) deixa de servir /actuator/**, fechando o acesso anônimo a
+  # /prometheus e /metrics na borda. O Prometheus continua raspando por esta porta na
+  # rede interna (ver infra/prometheus.yml → gateway:8181).
+  server:
+    port: 8181
   tracing:
     enabled: true
     propagation:

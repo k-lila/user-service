@@ -230,7 +230,7 @@ Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/pri
 
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 12 gaps mapeados (G1–G12): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10), Grafana `admin/admin` (baixa, G11), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). JWT em `localStorage` resolvido via BFF.
+Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). 12 gaps mapeados (G1–G12): sem TLS/HTTPS (alta, G1), portas internas publicadas (alta, G2), config-server sem auth (média, G3), secrets em claro no compose (média, G4 — **resolvido** via C11, `.env` git-ignored), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), actuator sem auth na borda (média, G6 — **resolvido** via C18, porta de management interna), CORS duplicado e hardcoded (média, G7 — curativo aplicado), `permissions` hardcoded (média, G8 — **resolvido** via C8, derivadas das roles), validação de senha fraca (baixa, G9), sem brute-force/lockout (média, G10), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). JWT em `localStorage` resolvido via BFF.
 
 ---
 

@@ -10,4 +10,4 @@ scrape_configs:
           - discovery-server:9091
           - authorization-server:8082
           - user-service:8090
-          - gateway:8081
+          - gateway:8181

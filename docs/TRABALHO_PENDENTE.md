@@ -65,7 +65,7 @@ Ordem sugerida: **1 → 2 → 3 → 4 → 5** (a evolução de domínio vem depo
 
 - [ ] **C16 — Não publicar portas internas em produção** (ref **G2**). Em prod, expor **só o gateway**; remover os `ports:` dos serviços internos no compose de produção (manter na rede interna). Exceção: o auth-server precisa que o browser alcance `/oauth2/authorize` e `/connect/logout` (front-channel) — expor só esses caminhos, não a porta inteira. · **Prioridade: Alta · Esforço: M**
 
-- [ ] **C11 — Secrets fora do `docker-compose.yml`** (ref **G4**, **G11**). Mover Mongo (`user_service:user_1234321`), Postgres (`auth_service:auth_1234321`), `OAUTH_CLIENT_SECRET`, `INTERNAL_API_TOKEN` e Grafana (`admin/admin`) para `.env` git-ignored / secret manager. · **Prioridade: Média · Esforço: P**
+- [x] **C11 — Secrets fora do `docker-compose.yml`** (ref **G4**, **G11**). Mongo (`MONGO_USER`/`MONGO_PASSWORD`), Postgres (`POSTGRES_USER`/`POSTGRES_PASSWORD`), `OAUTH_CLIENT_SECRET` (incl. o que estava hardcoded no gateway), `INTERNAL_API_TOKEN` e Grafana movidos para `.env` git-ignored, referenciados por `${VAR}` **sem default** (falta de `.env` derruba a subida). Template versionado em `.env.example` (exceção `!.env.example` no `.gitignore`). · **Prioridade: Média · Esforço: P**
 
 - [ ] **C12 — CORS na borda + configurável** (ref **G7**). Hoje há `CORSConfig` em 3 módulos com origens hardcoded; o gateway repassa o `Origin` ao user-service, cuja allowlist já rejeitou `localhost:5173` → 403 + `vary` duplicado. **Estado:** curativo (Opção A — `5173` na allowlist do user-service). · **Prioridade: Média · Esforço: M**
   - **Princípio:** CORS só importa na borda que o browser toca (gateway). Em serviço interno não agrega segurança (o guard real é JWT + isolamento de rede). Pré-condição: confirmar que o user-service **nunca** é chamado direto pelo browser; se for, usar Opção B (gateway remove o header `Origin` em `/users/**` via `RemoveRequestHeader=Origin`).
@@ -77,11 +77,11 @@ Ordem sugerida: **1 → 2 → 3 → 4 → 5** (a evolução de domínio vem depo
 
 - [ ] **C17 — Proteger/segregar o config-server** (ref **G3**). Não publicar a porta `8888` em prod; proteger o endpoint (Spring Security Basic/mTLS) e **remover os defaults de secret** dos YAMLs (forçar injeção por env). · **Prioridade: Média · Esforço: M**
 
-- [ ] **C18 — Restringir actuator na borda pública** (ref **G6**). Reduzir `management.endpoints.web.exposure.include` no gateway (idealmente só `health`) e exigir auth para `metrics`/`prometheus`, ou raspar por porta/rede de management interna não publicada. · **Prioridade: Média · Esforço: P**
+- [x] **C18 — Restringir actuator na borda pública** (ref **G6**). Actuator do gateway movido para uma **porta de management interna** (`management.server.port: 8181`) não publicada no host: a borda externa (8081) deixa de servir `/actuator/**`, fechando o acesso anônimo a `/prometheus` e `/metrics`. O Prometheus raspa por `gateway:8181` na rede interna; healthcheck do gateway ajustado para `8181`. · **Prioridade: Média · Esforço: P**
 
 - [ ] **C19 — Lockout / anti-brute-force no login** (ref **G10**). Contador de falhas por conta no Redis (já disponível) com lockout/backoff após N tentativas; considerar CAPTCHA após o limite. Encaixa com a auditoria de eventos (§5). · **Prioridade: Média · Esforço: M**
 
-- [ ] **C8 — `permissions` derivadas das roles** (ref **G8**). Hoje `["users.read","users.write"]` é hardcoded para todo usuário no `TokenCustomizerConfig`; mapear roles → permissions (ex.: ADMIN ganha `users.delete`). · **Prioridade: Média · Esforço: P**
+- [x] **C8 — `permissions` derivadas das roles** (ref **G8**). `TokenCustomizerConfig` agora deriva `permissions` de `user.getRoles()`: `USER` → `users.read`/`users.write`; `ADMIN` adiciona `users.delete`. `LinkedHashSet` deduplica e mantém ordem estável; preservado o `new ArrayList<>(...)` exigido pela serialização do `JdbcOAuth2AuthorizationService`. · **Prioridade: Média · Esforço: P**
 
 - [ ] **TLS/HTTPS** (ref **G1**) — manter como gap conhecido; decidido configurar junto com a infra de produção. · **Prioridade: Alta · Esforço: M**
 

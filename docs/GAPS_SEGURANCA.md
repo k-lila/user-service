@@ -28,25 +28,25 @@
 | G1  | Sem TLS/HTTPS (cookies de sessão sem flag `Secure` por consequência)           | Todo o sistema                                                   | Alta       | Aberto   | §3  |
 | G2  | Portas internas publicadas no host → acesso direto contorna o gateway          | `docker-compose.yml` (`8090`, `8082`, `8888`, `9091`)            | Alta       | Aberto   | —   |
 | G3  | config-server sem autenticação serve YAMLs com secrets default                 | config-server + porta `8888` publicada                          | Média      | Aberto   | —   |
-| G4  | Secrets em claro (Mongo, Postgres, `OAUTH_CLIENT_SECRET`, internal token)      | `docker-compose.yml`                                            | Média      | Aberto   | C11 |
+| G4  | Secrets em claro (Mongo, Postgres, `OAUTH_CLIENT_SECRET`, internal token)      | `docker-compose.yml`                                            | Média      | **Resolvido** (C11) | C11 |
 | G5  | Chave privada JWK **dev** rastreada no classpath                               | `authorization-server/.../keys/app.key`                         | Média      | Aceito   | §1  |
-| G6  | Actuator exposto sem auth na borda pública (`/actuator/prometheus`, `/metrics`) | `gateway/.../SecurityConfig.java` + `gateway.yml`               | Média      | Aberto   | —   |
+| G6  | Actuator exposto sem auth na borda pública (`/actuator/prometheus`, `/metrics`) | `gateway/.../SecurityConfig.java` + `gateway.yml`               | Média      | **Resolvido** (C18) | C18 |
 | G7  | CORS duplicado e hardcoded em 3 módulos                                        | `CORSConfig.java` (gateway / user-service / auth-server)         | Média      | Curativo | C12 |
-| G8  | Autorização grosseira: `permissions` hardcoded para todo usuário               | `TokenCustomizerConfig.java:38-41`                              | Média      | Aberto   | C8  |
+| G8  | Autorização grosseira: `permissions` hardcoded para todo usuário               | `TokenCustomizerConfig.java`                                    | Média      | **Resolvido** (C8) | C8  |
 | G9  | Validação de senha fraca e dividida (sem complexidade, nullable)               | `UserRequestDTO.java:21` + `RegisterService`                    | Baixa      | Aberto   | C13 |
 | G10 | Sem proteção a brute-force / lockout de conta no login                         | auth-server (form login) + rate limit do gateway                | Média      | Aberto   | —   |
-| G11 | Grafana `admin/admin`                                                          | `docker-compose.yml` (`GF_SECURITY_ADMIN_*`)                    | Baixa      | Aberto   | C11 |
+| G11 | Grafana `admin/admin`                                                          | `docker-compose.yml` (`GF_SECURITY_ADMIN_*`)                    | Baixa      | Curativo (C11) | C11 |
 | G12 | Keyfile MongoDB de dev rastreado no repositório                                | `infra/mongo/keyfile`                                           | Média      | Aceito   | —   |
 | —   | JWT armazenado em `localStorage` no front-end                                  | `login-interface/`                                              | —          | **Resolvido** (BFF) | — |
 
 **Notas dos gaps diretos (sem subseção):**
 
 - **G1 — TLS/HTTPS:** decidido configurar junto com a infra de produção. Sem TLS, os cookies `SESSION`/`AUTHSESSION` saem sem a flag `Secure` (hoje só `HttpOnly` + `SameSite=Lax`) — resolve-se com o TLS.
-- **G4 — Secrets em claro:** mover Mongo (`user_service:user_1234321`), Postgres (`auth_service:auth_1234321`), `OAUTH_CLIENT_SECRET` e `INTERNAL_API_TOKEN` para `.env` git-ignored / secret manager. Ver C11.
+- **G4 — Secrets em claro:** **Resolvido (C11).** Mongo, Postgres, `OAUTH_CLIENT_SECRET` (incl. o que estava hardcoded no gateway) e `INTERNAL_API_TOKEN` movidos para `.env` git-ignored, referenciados por `${VAR}` **sem default** (a subida falha alto se faltar `.env`). Template versionado em `.env.example`. Em produção, injetar via secret manager. Ver C11.
 - **G5 — Chave JWK dev:** **Aceito (Opção A)** — par RSA dev fixo no classpath para o `docker compose up` funcionar sem setup. Em produção, **sobrescrever** via `JWK_PRIVATE_KEY`/`JWK_PUBLIC_KEY`/`JWK_KEY_ID` apontando para secret montado (`file:/run/secrets/...`); a chave dev nunca vai para produção. Ver §1.
 - **G7 — CORS:** `CorsFilter`/`CorsConfigurationSource` repetido nos 3 módulos com origens fixas; já causou `403 Invalid CORS request` + `vary` duplicado. Curativo: `localhost:5173` na allowlist do user-service. Alvo: CORS só na borda (gateway) e configurável por ambiente. Ver C12.
 - **G9 — Senha:** `@Size(min=8)` é nullable (sem `@NotBlank`) e a ausência é checada manualmente no `RegisterService`; sem regra de complexidade. Unificar na validação declarativa. Ver C13.
-- **G11 — Grafana:** trocar `admin/admin` e proteger o stack de observabilidade (Prometheus `:9090` e Grafana `:3000` hoje sem auth). Ver C11.
+- **G11 — Grafana:** **Curativo (C11).** Credenciais externalizadas para `.env` (`GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`) — não mais hardcoded no compose versionado; o valor de dev segue `admin/admin`, **trocar em produção**. Prometheus `:9090` e Grafana `:3000` ainda sem auth na borda (resolve com C16/TLS). Ver C11.
 - **G12 — Keyfile MongoDB:** `infra/mongo/keyfile` (string base64 aleatória) está rastreado no repositório para permitir o `docker compose up` sem setup externo. **Aceito (Opção A)** — padrão idêntico ao G5 (chave JWK dev no classpath); em produção, montar o keyfile via secret externo e remover o arquivo do repo (ou adicionar ao `.gitignore`).
 
 ## Detalhamento dos gaps
@@ -68,12 +68,14 @@
 - **Risco:** no gateway (ponto de entrada externo, porta `8081`), `/actuator/**` é `permitAll`. `/actuator/prometheus` e `/actuator/metrics` ficam acessíveis sem autenticação → divulgação de métricas operacionais (URIs, contadores, latências).
 - **Evidência:** `gateway/.../SecurityConfig.java` lista `/actuator/**` em `permitAll`; `gateway.yml` expõe `health, info, metrics, prometheus`. _(O endpoint `gateway` de rotas está `enabled` mas **não** consta no `exposure.include`, então não é servido.)_
 - **Mitigação alvo:** restringir o `exposure.include` ao mínimo na borda (idealmente só `health`) e exigir autenticação para `metrics`/`prometheus`, ou raspar métricas por uma rede/porta de management interna não publicada.
+- **Status — Resolvido (C18):** actuator do gateway movido para `management.server.port: 8181` (porta de management **interna**, não publicada no host). A borda externa (8081) deixa de servir `/actuator/**`; o Prometheus raspa por `gateway:8181` na rede interna e o healthcheck do container aponta para `8181`. _(O `/actuator/**` em `permitAll` no `SecurityConfig` do gateway virou config morta — removível em higiene futura.)_
 
 ### G8 — Autorização grosseira (`permissions` hardcoded)
 
 - **Risco:** o claim `permissions` do JWT é fixo para **todo** usuário, inclusive ADMIN — a autorização fina por permissão não reflete a role real. Se algum recurso passar a confiar em `permissions`, o controle de acesso fica incorreto.
-- **Evidência:** `TokenCustomizerConfig.java:38-41` injeta `["users.read","users.write"]` para qualquer login.
-- **Mitigação alvo:** derivar `permissions` das `roles` (ex.: ADMIN ganha `users.delete`). Ver C8. _(Hoje a autorização efetiva das rotas usa `roles` via `@PreAuthorize`/`ROLE_`, então o impacto atual é latente, não explorável.)_
+- **Evidência (original):** `TokenCustomizerConfig` injetava `["users.read","users.write"]` para qualquer login.
+- **Mitigação alvo:** derivar `permissions` das `roles` (ex.: ADMIN ganha `users.delete`). Ver C8. _(A autorização efetiva das rotas usa `roles` via `@PreAuthorize`/`ROLE_`, então o impacto era latente, não explorável.)_
+- **Status — Resolvido (C8):** `TokenCustomizerConfig` deriva `permissions` de `user.getRoles()` — `USER` → `users.read`/`users.write`; `ADMIN` adiciona `users.delete` (`LinkedHashSet` deduplica; `new ArrayList<>(...)` preservado para a serialização do SAS no Postgres).
 
 ### G10 — Sem proteção a brute-force no login
 
