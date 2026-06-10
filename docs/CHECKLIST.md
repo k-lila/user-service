@@ -93,7 +93,7 @@
 - [ ] Contrato de erro uniforme em todos os endpoints (RFC 7807 / `ProblemDetail` ou equivalente) _(C9 — `GlobalExceptionHandler` devolve `String` crua; apenas `@Valid` 400 foi corrigido)_
 - [x] Documentação de API gerada automaticamente e acessível (OpenAPI/Swagger)
 - [ ] API versionada (`/v1/...`) antes de adicionar novos domínios sobre a base
-- [~] Validação de entrada declarativa (Bean Validation ou equivalente) — nunca somente manual _(`@Valid` usado na maioria dos campos; senha com `@Size` nullable sem `@NotBlank` + checagem manual no `RegisterService` — G9/C13)_
+- [x] Validação de entrada declarativa (Bean Validation ou equivalente) — nunca somente manual _(C13: senha 8–72 chars com letra e número, `@NotBlank` no grupo `OnCreate` do registro; null-check manual do `RegisterService` removido — fecha G9)_
 
 ## 10. Testes e Entrega
 

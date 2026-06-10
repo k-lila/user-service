@@ -13,7 +13,7 @@
 
 ## Estado atual
 
-**45 unitários + 46 de controller + 32 de integração** (Testcontainers), BUILD SUCCESS em ambos os módulos.
+**45 unitários + 49 de controller + 32 de integração** (Testcontainers), BUILD SUCCESS em ambos os módulos.
 
 ## Unitários (Mockito)
 
@@ -32,8 +32,8 @@ MockMvc + `SecurityMockMvcRequestPostProcessors.jwt()`.
 
 | Foco                                                                         | Arquivo de teste                                              | Testes |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ------ |
-| Status HTTP, autorização (`ROLE_USER`/`ROLE_ADMIN`/sem token), extração JWT, validação `@Valid` (400) | `user-service/.../controller/UserControllerTest.java`         | 41     |
-| Endpoint interno `/internal/users/email/{email}` (200/404 com `X-Internal-Token`, 403 sem/errado) | `user-service/.../controller/InternalUserControllerTest.java` | 5      |
+| Status HTTP, autorização (`ROLE_USER`/`ROLE_ADMIN`/sem token), extração JWT, validação Bean Validation (400 — inclui a política de senha do C13) | `user-service/.../controller/UserControllerTest.java`         | 45     |
+| Endpoint interno `/internal/users/email/{email}` (200/404 com `X-Internal-Token`, 403 sem/errado) | `user-service/.../controller/InternalUserControllerTest.java` | 4      |
 
 > Usa `@Import({SecurityConfig.class, GlobalExceptionHandler.class})` — em Spring Boot 4.0 o slice `@WebMvcTest` não carrega essas classes automaticamente.
 

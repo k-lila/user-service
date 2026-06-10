@@ -14,7 +14,7 @@
 
 - **Contexto:** o sistema roda em **múltiplas instâncias** (escala horizontal) e serve de **base/template reutilizável** pronta para produção.
 - **ID `C#`:** âncora estável de cada correção (referenciada por outros docs). Não é reordenável nem reusável.
-- **Itens concluídos saem deste arquivo** — a numeração (IDs `C#` e seções `§`) é preservada, não reusada; detalhes no histórico git. Já entregues: **§1 — Resiliência e escalabilidade** inteira (C7 — circuit breaker na chamada Feign; deploy rolling com graceful shutdown + probes; eliminação de SPOFs — Eureka HA, config-server HA, MongoDB replica set, Redis Sentinel) e **§2 — Hardening de segurança** inteira (C8, C11, C12, C16, C17, C18, C19 e a borda TLS de dev, curativo do G1). Os controles ativos resultantes estão em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md#controles-de-segurança-já-implementados).
+- **Itens concluídos saem deste arquivo** — a numeração (IDs `C#` e seções `§`) é preservada, não reusada; detalhes no histórico git. Já entregues: **§1 — Resiliência e escalabilidade** inteira (C7 — circuit breaker na chamada Feign; deploy rolling com graceful shutdown + probes; eliminação de SPOFs — Eureka HA, config-server HA, MongoDB replica set, Redis Sentinel), **§2 — Hardening de segurança** inteira (C8, C11, C12, C16, C17, C18, C19 e a borda TLS de dev, curativo do G1), **C13** (validação de senha declarativa e forte, fecha G9) e **C15** (higiene cosmética). Os controles ativos resultantes estão em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md#controles-de-segurança-já-implementados).
 - **Pendência herdada do §2:** **TLS de produção** (cert ACME/corporativo + domínios reais) — pertence à infra de deploy, não ao código; risco registrado em **G1** ([GAPS_SEGURANCA.md](GAPS_SEGURANCA.md)), setup da borda de dev em [TLS_DEV.md](TLS_DEV.md).
 - **Prioridade:** Alta / Média / Baixa (impacto no objetivo de base sólida e multi-instância). **Esforço:** P / M / G.
 - **Ref:** gap correlato em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md) — lá fica o **risco/severidade**; aqui, o **plano acionável**.
@@ -27,11 +27,9 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
 | --- | ----------------------------------------------- | ---------- | ------- | --- |
 | C9  | Erros padronizados (RFC 7807 / `ProblemDetail`) | Média      | M       | —   |
 | C10 | Cobertura de testes (gateway/auth/front)        | Média      | M       | —   |
-| C13 | Validação de senha unificada e forte            | Baixa      | P       | G9  |
 | —   | Versionamento de API (`/v1`)                    | Baixa      | M       | —   |
 | C14 | Eliminar a dupla chamada Feign por login        | Baixa      | M       | —   |
 | —   | Pipeline de CI                                  | Média      | M       | —   |
-| C15 | Higiene cosmética                               | Baixa      | P       | —   |
 
 ## 3. Qualidade e API
 
@@ -47,8 +45,6 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
     - **Integração (MSW):** registro + derivação do estado autenticado por `GET /users/me` (200 vs 401), sem `localStorage`.
     - **E2E (opcional):** Playwright cobrindo o redirect OAuth2 ponta a ponta (exige o stack de pé).
 
-- [ ] **C13 — Validação de senha unificada e forte** (ref **G9**). `UserRequestDTO` usa `@Size(min=8)` nullable + checagem manual de null no `RegisterService`, sem regra de complexidade. Unificar na validação declarativa. · **Prioridade: Baixa · Esforço: P**
-
 - [ ] **Versionamento de API (`/v1/...`)** antes de adicionar novas camadas de domínio sobre a base. · **Prioridade: Baixa · Esforço: M**
 
 ## 4. Eficiência e operação
@@ -56,8 +52,6 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
 - [ ] **C14 — Eliminar a dupla chamada Feign por login**. `AuthorizationService.loadUserByUsername` e `TokenCustomizerConfig.jwtCustomizer` chamam `getUserByEmail` separadamente a cada login. Reaproveitar o resultado (principal/atributo) ou unificar. Mitigado hoje pelo cache `authByEmail`. · **Prioridade: Baixa · Esforço: M**
 
 - [ ] **Pipeline de CI** (ex.: GitHub Actions) — build + testes dos 5 módulos Java + front-end (`npm ci`, `build`, `test` quando a bateria de C10 existir) a cada push/PR. Os testes de integração com Testcontainers exigem Docker no runner. · **Prioridade: Média · Esforço: M**
-
-- [ ] **C15 — Higiene cosmética**. Campos `private` não-`final` + `@Autowired` redundante no construtor (`UserController`, `SearchService`); `RegisterService.updateUser` monta o `UserResponseDTO` duas vezes. · **Prioridade: Baixa · Esforço: P**
 
 ## 5. Evolução de domínio (futuro)
 

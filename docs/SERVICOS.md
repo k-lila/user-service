@@ -34,7 +34,7 @@
 
 ## Exemplos de payload
 
-**Request — `POST /users/register`** (validado por `@Valid`; `name` 1–50 chars, `email` formato e-mail, `password` mín. 8 chars):
+**Request — `POST /users/register`** (Bean Validation; `name` 1–50 chars, `email` formato e-mail, `password` obrigatória, 8–72 chars com ao menos uma letra e um número — no `PUT /users` a senha é opcional: omitida/null mantém a atual):
 
 ```json
 {

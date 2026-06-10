@@ -21,7 +21,7 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 | Nível   | Uso                                                                                                        |
 | ------- | ---------------------------------------------------------------------------------------------------------- |
 | `INFO`  | Eventos de fluxo de negócio bem-sucedidos (entrada de endpoint, registro, atualização, busca encontrada, `auth` enviando credenciais) e a requisição recebida no gateway. |
-| `WARN`  | Anomalias esperadas e recuperáveis: e-mail já cadastrado, entidade não encontrada (404), argumento inválido (400), senha ausente, falha de login, rejeição por rate limit (429). |
+| `WARN`  | Anomalias esperadas e recuperáveis: e-mail já cadastrado, entidade não encontrada (404), argumento inválido / validação falhou (400), falha de login, rejeição por rate limit (429). |
 | `ERROR` | Falhas inesperadas com stacktrace: handler genérico 500 e falha de comunicação Feign (auth-server → user-service). |
 | `DEBUG` | Alto volume / baixo valor operacional: operações de cache (`put`/`evict`) no `CacheService`.                |
 

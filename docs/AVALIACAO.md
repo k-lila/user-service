@@ -43,12 +43,10 @@ A arquitetura e a execução do núcleo sustentam o rótulo: escala horizontal r
 - **G1:** sem TLS em produção (o curativo de dev existe; cert ACME + domínios reais pertencem à infra de deploy).
 - **G13:** Redis/Sentinel sem autenticação — guarda sessões com JWT/refresh token, hash BCrypt no cache `authByEmail` e os contadores de lockout; mitigado apenas por isolamento de rede (portas nunca publicadas).
 - **G5/G12 (aceitos):** chave JWK e keyfile MongoDB de dev rastreados no repositório, com override documentado para prod.
-- **G9:** validação de senha fraca (`@Size(min=8)` nullable + null-check manual, sem complexidade).
 
 **5. Detalhes de execução menores — nenhum bloqueia, mas acumulam.**
 - Dupla chamada Feign por login (C14): `loadUserByUsername` e `jwtCustomizer` buscam o usuário separadamente; mitigada pelo cache `authByEmail`, mas são duas viagens com cache frio.
 - Sem versionamento de API (`/v1`) — relevante antes de novas camadas de domínio entrarem.
-- Higiene cosmética (C15): campos `private` não-`final`, `@Autowired` redundante, DTO montado duas vezes em `RegisterService.updateUser`.
 - Gestão de admin manual: promover ADMIN exige `updateOne` direto no MongoDB; sem isso, as rotas `ROLE_ADMIN` são inalcançáveis.
 
 ---
@@ -60,8 +58,8 @@ Em ordem de impacto:
 1. **CI/CD** (GitHub Actions): build + testes dos 5 módulos Java + front a cada push. Pré-condição: tornar o `contextLoads` do gateway hermético, ou o pipeline quebra no primeiro dia. Testcontainers exige Docker no runner.
 2. **RFC 7807 (C9):** unificar 400/404/409/500 em `ProblemDetail` — refactor de um arquivo.
 3. **Equilibrar a cobertura (C10):** `contextLoads` hermético + testes de roteamento/rate-limit no gateway; WireMock para o circuit breaker no auth-server; `vitest` + `@testing-library/react` no front.
-4. **G13** (auth no Redis) e **C13** (senha) — pequenos, fecham os gaps de segurança abertos que dependem de código.
-5. **C14, C15, versionamento `/v1`** — menores; o acúmulo é que pesa.
+4. **G13** (auth no Redis) — pequeno, fecha o último gap de segurança aberto que depende de código.
+5. **C14, versionamento `/v1`** — menores; o acúmulo é que pesa.
 
 ---
 
