@@ -18,7 +18,7 @@ O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o clie
 
 **Mapa de documentos:**
 
-- [Readme.md](Readme.md) — pré-requisitos e execução (humano)
+- [README.md](README.md) — pré-requisitos e execução (humano)
 - [docs/SERVICOS.md](docs/SERVICOS.md) — referência da API (endpoints, schema MongoDB, cache)
 - [docs/CONFIG.md](docs/CONFIG.md) — variáveis de ambiente
 - [docs/TESTES.md](docs/TESTES.md) — estratégia de testes
@@ -236,7 +236,7 @@ Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/pri
 
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). **Gaps ativos:** sem TLS/HTTPS em prod (alta, G1 — **curativo:** borda TLS de dev via nginx+mkcert no overlay `docker-compose.tls.yml`, ver [docs/TLS_DEV.md](docs/TLS_DEV.md); falta cert ACME/domínios reais em prod), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), validação de senha fraca (baixa, G9), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). **Resolvidos** (IDs preservados, não reusados): G2 (C16, compose prod-safe), G3 (C17, config-server Basic auth + porta fechada + sem defaults de secret), G4 (C11, secrets em `.env`), G6 (C18, management interna), G7 (C12, CORS configurável: gateway p/ SPA, auth-server p/ Swagger; user-service sem CORS), G8 (C8, `permissions` por roles), G10 (C19, lockout por conta+IP); JWT em `localStorage` via BFF.
+Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). **Gaps ativos:** sem TLS/HTTPS em prod (alta, G1 — **curativo:** borda TLS de dev via nginx+mkcert no overlay `docker-compose.tls.yml`, ver [docs/TLS_DEV.md](docs/TLS_DEV.md); falta cert ACME/domínios reais em prod), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), validação de senha fraca (baixa, G9), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5), Redis/Sentinel sem autenticação (média, G13 — aberto, mitigado por portas nunca publicadas). **Resolvidos** (IDs preservados, não reusados): G2 (C16, compose prod-safe), G3 (C17, config-server Basic auth + porta fechada + sem defaults de secret), G4 (C11, secrets em `.env`), G6 (C18, management interna), G7 (C12, CORS configurável: gateway p/ SPA, auth-server p/ Swagger; user-service sem CORS), G8 (C8, `permissions` por roles), G10 (C19, lockout por conta+IP); JWT em `localStorage` via BFF.
 
 ---
 
