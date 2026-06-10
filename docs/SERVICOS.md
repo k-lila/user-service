@@ -59,7 +59,7 @@
 
 ## Claims do JWT
 
-O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims no access token:
+O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims no access token. Desde C14, `userID` e `roles` são lidos das authorities do `Authentication` (carregadas por `AuthorizationService.loadUserByUsername`) — sem chamada Feign adicional na fase de emissão do token:
 
 | Claim         | Origem                       | Exemplo                          |
 | ------------- | ---------------------------- | -------------------------------- |

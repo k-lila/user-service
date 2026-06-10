@@ -14,7 +14,7 @@
 
 - **Contexto:** o sistema roda em **múltiplas instâncias** (escala horizontal) e serve de **base/template reutilizável** pronta para produção.
 - **ID `C#`:** âncora estável de cada correção (referenciada por outros docs). Não é reordenável nem reusável.
-- **Itens concluídos saem deste arquivo** — a numeração (IDs `C#` e seções `§`) é preservada, não reusada; detalhes no histórico git. Já entregues: **§1 — Resiliência e escalabilidade** inteira (C7 — circuit breaker na chamada Feign; deploy rolling com graceful shutdown + probes; eliminação de SPOFs — Eureka HA, config-server HA, MongoDB replica set, Redis Sentinel), **§2 — Hardening de segurança** inteira (C8, C11, C12, C16, C17, C18, C19 e a borda TLS de dev, curativo do G1), **C13** (validação de senha declarativa e forte, fecha G9), **C15** (higiene cosmética) e **C9** (erros padronizados RFC 7807 / ProblemDetail). Os controles ativos resultantes estão em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md#controles-de-segurança-já-implementados).
+- **Itens concluídos saem deste arquivo** — a numeração (IDs `C#` e seções `§`) é preservada, não reusada; detalhes no histórico git. Já entregues: **§1 — Resiliência e escalabilidade** inteira (C7 — circuit breaker na chamada Feign; deploy rolling com graceful shutdown + probes; eliminação de SPOFs — Eureka HA, config-server HA, MongoDB replica set, Redis Sentinel), **§2 — Hardening de segurança** inteira (C8, C11, C12, C16, C17, C18, C19 e a borda TLS de dev, curativo do G1), **C13** (validação de senha declarativa e forte, fecha G9), **C15** (higiene cosmética), **C9** (erros padronizados RFC 7807 / ProblemDetail) e **C14** (eliminar dupla chamada Feign por login — `userId` embutido como authority `USER_ID:` em `AuthorizationService`, lido diretamente pelo `TokenCustomizerConfig` sem chamada Feign adicional). Os controles ativos resultantes estão em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md#controles-de-segurança-já-implementados).
 - **Pendência herdada do §2:** **TLS de produção** (cert ACME/corporativo + domínios reais) — pertence à infra de deploy, não ao código; risco registrado em **G1** ([GAPS_SEGURANCA.md](GAPS_SEGURANCA.md)), setup da borda de dev em [TLS_DEV.md](TLS_DEV.md).
 - **Prioridade:** Alta / Média / Baixa (impacto no objetivo de base sólida e multi-instância). **Esforço:** P / M / G.
 - **Ref:** gap correlato em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md) — lá fica o **risco/severidade**; aqui, o **plano acionável**.
@@ -28,7 +28,7 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
 | ~~C9~~  | ~~Erros padronizados (RFC 7807 / `ProblemDetail`)~~ — ✅ concluído | Média      | M       | —   |
 | C10 | Cobertura de testes (gateway/auth/front)        | Média      | M       | —   |
 | —   | Versionamento de API (`/v1`)                    | Baixa      | M       | —   |
-| C14 | Eliminar a dupla chamada Feign por login        | Baixa      | M       | —   |
+| ~~C14~~ | ~~Eliminar a dupla chamada Feign por login~~ — ✅ concluído | Baixa      | M       | —   |
 | —   | Pipeline de CI                                  | Média      | M       | —   |
 
 ## 3. Qualidade e API
@@ -49,7 +49,7 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
 
 ## 4. Eficiência e operação
 
-- [ ] **C14 — Eliminar a dupla chamada Feign por login**. `AuthorizationService.loadUserByUsername` e `TokenCustomizerConfig.jwtCustomizer` chamam `getUserByEmail` separadamente a cada login. Reaproveitar o resultado (principal/atributo) ou unificar. Mitigado hoje pelo cache `authByEmail`. · **Prioridade: Baixa · Esforço: M**
+- [x] ~~**C14 — Eliminar a dupla chamada Feign por login**. `AuthorizationService.loadUserByUsername` embute o `userId` como `GrantedAuthority` com prefixo `USER_ID:` nas authorities; `TokenCustomizerConfig.jwtCustomizer` lê `userId` e `roles` diretamente das authorities do `Authentication`, sem nenhuma chamada Feign adicional. `TokenCustomizerConfig` não depende mais de `IUserClient`. De 2 chamadas Feign por login → 1. (Abordagem `CustomUserDetails extends User` foi descartada: o `UserDeserializer` do Spring Security 7/Jackson 3 sempre reconstrói `User` — nunca o subtipo — tornando o cast impossível após a troca do código por token no `JdbcOAuth2AuthorizationService`.)~~ — ✅ concluído · **Prioridade: Baixa · Esforço: M**
 
 - [ ] **Pipeline de CI** (ex.: GitHub Actions) — build + testes dos 5 módulos Java + front-end (`npm ci`, `build`, `test` quando a bateria de C10 existir) a cada push/PR. Os testes de integração com Testcontainers exigem Docker no runner. · **Prioridade: Média · Esforço: M**
 
