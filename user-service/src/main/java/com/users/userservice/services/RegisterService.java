@@ -107,7 +107,7 @@ public class RegisterService {
             updated.getName(),
             updated.getId()
         );
-        return UserResponseDTO.toResponseDTO(updated);
+        return updatedDTO;
     }
 
     public void deactivateUser(String userID) {
