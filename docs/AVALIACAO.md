@@ -2,9 +2,9 @@
 
 ## Veredito
 
-**Nível: Sênior — com ressalvas em segurança operacional e CI/CD.**
+**Nível: Sênior — com ressalvas em CI/CD e cobertura de testes.**
 
-O projeto deu um salto qualitativo desde a avaliação anterior: o bloqueador estrutural que impedia o rótulo "Sênior" foi removido por completo. A escala horizontal agora é real — JWK com `kid` fixo e persistente, estado OAuth em PostgreSQL (JDBC), sessão em Redis Sentinel, Eureka HA, config-server atrás de nginx, MongoDB replica set. Somam-se as correções C1–C5 e o circuit breaker C7. O rótulo "pronto para produção" tornou-se defendível no plano técnico-arquitetural; o que resta são lacunas de segurança operacional e automação — reais, mas distintas de falhas de arquitetura ou de execução de núcleo.
+O projeto deu um salto qualitativo desde a avaliação anterior: o bloqueador estrutural que impedia o rótulo "Sênior" foi removido por completo. A escala horizontal agora é real — JWK com `kid` fixo e persistente, estado OAuth em PostgreSQL (JDBC), sessão em Redis Sentinel, Eureka HA, config-server atrás de nginx, MongoDB replica set. Somam-se as correções C1–C5, o circuit breaker C7 e, nesta rodada, o **hardening de segurança completo** (C8, C11, C12, C16–C19 e a borda TLS de dev): a ressalva de segurança operacional da avaliação anterior caiu. O rótulo "pronto para produção" tornou-se defendível; o que resta são automação (CI/CD), cobertura de testes e contrato de API — lacunas acionáveis, distintas de falhas de arquitetura ou de execução de núcleo.
 
 ---
 
@@ -25,18 +25,15 @@ O projeto deu um salto qualitativo desde a avaliação anterior: o bloqueador es
 - C4: `DuplicateKeyException` mapeada para 409 no registro — corrida `findByEmail → insert → 500` eliminada.
 - C5: `/internal` protegido por `X-Internal-Token` (`InternalTokenFilter` + comparação em tempo constante via `MessageDigest.isEqual` + `FeignConfig` injetando o header) — endpoint que expunha `passwordHash`/`roles` deixou de ser canal aberto.
 
-**6. Topologia, OAuth2, BFF e observabilidade** — mantidos da avaliação anterior e continuam sendo o piso que coloca o projeto acima de Pleno: separação de responsabilidades rígida, authorization code + PKCE + OIDC, BFF com token nunca tocando o browser, Zipkin/Prometheus/Grafana, logs estruturados com mascaramento de PII.
+**6. Hardening de segurança operacional completo (§2).** Compose prod-safe que publica só a borda (C16), secrets em `.env` git-ignored sem defaults — fail-fast (C11), CORS só onde há fetch cross-origin real e configurável por env (C12), config-server com HTTP Basic + porta fechada (C17), actuator do gateway em porta de management interna (C18), lockout anti-brute-force por (conta, IP) no Redis com mensagem genérica (C19), `permissions` derivadas das roles (C8) e borda TLS de dev (nginx + mkcert) com a mesma topologia de prod — cookies `Secure` exercíveis localmente. Restam, registrados em GAPS_SEGURANCA.md: o TLS de produção real (G1 — cert ACME/domínios, trabalho de infra de deploy, não de código), trade-offs aceitos de dev (G5, G11, G12) e dívidas pequenas (G9 senha, G13 auth no Redis).
+
+**7. Topologia, OAuth2, BFF e observabilidade** — mantidos da avaliação anterior e continuam sendo o piso que coloca o projeto acima de Pleno: separação de responsabilidades rígida, authorization code + PKCE + OIDC, BFF com token nunca tocando o browser, Zipkin/Prometheus/Grafana, logs estruturados com mascaramento de PII.
 
 ---
 
 ## O que ainda segura o "Sênior pleno" (lacunas remanescentes)
 
-**1. Segurança operacional com múltiplos gaps abertos.**
-- Sem HTTPS/TLS (G1): JWT, cookies de sessão (`SESSION`, `AUTHSESSION`) e tokens internos trafegam em claro; flag `Secure` nos cookies não tem efeito sem TLS.
-- Portas internas publicadas no host (G2/C16): `8090`, `8082`, `8888`, `9091` atingíveis diretamente, contornando o gateway e seu rate limiting.
-- Secrets em `docker-compose.yml` (G4/C11): credenciais Mongo, Postgres, `OAUTH_CLIENT_SECRET` e `INTERNAL_API_TOKEN` em claro no repositório.
-- CORS duplicado e hardcoded em 3 módulos (G7/C12): curativo aplicado (Opção A — allowlist no user-service), mas a solução limpa (CORS só na borda, configurável por env) ainda é pendente.
-- Actuator sem restrição na borda pública (G6/C18); config-server sem auth (G3/C17); sem lockout de login (G10/C19).
+**1. Sem CI/CD.** Nenhum pipeline automatizado. Para um template reutilizável, o gate "passa nos 5 módulos + front a cada push" ainda não existe — e o `contextLoads` não-hermético do gateway vai quebrar o pipeline quando ele vier.
 
 **2. RFC 7807 ainda pendente (C9).** O `GlobalExceptionHandler` passou a tratar `@Valid` (C3), mas os demais casos — 404, 409, 500 — ainda devolvem `String` crua. O contrato de erro não é uniforme.
 
@@ -45,10 +42,7 @@ O projeto deu um salto qualitativo desde a avaliação anterior: o bloqueador es
 - Authorization-server: `AuthorizationServiceTest` + `UserClientFallbackFactoryTest`; falta teste de integração do circuit breaker (WireMock + Resilience4j em modo acelerado simulando user-service fora do ar).
 - Front-end: zero cobertura (sem `vitest`, sem script `test` no `package.json`).
 
-**4. Sem CI/CD.** Nenhum pipeline automatizado. Para um template reutilizável, o gate "passa nos 5 módulos + front a cada push" ainda não existe — e o `contextLoads` não-hermético do gateway vai quebrar o pipeline quando ele vier.
-
-**5. Detalhes de execução menores (nenhum bloqueador isolado, mas acumulam).**
-- `permissions` hardcoded `["users.read","users.write"]` para todo usuário no `TokenCustomizerConfig` (G8/C8): ADMIN e USER recebem o mesmo claim de permissão no token.
+**4. Detalhes de execução menores (nenhum bloqueador isolado, mas acumulam).**
 - Dupla chamada Feign por login (C14): `loadUserByUsername` + `jwtCustomizer` fazem `getUserByEmail` separadamente; mitigada pelo cache `authByEmail`, mas ainda são duas viagens por login sem cache frio.
 - Validação de senha inconsistente (G9/C13): `@Size(min=8)` nullable + null-check manual no `RegisterService`; sem regra de complexidade.
 - Campos `private` não-`final` em `UserController`/`SearchService` e `@Autowired` redundante no construtor (C15).
@@ -59,14 +53,13 @@ O projeto deu um salto qualitativo desde a avaliação anterior: o bloqueador es
 
 A distância restante é menor do que a já percorrida. Em ordem de impacto:
 
-1. **Fechar os gaps de segurança que dependem só de código** (C11, C12, C16, C18): secrets em `.env` git-ignored, CORS só na borda e configurável por env, portas internas removidas do compose de prod, actuator restrito. Nenhum exige redesenho.
-2. **CI/CD** (GitHub Actions): build + testes dos 5 módulos Java + front a cada push. Exige tornar o `contextLoads` do gateway hermético (pré-condição para o pipeline não quebrar no primeiro dia).
-3. **RFC 7807 (C9)**: unificar 400/404/409/500 em `ProblemDetail` — refactor de 1 arquivo.
-4. **Cobrir gateway e auth-server (C10)**: `contextLoads` hermético, teste WireMock do circuit breaker, `vitest` + `@testing-library/react` no front.
-5. **C8, C13, C14, C15** — menores; o acúmulo é que pesa.
+1. **CI/CD** (GitHub Actions): build + testes dos 5 módulos Java + front a cada push. Exige tornar o `contextLoads` do gateway hermético (pré-condição para o pipeline não quebrar no primeiro dia).
+2. **RFC 7807 (C9)**: unificar 400/404/409/500 em `ProblemDetail` — refactor de 1 arquivo.
+3. **Cobrir gateway e auth-server (C10)**: `contextLoads` hermético, teste WireMock do circuit breaker, `vitest` + `@testing-library/react` no front.
+4. **C13, C14, C15** — menores; o acúmulo é que pesa.
 
 ---
 
 ## Resumo em uma linha
 
-> **O bloqueador estrutural foi removido: a escala horizontal é real e a infra HA está no lugar.** O sistema subiu de "Pleno consolidado com traços de Sênior" para **Sênior**, com ressalva em segurança operacional (HTTPS, secrets, portas, CORS) e ausência de CI/CD — lacunas acionáveis, não de arquitetura.
+> **Escala horizontal real, infra HA e hardening de segurança completos.** O sistema consolidou o nível **Sênior**: a ressalva de segurança operacional caiu (resta o TLS de produção, trabalho de infra de deploy); as lacunas remanescentes — CI/CD, cobertura de testes e contrato de erro — são acionáveis e não tocam a arquitetura.

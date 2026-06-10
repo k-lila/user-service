@@ -47,7 +47,7 @@
 
 ## 4. Segurança Operacional
 
-- [ ] TLS/HTTPS em todas as comunicações externas _(G1 — aberto)_
+- [~] TLS/HTTPS em todas as comunicações externas _(G1 — curativo: borda TLS de dev via nginx+mkcert, overlay `docker-compose.tls.yml`, cookies `Secure`; pendente cert ACME/domínios reais em prod)_
 - [x] Segredos fora do repositório: variáveis de ambiente ou secret manager, nunca hardcoded _(C11 — Mongo/Postgres/`OAUTH_CLIENT_SECRET`/`INTERNAL_API_TOKEN` em `.env` git-ignored; C17 removeu os defaults de secret dos YAMLs)_
 - [x] Rate limiting por tier: por IP em endpoints públicos e por usuário em endpoints autenticados
 - [x] Proteção CSRF nos endpoints de mutação acessados pelo browser
