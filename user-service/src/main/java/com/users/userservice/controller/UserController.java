@@ -33,7 +33,7 @@ import jakarta.validation.groups.Default;
     description = "Endpoints do serviço de usuários"
 )
 @RestController
-@RequestMapping(value = "users")
+@RequestMapping(value = "/v1/users")
 public class UserController {
     private static final Logger LOGGER = LoggerFactory.getLogger(UserController.class);
     private final RegisterService registerService;

@@ -78,7 +78,7 @@ class UserControllerTest {
     void register_deveRetornar201_quandoDadosValidos() throws Exception {
         when(registerService.registerUser(any())).thenReturn(buildResponse());
 
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "fulano@email.com", "senha123"))))
                 .andExpect(status().isCreated());
@@ -89,7 +89,7 @@ class UserControllerTest {
         when(registerService.registerUser(any()))
                 .thenThrow(new EmailAlreadyRegisteredException("fulano@email.com"));
 
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Ciclano", "fulano@email.com", "senha456"))))
                 .andExpect(status().isConflict());
@@ -99,7 +99,7 @@ class UserControllerTest {
 
     @Test
     void register_deveRetornar400_quandoEmailInvalido() throws Exception {
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "email-invalido", "senha123"))))
                 .andExpect(status().isBadRequest());
@@ -109,7 +109,7 @@ class UserControllerTest {
 
     @Test
     void register_deveRetornar400_quandoSenhaMenorQue8() throws Exception {
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "fulano@email.com", "123"))))
                 .andExpect(status().isBadRequest());
@@ -119,7 +119,7 @@ class UserControllerTest {
 
     @Test
     void register_deveRetornar400_quandoNomeEmBranco() throws Exception {
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("", "fulano@email.com", "senha123"))))
                 .andExpect(status().isBadRequest());
@@ -129,7 +129,7 @@ class UserControllerTest {
 
     @Test
     void register_deveRetornar400_quandoSenhaAusente() throws Exception {
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "fulano@email.com", null))))
                 .andExpect(status().isBadRequest());
@@ -139,7 +139,7 @@ class UserControllerTest {
 
     @Test
     void register_deveRetornar400_quandoSenhaSemNumero() throws Exception {
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "fulano@email.com", "somenteletras"))))
                 .andExpect(status().isBadRequest());
@@ -149,7 +149,7 @@ class UserControllerTest {
 
     @Test
     void register_deveRetornar400_quandoSenhaSemLetra() throws Exception {
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "fulano@email.com", "123456789"))))
                 .andExpect(status().isBadRequest());
@@ -163,20 +163,20 @@ class UserControllerTest {
     void searchAll_deveRetornar200_quandoTokenComRoleUser() throws Exception {
         when(searchService.searchAll(any())).thenReturn(new PageImpl<>(List.of(buildResponse())));
 
-        mockMvc.perform(get("/users")
+        mockMvc.perform(get("/v1/users")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isOk());
     }
 
     @Test
     void searchAll_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(get("/users"))
+        mockMvc.perform(get("/v1/users"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void searchAll_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(get("/users")
+        mockMvc.perform(get("/v1/users")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
                 .andExpect(status().isForbidden());
     }
@@ -187,7 +187,7 @@ class UserControllerTest {
     void searchById_deveRetornar200ComBody_quandoIdExiste() throws Exception {
         when(searchService.searchById(USER_ID)).thenReturn(buildResponse());
 
-        mockMvc.perform(get("/users/{id}", USER_ID)
+        mockMvc.perform(get("/v1/users/{id}", USER_ID)
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(USER_ID))
@@ -199,20 +199,20 @@ class UserControllerTest {
         when(searchService.searchById("id-inexistente"))
                 .thenThrow(new DomainEntityNotFound(User.class, "ID", "id-inexistente"));
 
-        mockMvc.perform(get("/users/{id}", "id-inexistente")
+        mockMvc.perform(get("/v1/users/{id}", "id-inexistente")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void searchById_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(get("/users/{id}", USER_ID))
+        mockMvc.perform(get("/v1/users/{id}", USER_ID))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void searchById_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(get("/users/{id}", USER_ID)
+        mockMvc.perform(get("/v1/users/{id}", USER_ID)
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
                 .andExpect(status().isForbidden());
     }
@@ -223,7 +223,7 @@ class UserControllerTest {
     void searchByEmail_deveRetornar200ComBody_quandoEmailExiste() throws Exception {
         when(searchService.searchByEmail("fulano@email.com")).thenReturn(buildResponse());
 
-        mockMvc.perform(get("/users/email/{email}", "fulano@email.com")
+        mockMvc.perform(get("/v1/users/email/{email}", "fulano@email.com")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("fulano@email.com"));
@@ -234,20 +234,20 @@ class UserControllerTest {
         when(searchService.searchByEmail("nao@existe.com"))
                 .thenThrow(new DomainEntityNotFound(User.class, "Email", "nao@existe.com"));
 
-        mockMvc.perform(get("/users/email/{email}", "nao@existe.com")
+        mockMvc.perform(get("/v1/users/email/{email}", "nao@existe.com")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void searchByEmail_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(get("/users/email/{email}", "fulano@email.com"))
+        mockMvc.perform(get("/v1/users/email/{email}", "fulano@email.com"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void searchByEmail_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(get("/users/email/{email}", "fulano@email.com")
+        mockMvc.perform(get("/v1/users/email/{email}", "fulano@email.com")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
                 .andExpect(status().isForbidden());
     }
@@ -258,7 +258,7 @@ class UserControllerTest {
     void updateUser_deveRetornar200ComBody_quandoAtualizacaoBemSucedida() throws Exception {
         when(registerService.updateUser(any(), eq(USER_ID))).thenReturn(buildResponse());
 
-        mockMvc.perform(put("/users")
+        mockMvc.perform(put("/v1/users")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
@@ -272,7 +272,7 @@ class UserControllerTest {
     void updateUser_devePassarUserIdDoJwtParaOServico() throws Exception {
         when(registerService.updateUser(any(), eq(USER_ID))).thenReturn(buildResponse());
 
-        mockMvc.perform(put("/users")
+        mockMvc.perform(put("/v1/users")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
@@ -288,7 +288,7 @@ class UserControllerTest {
         when(registerService.updateUser(any(), eq(USER_ID)))
                 .thenThrow(new DomainEntityNotFound(User.class, "ID", USER_ID));
 
-        mockMvc.perform(put("/users")
+        mockMvc.perform(put("/v1/users")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
@@ -302,7 +302,7 @@ class UserControllerTest {
         when(registerService.updateUser(any(), eq(USER_ID)))
                 .thenThrow(new EmailAlreadyRegisteredException("outro@email.com"));
 
-        mockMvc.perform(put("/users")
+        mockMvc.perform(put("/v1/users")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
@@ -315,7 +315,7 @@ class UserControllerTest {
     void updateUser_deveRetornar200_quandoSenhaAusente() throws Exception {
         when(registerService.updateUser(any(), eq(USER_ID))).thenReturn(buildResponse());
 
-        mockMvc.perform(put("/users")
+        mockMvc.perform(put("/v1/users")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
@@ -326,7 +326,7 @@ class UserControllerTest {
 
     @Test
     void updateUser_deveRetornar400_quandoSenhaInvalida() throws Exception {
-        mockMvc.perform(put("/users")
+        mockMvc.perform(put("/v1/users")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER")))
@@ -339,7 +339,7 @@ class UserControllerTest {
 
     @Test
     void updateUser_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(put("/users")
+        mockMvc.perform(put("/v1/users")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "fulano@email.com", null))))
                 .andExpect(status().isUnauthorized());
@@ -347,7 +347,7 @@ class UserControllerTest {
 
     @Test
     void updateUser_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(put("/users")
+        mockMvc.perform(put("/v1/users")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER")))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "fulano@email.com", "senha12345"))))
@@ -358,7 +358,7 @@ class UserControllerTest {
 
     @Test
     void removeUser_deveRetornar204_quandoIdExiste() throws Exception {
-        mockMvc.perform(delete("/users/{id}", USER_ID)
+        mockMvc.perform(delete("/v1/users/{id}", USER_ID)
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
                 .andExpect(status().isNoContent());
 
@@ -370,20 +370,20 @@ class UserControllerTest {
         doThrow(new DomainEntityNotFound(User.class, "ID", "id-inexistente"))
                 .when(registerService).deactivateUser("id-inexistente");
 
-        mockMvc.perform(delete("/users/{id}", "id-inexistente")
+        mockMvc.perform(delete("/v1/users/{id}", "id-inexistente")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void removeUser_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(delete("/users/{id}", USER_ID))
+        mockMvc.perform(delete("/v1/users/{id}", USER_ID))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void removeUser_deveRetornar403_quandoTokenComRoleUser() throws Exception {
-        mockMvc.perform(delete("/users/{id}", USER_ID)
+        mockMvc.perform(delete("/v1/users/{id}", USER_ID)
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
     }
@@ -392,7 +392,7 @@ class UserControllerTest {
 
     @Test
     void deleteUser_deveRetornar204_quandoIdExiste() throws Exception {
-        mockMvc.perform(delete("/users/del/{id}", USER_ID)
+        mockMvc.perform(delete("/v1/users/del/{id}", USER_ID)
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
                 .andExpect(status().isNoContent());
 
@@ -404,20 +404,20 @@ class UserControllerTest {
         doThrow(new DomainEntityNotFound(User.class, "ID", "id-inexistente"))
                 .when(registerService).deleteUser("id-inexistente");
 
-        mockMvc.perform(delete("/users/del/{id}", "id-inexistente")
+        mockMvc.perform(delete("/v1/users/del/{id}", "id-inexistente")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void deleteUser_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(delete("/users/del/{id}", USER_ID))
+        mockMvc.perform(delete("/v1/users/del/{id}", USER_ID))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void deleteUser_deveRetornar403_quandoTokenComRoleUser() throws Exception {
-        mockMvc.perform(delete("/users/del/{id}", USER_ID)
+        mockMvc.perform(delete("/v1/users/del/{id}", USER_ID)
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
     }
@@ -426,7 +426,7 @@ class UserControllerTest {
 
     @Test
     void removeCurrentUser_deveRetornar204EPassarUserIdDoJwt() throws Exception {
-        mockMvc.perform(delete("/users/remove/me")
+        mockMvc.perform(delete("/v1/users/remove/me")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
@@ -440,7 +440,7 @@ class UserControllerTest {
         doThrow(new DomainEntityNotFound(User.class, "ID", USER_ID))
                 .when(registerService).deactivateUser(USER_ID);
 
-        mockMvc.perform(delete("/users/remove/me")
+        mockMvc.perform(delete("/v1/users/remove/me")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
@@ -449,13 +449,13 @@ class UserControllerTest {
 
     @Test
     void removeCurrentUser_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(delete("/users/remove/me"))
+        mockMvc.perform(delete("/v1/users/remove/me"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void removeCurrentUser_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(delete("/users/remove/me")
+        mockMvc.perform(delete("/v1/users/remove/me")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
                 .andExpect(status().isForbidden());
     }
@@ -466,7 +466,7 @@ class UserControllerTest {
     void getCurrentUser_deveRetornar200ComBodyEPassarUserIdDoJwt() throws Exception {
         when(searchService.searchById(USER_ID)).thenReturn(buildResponse());
 
-        mockMvc.perform(get("/users/me")
+        mockMvc.perform(get("/v1/users/me")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
@@ -481,7 +481,7 @@ class UserControllerTest {
         when(searchService.searchById(USER_ID))
                 .thenThrow(new DomainEntityNotFound(User.class, "ID", USER_ID));
 
-        mockMvc.perform(get("/users/me")
+        mockMvc.perform(get("/v1/users/me")
                 .with(jwt()
                         .jwt(b -> b.claim("userID", USER_ID))
                         .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
@@ -490,20 +490,20 @@ class UserControllerTest {
 
     @Test
     void getCurrentUser_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(get("/users/me"))
+        mockMvc.perform(get("/v1/users/me"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void getCurrentUser_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(get("/users/me")
+        mockMvc.perform(get("/v1/users/me")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void searchAll_deveRetornar403_quandoTokenComApenasRoleAdmin() throws Exception {
-        mockMvc.perform(get("/users")
+        mockMvc.perform(get("/v1/users")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
                 .andExpect(status().isForbidden());
     }
@@ -512,7 +512,7 @@ class UserControllerTest {
     void register_deveRetornarBodyComDadosDoUsuario_quandoCadastroValido() throws Exception {
         when(registerService.registerUser(any())).thenReturn(buildResponse());
 
-        mockMvc.perform(post("/users/register")
+        mockMvc.perform(post("/v1/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "fulano@email.com", "senha123"))))
                 .andExpect(status().isCreated())

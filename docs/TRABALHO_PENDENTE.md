@@ -27,7 +27,7 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
 | --- | ----------------------------------------------- | ---------- | ------- | --- |
 | ~~C9~~  | ~~Erros padronizados (RFC 7807 / `ProblemDetail`)~~ — ✅ concluído | Média      | M       | —   |
 | C10 | Cobertura de testes (gateway/auth/front)        | Média      | M       | —   |
-| —   | Versionamento de API (`/v1`)                    | Baixa      | M       | —   |
+| —   | ~~Versionamento de API (`/v1`)~~ — ✅ concluído | Baixa      | M       | —   |
 | ~~C14~~ | ~~Eliminar a dupla chamada Feign por login~~ — ✅ concluído | Baixa      | M       | —   |
 | —   | Pipeline de CI                                  | Média      | M       | —   |
 
@@ -45,7 +45,7 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
     - **Integração (MSW):** registro + derivação do estado autenticado por `GET /users/me` (200 vs 401), sem `localStorage`.
     - **E2E (opcional):** Playwright cobrindo o redirect OAuth2 ponta a ponta (exige o stack de pé).
 
-- [ ] **Versionamento de API (`/v1/...`)** antes de adicionar novas camadas de domínio sobre a base. · **Prioridade: Baixa · Esforço: M**
+- [x] ~~**Versionamento de API (`/v1/...`)** antes de adicionar novas camadas de domínio sobre a base.~~ — ✅ concluído · **Prioridade: Baixa · Esforço: M**
 
 ## 4. Eficiência e operação
 

@@ -15,7 +15,7 @@ export default defineConfig({
   // Só o callback OAuth2 (/login/oauth2/**) vai ao gateway; /login puro é rota do SPA.
   server: {
     proxy: {
-      '/users': { target: 'http://localhost:8081', changeOrigin: true },
+      '/v1/users': { target: 'http://localhost:8081', changeOrigin: true },
       '/oauth2': { target: 'http://localhost:8081', changeOrigin: true },
       '/login/oauth2': { target: 'http://localhost:8081', changeOrigin: true },
       '/logout': { target: 'http://localhost:8081', changeOrigin: true },

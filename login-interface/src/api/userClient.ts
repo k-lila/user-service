@@ -8,6 +8,6 @@ export interface UserResponse {
 }
 
 export async function getCurrentUser(): Promise<UserResponse> {
-  const response = await api.get('/users/me')
+  const response = await api.get('/v1/users/me')
   return response.data
 }

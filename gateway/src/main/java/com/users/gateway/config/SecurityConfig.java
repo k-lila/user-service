@@ -60,11 +60,11 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                 .csrfTokenRepository(csrfTokenRepository)
                 .csrfTokenRequestHandler(new ServerCsrfTokenRequestAttributeHandler())
-                // /users/register é público e pré-sessão: CSRF não protege nada ali.
+                // /v1/users/register é público e pré-sessão: CSRF não protege nada ali.
                 .requireCsrfProtectionMatcher(new AndServerWebExchangeMatcher(
                         CsrfWebFilter.DEFAULT_CSRF_MATCHER,
                         new NegatedServerWebExchangeMatcher(
-                                ServerWebExchangeMatchers.pathMatchers("/users/register"))
+                                ServerWebExchangeMatchers.pathMatchers("/v1/users/register"))
                 ))
             )
             .cors(Customizer.withDefaults())
@@ -78,7 +78,7 @@ public class SecurityConfig {
                         "/swagger-ui/**",
                         "/v3/api-docs/**",
                         "/swagger-ui.html",
-                        "/users/register"
+                        "/v1/users/register"
                 ).permitAll()
                 .anyExchange().authenticated()
             )

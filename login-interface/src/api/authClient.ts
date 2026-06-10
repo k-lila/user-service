@@ -35,11 +35,11 @@ export function logout(): void {
   form.submit()
 }
 
-// Registro é público (POST /users/register) e não autentica: após criar a
+// Registro é público (POST /v1/users/register) e não autentica: após criar a
 // conta, o usuário ainda passa pelo login OAuth2.
 export async function register(
   request: RegisterRequest
 ): Promise<UserResponse> {
-  const response = await api.post('/users/register', request)
+  const response = await api.post('/v1/users/register', request)
   return response.data
 }

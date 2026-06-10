@@ -13,29 +13,29 @@
 
 ## Endpoints expostos via gateway
 
-| Método | Path                 | Auth       | Rate Limit      |
-| ------ | -------------------- | ---------- | --------------- |
-| POST   | /users/register      | Nenhuma    | 2 req/s (IP)    |
-| GET    | /users               | ROLE_USER  | 10 req/s (user) |
-| GET    | /users/{id}          | ROLE_USER  | 10 req/s (user) |
-| GET    | /users/email/{email} | ROLE_USER  | 10 req/s (user) |
-| GET    | /users/me            | ROLE_USER  | 10 req/s (user) |
-| PUT    | /users               | ROLE_USER  | 10 req/s (user) |
-| DELETE | /users/{id}          | ROLE_ADMIN | 10 req/s (user) |
-| DELETE | /users/del/{id}      | ROLE_ADMIN | 10 req/s (user) |
-| DELETE | /users/remove/me     | ROLE_USER  | 10 req/s (user) |
+| Método | Path                    | Auth       | Rate Limit      |
+| ------ | ----------------------- | ---------- | --------------- |
+| POST   | /v1/users/register      | Nenhuma    | 2 req/s (IP)    |
+| GET    | /v1/users               | ROLE_USER  | 10 req/s (user) |
+| GET    | /v1/users/{id}          | ROLE_USER  | 10 req/s (user) |
+| GET    | /v1/users/email/{email} | ROLE_USER  | 10 req/s (user) |
+| GET    | /v1/users/me            | ROLE_USER  | 10 req/s (user) |
+| PUT    | /v1/users               | ROLE_USER  | 10 req/s (user) |
+| DELETE | /v1/users/{id}          | ROLE_ADMIN | 10 req/s (user) |
+| DELETE | /v1/users/del/{id}      | ROLE_ADMIN | 10 req/s (user) |
+| DELETE | /v1/users/remove/me     | ROLE_USER  | 10 req/s (user) |
 
 **Semânticas de DELETE (intencionais):**
 
-- `DELETE /users/{id}` (ADMIN) → soft-delete (`deactivateUser`, `active=false`)
-- `DELETE /users/del/{id}` (ADMIN) → hard-delete (`deleteUser`)
-- `DELETE /users/remove/me` (USER) → soft-delete
+- `DELETE /v1/users/{id}` (ADMIN) → soft-delete (`deactivateUser`, `active=false`)
+- `DELETE /v1/users/del/{id}` (ADMIN) → hard-delete (`deleteUser`)
+- `DELETE /v1/users/remove/me` (USER) → soft-delete
 
 > Ver _Convenções_ no [CLAUDE.md](../CLAUDE.md).
 
 ## Exemplos de payload
 
-**Request — `POST /users/register`** (Bean Validation; `name` 1–50 chars, `email` formato e-mail, `password` obrigatória, 8–72 chars com ao menos uma letra e um número — no `PUT /users` a senha é opcional: omitida/null mantém a atual):
+**Request — `POST /v1/users/register`** (Bean Validation; `name` 1–50 chars, `email` formato e-mail, `password` obrigatória, 8–72 chars com ao menos uma letra e um número — no `PUT /v1/users` a senha é opcional: omitida/null mantém a atual):
 
 ```json
 {

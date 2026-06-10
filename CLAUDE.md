@@ -37,10 +37,10 @@ login-interface (React)
         │
         ▼
     gateway :8081          ← único ponto de entrada externo
-    ├── /users/register  → user-service
-    ├── /oauth2/**       → authorization-server
-    ├── /login           → authorization-server
-    └── /users/**        → user-service
+    ├── /v1/users/register  → user-service
+    ├── /oauth2/**          → authorization-server
+    ├── /login              → authorization-server
+    └── /v1/users/**        → user-service
         │
         ├── authorization-server :8082
         │       ├── chama user-service via Feign (circuit breaker Resilience4j + UserClientFallbackFactory)
@@ -113,7 +113,7 @@ login-interface (React)
 - **Cliente OAuth2 do BFF:** `oauth2Login` + `oauth2Client` (`gateway-client` confidencial) + resource server JWT. Guarda o token na sessão e o relaya downstream — o SPA nunca vê o JWT.
 - **Rate limiting** via Redis (token bucket): LOW 2 req/s cap 5 (registro/IP), MED 5 req/s cap 10 (OAuth2/IP), HIGH 10 req/s cap 20 (autenticados/user). O IP é lido com `getHostString()` (`RateLimiterConfig`/`RateLimitLogFilter`): com `server.forward-headers-strategy=framework` (borda TLS) o WebFlux consome o `X-Forwarded-For` e o `remoteAddress` vira `InetSocketAddress` *unresolved* — `getAddress()` é null e `getHostAddress()` daria NPE.
 - **Rotas em Java** (`GatewayRouter`, `RouteLocatorBuilder`). **`TokenRelay` é por rota** (na rota `user-service`), **não** via `default-filters` do yaml — a DSL Java não recebe default-filters.
-- **CSRF** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`; `/users/register` isento); o entry point devolve **401** (não 302); **logout RP-initiated**.
+- **CSRF** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`; `/v1/users/register` isento); o entry point devolve **401** (não 302); **logout RP-initiated**.
 - **Sessão WebFlux no Redis** via Spring Session (`@EnableRedisWebSession` — exige anotação explícita). Guarda `OAuth2AuthorizedClient` (com JWT) + `SecurityContext`. Cookie `SESSION`.
 - **Outros:** filtros `CorrelationIdFilter` e `RateLimitLogFilter`; load balancing via Eureka (`lb://`).
 
@@ -129,7 +129,7 @@ login-interface (React)
   - **Alinha com a sessão no Redis.**
 - **Mecânica:**
   - **Same-origin via proxy** (Vite em dev, nginx no Docker): `/users`, `/oauth2`, `/login/oauth2`, `/logout` → gateway (só `/login/oauth2`, não `/login` puro).
-  - **Sem token no front:** `apiAxios` com `withCredentials`, sem `Authorization: Bearer`; estado de auth derivado de `GET /users/me` (200 vs 401).
+  - **Sem token no front:** `apiAxios` com `withCredentials`, sem `Authorization: Bearer`; estado de auth derivado de `GET /v1/users/me` (200 vs 401).
   - **Hostname OAuth em Docker:** `OAUTH_AUTHORIZATION_URI` aponta para `localhost:8082` (front-channel/browser), enquanto `issuer-uri`/token/jwks ficam no hostname interno `authorization-server:8082`.
   - **CSRF** via `X-XSRF-TOKEN`.
   - **Logout:** form oculto `POST /logout` → `end_session_endpoint`.
@@ -161,9 +161,9 @@ login-interface (React)
 - **Endpoint interno isolado:** `/internal/users/email/{email}` não está no gateway nem no Swagger — canal exclusivo auth-server ↔ user-service.
   - Protegido por shared secret `X-Internal-Token` (`InternalTokenFilter` valida; `FeignConfig` injeta); acesso direto à 8090 sem o header → 403.
 - **DELETE com semânticas distintas e intencionais:**
-  - `DELETE /users/{id}` (ADMIN) → soft-delete (`deactivateUser`, `active=false`).
-  - `DELETE /users/del/{id}` (ADMIN) → hard-delete (`deleteUser`).
-  - `DELETE /users/remove/me` (USER) → soft-delete.
+  - `DELETE /v1/users/{id}` (ADMIN) → soft-delete (`deactivateUser`, `active=false`).
+  - `DELETE /v1/users/del/{id}` (ADMIN) → hard-delete (`deleteUser`).
+  - `DELETE /v1/users/remove/me` (USER) → soft-delete.
 - **BCrypt** custo padrão (10).
 - **Roles fixas:** apenas `USER` e `ADMIN` (strings simples no MongoDB) — sem roles dinâmicas.
 - **Configuração centralizada:** segredos vêm do config-server via env. Segredos hardcoded são gaps conhecidos, não padrão.
