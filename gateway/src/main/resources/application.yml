@@ -1,5 +1,10 @@
 spring:
   application:
     name: gateway
+  # Credenciais Basic do config-server (C17 / G3). Default dev; prod sobrescreve via env.
+  cloud:
+    config:
+      username: ${CONFIG_SERVER_USERNAME:config-client}
+      password: ${CONFIG_SERVER_PASSWORD:config-dev-secret}
   config:
     import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}

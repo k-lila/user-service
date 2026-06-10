@@ -51,7 +51,7 @@
 - [x] Segredos fora do repositório: variáveis de ambiente ou secret manager, nunca hardcoded _(C11 — Mongo/Postgres/`OAUTH_CLIENT_SECRET`/`INTERNAL_API_TOKEN` em `.env` git-ignored; C17 removeu os defaults de secret dos YAMLs)_
 - [x] Rate limiting por tier: por IP em endpoints públicos e por usuário em endpoints autenticados
 - [x] Proteção CSRF nos endpoints de mutação acessados pelo browser
-- [~] Política de CORS definida na borda e configurável por ambiente, não hardcoded _(G7/C12 — CORS duplicado em 3 módulos com origens fixas; curativo aplicado, solução completa pendente)_
+- [x] Política de CORS definida na borda e configurável por ambiente, não hardcoded _(G7/C12 — CORS removido do user-service; gateway configurável p/ SPA (`CORS_ALLOWED_ORIGINS`) e auth-server configurável p/ Swagger (`CORS_ALLOWED_ORIGINS_AUTH`), via `setAllowedOriginPatterns`)_
 - [x] Proteção anti-brute-force com lockout/backoff por conta no login _(C19 — lockout por (conta, IP) no Redis, 5 falhas; CAPTCHA/auditoria como evolução)_
 - [x] Comparação de tokens e secrets em tempo constante (sem vulnerabilidade de timing)
 - [x] Mascaramento de PII em logs — e-mails e dados pessoais nunca em claro

@@ -75,6 +75,7 @@ login-interface (React)
 - Arquivos em `config-server/.../config/{servico}.yml`.
 - **HA:** duas instâncias (`config-server-1`, `config-server-2`) atrás de `config-lb` (nginx). `CONFIG_SERVER_URL` aponta para `config-lb:8888`. Stateless — qualquer instância serve a mesma config.
 - **Deve subir primeiro** — todos os demais dependem dele via `config-lb`.
+- **HTTP Basic (C17):** `SecurityConfig` exige autenticação no endpoint (`/actuator/health` aberto p/ healthchecks; CSRF off — cliente é máquina). Os clientes enviam `spring.cloud.config.username/password`; par único `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` (default dev no `application.yml`, sem default no compose → fail-fast).
 
 ### discovery-server (9091 / 9092)
 
@@ -233,7 +234,7 @@ Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/pri
 
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). **Gaps ativos:** sem TLS/HTTPS (alta, G1), config-server sem auth (média, G3 — curativo via C17, porta não publicada + defaults de secret removidos; Basic/mTLS pendente), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), CORS duplicado e hardcoded (média, G7 — curativo aplicado), validação de senha fraca (baixa, G9), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). **Resolvidos** (IDs preservados, não reusados): G2 (C16, compose prod-safe), G4 (C11, secrets em `.env`), G6 (C18, management interna), G8 (C8, `permissions` por roles), G10 (C19, lockout por conta+IP); JWT em `localStorage` via BFF.
+Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). **Gaps ativos:** sem TLS/HTTPS (alta, G1), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), validação de senha fraca (baixa, G9), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). **Resolvidos** (IDs preservados, não reusados): G2 (C16, compose prod-safe), G3 (C17, config-server Basic auth + porta fechada + sem defaults de secret), G4 (C11, secrets em `.env`), G6 (C18, management interna), G7 (C12, CORS configurável: gateway p/ SPA, auth-server p/ Swagger; user-service sem CORS), G8 (C8, `permissions` por roles), G10 (C19, lockout por conta+IP); JWT em `localStorage` via BFF.
 
 ---
 

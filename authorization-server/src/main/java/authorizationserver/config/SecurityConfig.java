@@ -49,6 +49,9 @@ public class SecurityConfig {
 			.oauth2AuthorizationServer((authorizationServer) -> {
 				http
 					.securityMatcher(authorizationServer.getEndpointsMatcher())
+					// CORS no endpoint de token (C12): o Swagger-UI troca o code pelo token
+					// via fetch cross-origin (:8081 → :8082/oauth2/token). Origens configuráveis
+					// em CORSConfig (cors.allowed-origins).
 					.cors(Customizer.withDefaults());
 				authorizationServer
 					.oidc(Customizer.withDefaults());

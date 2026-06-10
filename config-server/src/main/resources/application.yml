@@ -7,6 +7,13 @@ spring:
     timeout-per-shutdown-phase: 30s
   application:
     name: config-server
+  # Basic auth (C17 / G3). Default dev para `docker compose up` / `mvn spring-boot:run`
+  # funcionarem sem setup; em prod sobrescrever via env. Os clientes enviam as mesmas
+  # credenciais em spring.cloud.config.username/password.
+  security:
+    user:
+      name: ${CONFIG_SERVER_USERNAME:config-client}
+      password: ${CONFIG_SERVER_PASSWORD:config-dev-secret}
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:native}
   cloud:

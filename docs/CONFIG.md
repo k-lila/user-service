@@ -10,6 +10,7 @@
 - [OAuth2 e JWT](#oauth2-e-jwt)
 - [Canal interno](#canal-interno)
 - [Swagger / OpenAPI](#swagger--openapi)
+- [CORS](#cors)
 - [Observabilidade](#observabilidade)
 - [Front-end](#front-end)
 - [Containers de infraestrutura (só `docker-compose`)](#containers-de-infraestrutura-só-docker-compose)
@@ -21,6 +22,7 @@
 - A coluna **Serviço(s)** indica quem consome a variável.
 - **Compose base prod-safe + override de dev (C16):** `docker-compose.yml` publica só a borda (`gateway:8081` e `interface`); `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas em dev. As URLs voltadas ao **browser** (front-channel/redirects) entram no compose como `${VAR:-localhost-default}` — em dev usam o default; em **prod** (`docker compose -f docker-compose.yml up`) um `.env` as sobrescreve com os hostnames públicos. Ver `.env.example`.
 - **Secrets sem default no config-server (C17):** `AUTH_DB_USER`, `AUTH_DB_PASSWORD` e `OAUTH_CLIENT_SECRET` deixaram de ter default nos YAMLs servidos → ausência da env no cliente derruba a subida (mesma filosofia do `INTERNAL_API_TOKEN`).
+- **Config-server com Basic auth (C17):** o endpoint do config-server exige autenticação (só `/actuator/health` fica aberto, para os healthchecks). O par `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` vale para o usuário in-memory do config-server (`spring.security.user.*`) **e** para os clientes (`spring.cloud.config.username`/`password`).
 
 ## Infraestrutura e descoberta
 
@@ -28,6 +30,8 @@
 | ------------------- | ---------------------- | ------------------------------- | -------------------------------------------------------------------- |
 | `SERVER_PORT`       | todos                  | por serviço¹                    | Porta HTTP do serviço.                                                |
 | `CONFIG_SERVER_URL` | todos (exceto config)  | —                               | `spring.config.import=optional:configserver:...`. Compose: `http://config-lb:8888` (nginx LB na frente de `config-server-1` e `config-server-2`). |
+| `CONFIG_SERVER_USERNAME` | config-server · clientes | `config-client`             | Usuário do Basic auth do config-server (C17). No config-server vira `spring.security.user.name`; nos clientes, `spring.cloud.config.username`. |
+| `CONFIG_SERVER_PASSWORD` | config-server · clientes | `config-dev-secret`         | Senha do Basic auth (C17). **Cuidado:** o compose passa `${CONFIG_SERVER_PASSWORD}` **sem `:-default`** → se faltar no `.env`, o container recebe a var vazia (não cai no default do `application.yml`) e o config-server **falha na subida**. O `.env.example` lista ambas. |
 | `EUREKA_URI`        | todos (exceto discovery) | `http://localhost:9091/eureka` | `defaultZone` do Eureka. Compose: lista CSV com ambas as instâncias HA (`http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka`). |
 | `EUREKA_PEER_URL`   | discovery-server       | `http://localhost:9091/eureka`  | URL do **peer** Eureka (a outra instância). Cada nó aponta para o outro. |
 | `EUREKA_HOSTNAME`   | discovery-server       | `localhost`                     | Hostname que a instância anuncia ao peer. Compose: `discovery-server-1` / `discovery-server-2`. |
@@ -80,6 +84,15 @@
 | `OAUTH2SWAGGER_REDIRECT_URL` | gateway                | `http://localhost:8081/swagger-ui/oauth2-redirect.html` | `oauth2-redirect-url` do Swagger UI (`gateway.yml`).³ |
 
 > ³ Nome consumido pelo `gateway.yml` é `OAUTH2SWAGGER_REDIRECT_URL`. As chaves `OAUTH_GATEWAY_CLIENT` e `OAUTH_SWAGGER_REDIRECT_URL` que aparecem no `docker-compose.yml` **não são lidas** por nenhum serviço.
+
+## CORS
+
+CORS na borda + configurável por ambiente (C12). Cada serviço lê a property `cors.allowed-origins` da sua config servida, com `setAllowedOriginPatterns` (compatível com `allowCredentials`). O **user-service não tem CORS** (nunca recebe fetch cross-origin — só via gateway).
+
+| Variável                    | Serviço(s)           | Default dev              | Observação                                                                                                   |
+| --------------------------- | -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `CORS_ALLOWED_ORIGINS`      | gateway              | `http://localhost:5173`  | Origens (CSV) do **SPA** permitidas pela borda. Em prod, a origem pública real do SPA. Logada no startup do gateway. |
+| `CORS_ALLOWED_ORIGINS_AUTH` | authorization-server | `http://localhost:8081`  | Origem (CSV) do **Swagger-UI** permitida no auth-server — o Swagger é cliente OAuth2 no browser e faz fetch cross-origin a `/oauth2/token`. Em prod, a origem pública do Swagger/borda. Compose usa `${VAR:-default}`. |
 
 ## Observabilidade
 

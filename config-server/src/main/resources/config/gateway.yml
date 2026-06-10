@@ -48,6 +48,11 @@ spring:
         jwt:
           issuer-uri: ${AUTH_ISSUER_URI:http://localhost:8082}
 
+# CORS na borda (C12): origens permitidas configuráveis por ambiente (CSV).
+# Default dev http://localhost:5173; prod sobrescreve via CORS_ALLOWED_ORIGINS.
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
 eureka:
   client:
     service-url:
