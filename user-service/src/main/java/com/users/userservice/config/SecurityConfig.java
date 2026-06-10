@@ -1,6 +1,7 @@
 package com.users.userservice.config;
 
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,12 +14,17 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtGra
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
 
     @Value("${internal.api.token}")
     private String internalToken;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -57,7 +63,7 @@ public class SecurityConfig {
             .oauth2ResourceServer(oauth2 ->
                 oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
             )
-            .addFilterBefore(new InternalTokenFilter(internalToken), BearerTokenAuthenticationFilter.class);
+            .addFilterBefore(new InternalTokenFilter(internalToken, objectMapper), BearerTokenAuthenticationFilter.class);
         return http.build();
     }
 

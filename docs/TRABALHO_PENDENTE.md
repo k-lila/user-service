@@ -14,7 +14,7 @@
 
 - **Contexto:** o sistema roda em **múltiplas instâncias** (escala horizontal) e serve de **base/template reutilizável** pronta para produção.
 - **ID `C#`:** âncora estável de cada correção (referenciada por outros docs). Não é reordenável nem reusável.
-- **Itens concluídos saem deste arquivo** — a numeração (IDs `C#` e seções `§`) é preservada, não reusada; detalhes no histórico git. Já entregues: **§1 — Resiliência e escalabilidade** inteira (C7 — circuit breaker na chamada Feign; deploy rolling com graceful shutdown + probes; eliminação de SPOFs — Eureka HA, config-server HA, MongoDB replica set, Redis Sentinel), **§2 — Hardening de segurança** inteira (C8, C11, C12, C16, C17, C18, C19 e a borda TLS de dev, curativo do G1), **C13** (validação de senha declarativa e forte, fecha G9) e **C15** (higiene cosmética). Os controles ativos resultantes estão em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md#controles-de-segurança-já-implementados).
+- **Itens concluídos saem deste arquivo** — a numeração (IDs `C#` e seções `§`) é preservada, não reusada; detalhes no histórico git. Já entregues: **§1 — Resiliência e escalabilidade** inteira (C7 — circuit breaker na chamada Feign; deploy rolling com graceful shutdown + probes; eliminação de SPOFs — Eureka HA, config-server HA, MongoDB replica set, Redis Sentinel), **§2 — Hardening de segurança** inteira (C8, C11, C12, C16, C17, C18, C19 e a borda TLS de dev, curativo do G1), **C13** (validação de senha declarativa e forte, fecha G9), **C15** (higiene cosmética) e **C9** (erros padronizados RFC 7807 / ProblemDetail). Os controles ativos resultantes estão em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md#controles-de-segurança-já-implementados).
 - **Pendência herdada do §2:** **TLS de produção** (cert ACME/corporativo + domínios reais) — pertence à infra de deploy, não ao código; risco registrado em **G1** ([GAPS_SEGURANCA.md](GAPS_SEGURANCA.md)), setup da borda de dev em [TLS_DEV.md](TLS_DEV.md).
 - **Prioridade:** Alta / Média / Baixa (impacto no objetivo de base sólida e multi-instância). **Esforço:** P / M / G.
 - **Ref:** gap correlato em [GAPS_SEGURANCA.md](GAPS_SEGURANCA.md) — lá fica o **risco/severidade**; aqui, o **plano acionável**.
@@ -25,7 +25,7 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
 
 | ID  | Item                                            | Prioridade | Esforço | Ref |
 | --- | ----------------------------------------------- | ---------- | ------- | --- |
-| C9  | Erros padronizados (RFC 7807 / `ProblemDetail`) | Média      | M       | —   |
+| ~~C9~~  | ~~Erros padronizados (RFC 7807 / `ProblemDetail`)~~ — ✅ concluído | Média      | M       | —   |
 | C10 | Cobertura de testes (gateway/auth/front)        | Média      | M       | —   |
 | —   | Versionamento de API (`/v1`)                    | Baixa      | M       | —   |
 | C14 | Eliminar a dupla chamada Feign por login        | Baixa      | M       | —   |
@@ -33,7 +33,7 @@ Ordem sugerida: **3 → 4 → 5** (a evolução de domínio vem depois da base e
 
 ## 3. Qualidade e API
 
-- [ ] **C9 — Erros padronizados (RFC 7807 / `ProblemDetail`)**. Hoje o `GlobalExceptionHandler` devolve `String` crua e o `@Valid` sai no formato default do Spring (inconsistente). Unificar 400/404/409/500 + validação num único formato `ProblemDetail`. · **Prioridade: Média · Esforço: M**
+- [x] ~~**C9 — Erros padronizados (RFC 7807 / `ProblemDetail`)**. Hoje o `GlobalExceptionHandler` devolve `String` crua e o `@Valid` sai no formato default do Spring (inconsistente). Unificar 400/404/409/500 + validação num único formato `ProblemDetail`.~~ — ✅ concluído · **Prioridade: Média · Esforço: M**
 
 - [ ] **C10 — Cobertura de testes desigual**. Gateway só `contextLoads` (e não-hermético), auth-server com `AuthorizationServiceTest` + `UserClientFallbackFactoryTest` (C7) + `LoginAttemptServiceTest` (C19), front-end zero. · **Prioridade: Média · Esforço: M**
   - **Circuit breaker — teste de integração pendente:** `UserClientFallbackFactory` está coberta por unitários, mas falta um teste que simule o `user-service` fora do ar de ponta a ponta. Abordagem recomendada: WireMock (stub do endpoint `/internal/users/email/{email}` retornando 500 ou timeout) + Resilience4j em modo de teste (`slidingWindowSize` mínimo para abrir o circuito rapidamente) + assert que o fallback lança `UsernameNotFoundException` sem timeout. Encaixa no mesmo esforço de C10 quando a infraestrutura de testes do auth-server for montada.

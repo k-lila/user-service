@@ -9,6 +9,7 @@
 - [Claims do JWT](#claims-do-jwt)
 - [Schema MongoDB (coleção `users`)](#schema-mongodb-coleção-users)
 - [Estratégia de cache (Redis)](#estratégia-de-cache-redis)
+- [Formato de erros (RFC 7807 / ProblemDetail)](#formato-de-erros-rfc-7807--problemdetail)
 
 ## Endpoints expostos via gateway
 
@@ -109,3 +110,38 @@ TTL de 5 min, três caches distintos:
 - `deleteUser` e `deactivateUser` — **evictam** os três caches.
 
 > A escrita é manual (não declarativa) porque cada cache usa uma chave diferente — ID vs e-mail.
+
+## Formato de erros (RFC 7807 / ProblemDetail)
+
+Todos os erros retornam `Content-Type: application/problem+json` com o schema abaixo:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "User was not found for parameters {ID=abc}"
+}
+```
+
+| Status | `title`                 | Situação                                                        |
+| ------ | ----------------------- | --------------------------------------------------------------- |
+| 400    | `Bad Request`           | Argumento inválido (`IllegalArgumentException`)                 |
+| 400    | `Validation Failed`     | Bean Validation (`@Valid`) — inclui propriedade extra `errors`  |
+| 404    | `Not Found`             | Entidade não encontrada (`DomainEntityNotFound`)                |
+| 409    | `Conflict`              | E-mail já cadastrado — `detail` fixo: `"Email already registered"` |
+| 500    | `Internal Server Error` | Erro não tratado — `detail` fixo: `"Erro interno"`             |
+
+**Resposta 400 de validação — propriedade extra `errors`:**
+
+```json
+{
+  "type": "about:blank",
+  "title": "Validation Failed",
+  "status": 400,
+  "detail": "Validation failed",
+  "errors": [
+    { "field": "email", "message": "must be a well-formed email address" }
+  ]
+}
+```

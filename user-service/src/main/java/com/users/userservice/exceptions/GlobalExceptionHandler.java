@@ -1,10 +1,12 @@
 package com.users.userservice.exceptions;
 
-import java.util.stream.Collectors;
+import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -16,30 +18,39 @@ public class GlobalExceptionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(DomainEntityNotFound.class)
-    public ResponseEntity<String> handleDomainEntityNotFound(DomainEntityNotFound e) {
+    public ProblemDetail handleDomainEntityNotFound(DomainEntityNotFound e) {
         LOGGER.warn("| 404 | entidade não encontrada | {}", e.getMessage());
-        return ResponseEntity.status(404).body(e.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+        pd.setTitle("Not Found");
+        return pd;
     }
 
     @ExceptionHandler(EmailAlreadyRegisteredException.class)
-    public ResponseEntity<String> handleEmailAlreadyRegistered(EmailAlreadyRegisteredException e) {
+    public ProblemDetail handleEmailAlreadyRegistered(EmailAlreadyRegisteredException e) {
         LOGGER.warn("| 409 | email já cadastrado");
-        return ResponseEntity.status(409).body(e.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Email already registered");
+        pd.setTitle("Conflict");
+        return pd;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<String> handleIllegalArgument(IllegalArgumentException e) {
+    public ProblemDetail handleIllegalArgument(IllegalArgumentException e) {
         LOGGER.warn("| 400 | argumento inválido | {}", e.getMessage());
-        return ResponseEntity.status(400).body(e.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+        pd.setTitle("Bad Request");
+        return pd;
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<String> handleValidation(MethodArgumentNotValidException e) {
-        String msg = e.getBindingResult().getFieldErrors().stream()
-            .map(err -> err.getField() + ": " + err.getDefaultMessage())
-            .collect(Collectors.joining("; "));
-        LOGGER.warn("| 400 | validação falhou | {}", msg);
-        return ResponseEntity.status(400).body(msg);
+    public ProblemDetail handleValidation(MethodArgumentNotValidException e) {
+        List<Map<String, String>> errors = e.getBindingResult().getFieldErrors().stream()
+            .map(err -> Map.of("field", err.getField(), "message", err.getDefaultMessage()))
+            .toList();
+        LOGGER.warn("| 400 | validação falhou | {}", errors);
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed");
+        pd.setTitle("Validation Failed");
+        pd.setProperty("errors", errors);
+        return pd;
     }
 
     // Deixa o Spring Security traduzir negações de acesso (403) — não devem virar 500.
@@ -49,8 +60,10 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<String> handleGeneric(Exception e) {
+    public ProblemDetail handleGeneric(Exception e) {
         LOGGER.error("| 500 | erro não tratado", e);
-        return ResponseEntity.status(500).body("Erro interno");
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "Erro interno");
+        pd.setTitle("Internal Server Error");
+        return pd;
     }
 }

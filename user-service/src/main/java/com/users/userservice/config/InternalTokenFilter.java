@@ -4,7 +4,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.web.filter.OncePerRequestFilter;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -17,9 +21,11 @@ public class InternalTokenFilter extends OncePerRequestFilter {
 
     private static final String HEADER = "X-Internal-Token";
     private final String expectedToken;
+    private final ObjectMapper mapper;
 
-    public InternalTokenFilter(String expectedToken) {
+    public InternalTokenFilter(String expectedToken, ObjectMapper mapper) {
         this.expectedToken = expectedToken;
+        this.mapper = mapper;
     }
 
     @Override
@@ -32,8 +38,11 @@ public class InternalTokenFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String provided = request.getHeader(HEADER);
         if (!matches(provided)) {
+            ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, "Forbidden");
+            pd.setTitle("Forbidden");
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            response.getWriter().write("Forbidden");
+            response.setContentType("application/problem+json");
+            mapper.writeValue(response.getWriter(), pd);
             return;
         }
         filterChain.doFilter(request, response);
