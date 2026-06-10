@@ -60,4 +60,4 @@ Neste stack (Spring Boot 4.0.1 / spring-data-redis 4.0.1 / Lettuce 6.8.1, sem `c
 
 ## Front-end (`login-interface`)
 
-**Sem cobertura de testes hoje** — não há `vitest`/RTL nem script `test` no `package.json`. O único gate é o `npm run build` (`tsc -b` + `vite build`, typecheck). Bateria de testes planejada (ver [TRABALHO_PENDENTE.md](TRABALHO_PENDENTE.md) §4) para o front BFF, que já está implementado (ver seção _login-interface_ no CLAUDE.md).
+**Sem cobertura de testes hoje** — não há `vitest`/RTL nem script `test` no `package.json`. O único gate é o `npm run build` (`tsc -b` + `vite build`, typecheck). Bateria de testes planejada (ver [TRABALHO_PENDENTE.md](TRABALHO_PENDENTE.md), C10) para o front BFF, que já está implementado (ver seção _login-interface_ no CLAUDE.md).
