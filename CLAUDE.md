@@ -111,7 +111,7 @@ login-interface (React)
 
 - **Base:** Spring Cloud Gateway (WebFlux/reativo, `spring-cloud-starter-gateway-server-webflux`). Único ponto de entrada externo — **nunca chame os serviços diretamente em produção**.
 - **Cliente OAuth2 do BFF:** `oauth2Login` + `oauth2Client` (`gateway-client` confidencial) + resource server JWT. Guarda o token na sessão e o relaya downstream — o SPA nunca vê o JWT.
-- **Rate limiting** via Redis (token bucket): LOW 2 req/s cap 5 (registro/IP), MED 5 req/s cap 10 (OAuth2/IP), HIGH 10 req/s cap 20 (autenticados/user).
+- **Rate limiting** via Redis (token bucket): LOW 2 req/s cap 5 (registro/IP), MED 5 req/s cap 10 (OAuth2/IP), HIGH 10 req/s cap 20 (autenticados/user). O IP é lido com `getHostString()` (`RateLimiterConfig`/`RateLimitLogFilter`): com `server.forward-headers-strategy=framework` (borda TLS) o WebFlux consome o `X-Forwarded-For` e o `remoteAddress` vira `InetSocketAddress` *unresolved* — `getAddress()` é null e `getHostAddress()` daria NPE.
 - **Rotas em Java** (`GatewayRouter`, `RouteLocatorBuilder`). **`TokenRelay` é por rota** (na rota `user-service`), **não** via `default-filters` do yaml — a DSL Java não recebe default-filters.
 - **CSRF** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`; `/users/register` isento); o entry point devolve **401** (não 302); **logout RP-initiated**.
 - **Sessão WebFlux no Redis** via Spring Session (`@EnableRedisWebSession` — exige anotação explícita). Guarda `OAuth2AuthorizedClient` (com JWT) + `SecurityContext`. Cookie `SESSION`.
@@ -187,6 +187,8 @@ docker compose up -d --build
 
 O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`.
 
+**TLS/HTTPS na borda em dev (opcional, G1):** overlay opt-in `docker-compose.tls.yml` sobe um reverse-proxy nginx (`infra/tls-proxy`) que termina TLS com cert do **mkcert** e fala HTTPS com o browser (`app.localhost`/`auth.localhost`), mantendo o interno em HTTP. `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`. O Swagger-UI segue funcional nesse modo: o fluxo OAuth2 passa pela borda (`AUTH_URL`/`AUTH_TOKEN` → `https://auth.localhost`; CORS do auth-server inclui `http://localhost:8081`) — a porta 8082 não é publicada sem o override de dev. Setup e verificação em [docs/TLS_DEV.md](docs/TLS_DEV.md).
+
 ### Ordem manual (sem Docker)
 
 1. config-server → 2. discovery-server → 3. authorization-server → 4. user-service → 5. gateway (`mvn spring-boot:run` em cada) → 6. login-interface (`npm run dev`)
@@ -234,7 +236,7 @@ Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/pri
 
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). **Gaps ativos:** sem TLS/HTTPS (alta, G1), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), validação de senha fraca (baixa, G9), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). **Resolvidos** (IDs preservados, não reusados): G2 (C16, compose prod-safe), G3 (C17, config-server Basic auth + porta fechada + sem defaults de secret), G4 (C11, secrets em `.env`), G6 (C18, management interna), G7 (C12, CORS configurável: gateway p/ SPA, auth-server p/ Swagger; user-service sem CORS), G8 (C8, `permissions` por roles), G10 (C19, lockout por conta+IP); JWT em `localStorage` via BFF.
+Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). **Gaps ativos:** sem TLS/HTTPS em prod (alta, G1 — **curativo:** borda TLS de dev via nginx+mkcert no overlay `docker-compose.tls.yml`, ver [docs/TLS_DEV.md](docs/TLS_DEV.md); falta cert ACME/domínios reais em prod), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), validação de senha fraca (baixa, G9), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5). **Resolvidos** (IDs preservados, não reusados): G2 (C16, compose prod-safe), G3 (C17, config-server Basic auth + porta fechada + sem defaults de secret), G4 (C11, secrets em `.env`), G6 (C18, management interna), G7 (C12, CORS configurável: gateway p/ SPA, auth-server p/ Swagger; user-service sem CORS), G8 (C8, `permissions` por roles), G10 (C19, lockout por conta+IP); JWT em `localStorage` via BFF.
 
 ---
 

@@ -38,7 +38,9 @@ public class RateLimiterConfig {
             }      
             var address = exchange.getRequest().getRemoteAddress();
             if (address == null) return Mono.just("unknown");
-            return Mono.just(address.getAddress().getHostAddress());
+            // getHostString(): com server.forward-headers-strategy=framework o remoteAddress
+            // vem do X-Forwarded-For como InetSocketAddress unresolved (getAddress() == null).
+            return Mono.just(address.getHostString());
         };
     }
 

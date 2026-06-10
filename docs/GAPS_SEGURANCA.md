@@ -18,7 +18,7 @@
 
 | #   | Gap                                                                            | Localização                                                       | Severidade | Status   | Ref |
 | --- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------- | -------- | --- |
-| G1  | Sem TLS/HTTPS (cookies de sessão sem flag `Secure` por consequência)           | Todo o sistema                                                   | Alta       | Aberto   | §3  |
+| G1  | Sem TLS/HTTPS (cookies de sessão sem flag `Secure` por consequência)           | Todo o sistema                                                   | Alta       | Curativo (dev) | §3  |
 | G5  | Chave privada JWK **dev** rastreada no classpath                               | `authorization-server/.../keys/app.key`                         | Média      | Aceito   | §1  |
 | G9  | Validação de senha fraca e dividida (sem complexidade, nullable)               | `UserRequestDTO.java:21` + `RegisterService`                    | Baixa      | Aberto   | C13 |
 | G11 | Grafana `admin/admin`                                                          | `docker-compose.yml` (`GF_SECURITY_ADMIN_*`)                    | Baixa      | Curativo (C11) | C11 |
@@ -28,7 +28,7 @@
 
 **Notas dos gaps diretos (sem subseção):**
 
-- **G1 — TLS/HTTPS:** decidido configurar junto com a infra de produção. Sem TLS, os cookies `SESSION`/`AUTHSESSION` saem sem a flag `Secure` (hoje só `HttpOnly` + `SameSite=Lax`) — resolve-se com o TLS.
+- **G1 — TLS/HTTPS:** **Curativo (dev) — terminação TLS na borda via reverse-proxy nginx + mkcert.** Overlay opt-in `docker-compose.tls.yml` sobe um `tls-proxy` que fala HTTPS com o browser (`https://app.localhost` = SPA+BFF, `https://auth.localhost` = front-channel OAuth2) e mantém o tráfego interno em HTTP — topologia idêntica à de prod (ir para prod = trocar o cert mkcert→ACME e os hostnames `*.localhost` por domínios reais). Com TLS ligado, os cookies `SESSION`/`AUTHSESSION`/`XSRF-TOKEN` saem com **`Secure`** (gateway via `app.cookie.secure`/`APP_COOKIE_SECURE`; auth-server via `server.forward-headers-strategy`). O Swagger-UI (`http://localhost:8081/swagger-ui`) segue funcional no modo TLS: o fluxo OAuth2 passa pela borda (`AUTH_URL`/`AUTH_TOKEN` → `https://auth.localhost`) e o CORS do auth-server inclui a origem do Swagger. Setup e execução em [TLS_DEV.md](TLS_DEV.md). **Pendência:** TLS de produção real (cert ACME/corporativo + domínios) segue para a infra de deploy; o `docker compose up` padrão (sem o overlay) continua HTTP puro.
 - **G5 — Chave JWK dev:** **Aceito (Opção A)** — par RSA dev fixo no classpath para o `docker compose up` funcionar sem setup. Em produção, **sobrescrever** via `JWK_PRIVATE_KEY`/`JWK_PUBLIC_KEY`/`JWK_KEY_ID` apontando para secret montado (`file:/run/secrets/...`); a chave dev nunca vai para produção. Ver §1.
 - **G9 — Senha:** `@Size(min=8)` é nullable (sem `@NotBlank`) e a ausência é checada manualmente no `RegisterService`; sem regra de complexidade. Unificar na validação declarativa. Ver C13.
 - **G11 — Grafana:** **Curativo (C11).** Credenciais externalizadas para `.env` (`GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`) — não mais hardcoded no compose versionado; o valor de dev segue `admin/admin`, **trocar em produção**. Prometheus `:9090` e Grafana `:3000` não publicados em prod (via C16); auth na borda resolve com TLS. Ver C11.
@@ -49,3 +49,4 @@ Para contexto — o básico de segurança da base já está coberto:
 - **CORS na borda + configurável (C12):** `CORSConfig` removido do **user-service** (nunca recebe fetch cross-origin — só via gateway). O **gateway** faz CORS para o SPA (`CORS_ALLOWED_ORIGINS`, default `localhost:5173`); o **auth-server** mantém CORS para o **Swagger-UI** (cliente OAuth2 no browser que faz fetch cross-origin a `/oauth2/token`) com origem própria (`CORS_ALLOWED_ORIGINS_AUTH`, default `localhost:8081`). Ambos via `setAllowedOriginPatterns` (compatível com `allowCredentials`).
 - **Lockout anti-brute-force (C19):** contador de falhas no Redis por (conta, IP), lockout após 5 falhas, mensagem genérica.
 - **Autorização por roles (C8):** `permissions` do JWT derivadas das roles (`USER`/`ADMIN`), não mais hardcoded.
+- **TLS na borda em dev (G1, curativo):** overlay opt-in `docker-compose.tls.yml` (nginx + mkcert) termina TLS na borda; cookies de sessão com flag `Secure` exercíveis localmente. Mesma topologia da prod — ver [TLS_DEV.md](TLS_DEV.md).

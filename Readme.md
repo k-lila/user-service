@@ -50,6 +50,17 @@ docker compose logs -f
 docker compose down -v
 ```
 
+### Com TLS/HTTPS na borda (opcional)
+
+Sobe uma terminação TLS na borda (reverse-proxy nginx + mkcert), com a mesma topologia
+da produção. Requer gerar o certificado uma vez — passo a passo em
+[docs/TLS_DEV.md](docs/TLS_DEV.md).
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+# Acesso: https://app.localhost (SPA + API) · https://auth.localhost (front-channel OAuth2)
+```
+
 ---
 
 ## Execução manual (sem Docker)

@@ -28,8 +28,10 @@ public class RateLimitLogFilter implements GlobalFilter, Ordered {
             HttpStatusCode status = exchange.getResponse().getStatusCode();
             if (status != null && status.value() == 429) {
                 ServerHttpRequest request = exchange.getRequest();
+                // getHostString(): com server.forward-headers-strategy=framework o remoteAddress
+                // vem do X-Forwarded-For como InetSocketAddress unresolved (getAddress() == null).
                 String remote = request.getRemoteAddress() != null
-                    ? request.getRemoteAddress().getAddress().getHostAddress()
+                    ? request.getRemoteAddress().getHostString()
                     : "unknown";
                 LOGGER.warn(
                     "| 429 | rate limit excedido | {} {} | remote: {}",

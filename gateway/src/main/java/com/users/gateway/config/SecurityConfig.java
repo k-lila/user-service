@@ -28,6 +28,8 @@ import org.springframework.security.web.server.util.matcher.AndServerWebExchange
 import org.springframework.security.web.server.util.matcher.NegatedServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.session.CookieWebSessionIdResolver;
+import org.springframework.web.server.session.WebSessionIdResolver;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import reactor.core.publisher.Mono;
@@ -39,15 +41,24 @@ import reactor.core.publisher.Mono;
 @EnableRedisWebSession
 public class SecurityConfig {
 
+    // Flag Secure dos cookies (SESSION/XSRF-TOKEN). Default false p/ dev HTTP puro;
+    // o overlay TLS (docker-compose.tls.yml) liga via APP_COOKIE_SECURE=true. Atrás de
+    // proxy que termina TLS o sslInfo do exchange é null, então a flag é explícita (não inferida).
+    @Value("${app.cookie.secure:false}")
+    private boolean cookieSecure;
+
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http,
             ServerLogoutSuccessHandler oidcLogoutSuccessHandler,
             ReactiveClientRegistrationRepository clientRegistrationRepository) {
+        CookieServerCsrfTokenRepository csrfTokenRepository =
+                CookieServerCsrfTokenRepository.withHttpOnlyFalse();
+        csrfTokenRepository.setCookieCustomizer(cookie -> cookie.secure(cookieSecure));
         http
             // CSRF por token sincronizador: cookie XSRF-TOKEN legível pelo SPA (BFF + sessão).
             // Handler "plano" (não-XOR) para o token bruto do cookie casar com o header X-XSRF-TOKEN.
             .csrf(csrf -> csrf
-                .csrfTokenRepository(CookieServerCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRepository(csrfTokenRepository)
                 .csrfTokenRequestHandler(new ServerCsrfTokenRequestAttributeHandler())
                 // /users/register é público e pré-sessão: CSRF não protege nada ali.
                 .requireCsrfProtectionMatcher(new AndServerWebExchangeMatcher(
@@ -120,6 +131,19 @@ public class SecurityConfig {
                     .toUri();
             return redirectStrategy.sendRedirect(exchange.getExchange(), location);
         };
+    }
+
+    // Cookie SESSION (Spring Session reativo): o WebSessionManager do Spring Session
+    // adota este resolver (autowire opcional). Default cookieName="SESSION", HttpOnly e
+    // SameSite=Lax; aqui só fixamos a flag Secure conforme app.cookie.secure.
+    @Bean
+    public WebSessionIdResolver webSessionIdResolver() {
+        CookieWebSessionIdResolver resolver = new CookieWebSessionIdResolver();
+        resolver.addCookieInitializer(cookie -> cookie
+                .httpOnly(true)
+                .sameSite("Lax")
+                .secure(cookieSecure));
+        return resolver;
     }
 
     // O CsrfToken é carregado de forma lazy no WebFlux; subscrevê-lo a cada request
