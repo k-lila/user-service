@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +26,7 @@ import com.users.userservice.services.SearchService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.groups.Default;
 
 @Tag(
     name = "Controller",
@@ -44,7 +46,8 @@ public class UserController {
 
     @Operation(summary = "Registrar novo usuário")
     @PostMapping("/register")
-    public ResponseEntity<UserResponseDTO> registerUser(@RequestBody @Valid UserRequestDTO userDTO) {
+    public ResponseEntity<UserResponseDTO> registerUser(
+            @RequestBody @Validated({Default.class, UserRequestDTO.OnCreate.class}) UserRequestDTO userDTO) {
         LOGGER.info(
             "| POST | registrar usuário | nome: {}",
             userDTO.getName()

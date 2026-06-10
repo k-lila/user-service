@@ -127,6 +127,36 @@ class UserControllerTest {
         verifyNoInteractions(registerService);
     }
 
+    @Test
+    void register_deveRetornar400_quandoSenhaAusente() throws Exception {
+        mockMvc.perform(post("/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", null))))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
+    }
+
+    @Test
+    void register_deveRetornar400_quandoSenhaSemNumero() throws Exception {
+        mockMvc.perform(post("/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", "somenteletras"))))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
+    }
+
+    @Test
+    void register_deveRetornar400_quandoSenhaSemLetra() throws Exception {
+        mockMvc.perform(post("/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", "123456789"))))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
+    }
+
     // ── GET /users ───────────────────────────────────────────────────────────
 
     @Test
@@ -279,6 +309,32 @@ class UserControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Fulano", "outro@email.com", "senha12345"))))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void updateUser_deveRetornar200_quandoSenhaAusente() throws Exception {
+        when(registerService.updateUser(any(), eq(USER_ID))).thenReturn(buildResponse());
+
+        mockMvc.perform(put("/users")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", null))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void updateUser_deveRetornar400_quandoSenhaInvalida() throws Exception {
+        mockMvc.perform(put("/users")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", "123"))))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
     }
 
     @Test

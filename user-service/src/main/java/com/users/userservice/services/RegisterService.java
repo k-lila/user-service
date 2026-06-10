@@ -36,10 +36,6 @@ public class RegisterService {
     }
 
     public UserResponseDTO registerUser(@Valid UserRequestDTO userDTO) {
-        if (userDTO.getPassword() == null || userDTO.getPassword().isBlank()) {
-            LOGGER.warn("| registro rejeitado | senha ausente");
-            throw new IllegalArgumentException("Password is required");
-        }
         if (userRepository.findByEmail(userDTO.getEmail()).isPresent()) {
             LOGGER.warn(
                 "| email já cadastrado | email: {}",
