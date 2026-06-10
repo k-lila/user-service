@@ -4,6 +4,10 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -44,7 +48,11 @@ public class AuthorizationService implements UserDetailsService {
             LOGGER.warn("| auth | inexistente ou inativo | email: {}", LogUtils.maskEmail(email));
             throw new UsernameNotFoundException("Usuário inativo: " + email);
         }
-        List<SimpleGrantedAuthority> authorities = user.getRoles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList();
+        // userId embutido como authority para que o jwtCustomizer o leia sem nova chamada Feign.
+        // Filtrado em TokenCustomizerConfig: nunca entra no JWT como role ou permission.
+        List<GrantedAuthority> authorities = new ArrayList<>();
+        user.getRoles().forEach(role -> authorities.add(new SimpleGrantedAuthority("ROLE_" + role)));
+        authorities.add(new SimpleGrantedAuthority("USER_ID:" + user.getId()));
         // Lockout anti-brute-force: se o par (conta, IP) atingiu o limite de falhas,
         // accountNonLocked=false faz o DaoAuthenticationProvider lançar LockedException
         // antes de checar a senha. Chaveado pelo email submetido (mesmo valor do listener).

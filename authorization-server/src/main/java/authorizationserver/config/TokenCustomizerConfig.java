@@ -10,18 +10,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 
-import authorizationserver.clients.IUserClient;
-import authorizationserver.dtos.AuthDTO;
-
-
 @Configuration
 public class TokenCustomizerConfig {
 
-    private final IUserClient userClient;
-
-    public TokenCustomizerConfig(IUserClient userClient) {
-        this.userClient = userClient;
-    }
+    private static final String USER_ID_PREFIX = "USER_ID:";
+    private static final String ROLE_PREFIX    = "ROLE_";
 
     @Bean
     public OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer() {
@@ -30,12 +23,24 @@ public class TokenCustomizerConfig {
                 return;
             }
             var authentication = context.getPrincipal();
-            AuthDTO user = userClient.getUserByEmail(authentication.getName());
+            // userId e roles já estão nas authorities (carregados em AuthorizationService.loadUserByUsername).
+            // USER_ID: é filtrado aqui — nunca entra no JWT como role ou permission.
+            String userId = authentication.getAuthorities().stream()
+                .map(a -> a.getAuthority())
+                .filter(a -> a.startsWith(USER_ID_PREFIX))
+                .findFirst()
+                .map(a -> a.substring(USER_ID_PREFIX.length()))
+                .orElse(null);
+            List<String> roles = authentication.getAuthorities().stream()
+                .map(a -> a.getAuthority())
+                .filter(a -> a.startsWith(ROLE_PREFIX))
+                .map(a -> a.substring(ROLE_PREFIX.length()))
+                .toList();
             // Permissions derivadas das roles reais do usuário (em vez de fixas para todos):
             // ADMIN ganha users.delete. LinkedHashSet deduplica (USER+ADMIN não repete
             // read/write) e mantém ordem estável.
             Set<String> permissions = new LinkedHashSet<>();
-            for (String role : user.getRoles()) {
+            for (String role : roles) {
                 switch (role) {
                     case "USER"  -> permissions.addAll(List.of("users.read", "users.write"));
                     case "ADMIN" -> permissions.addAll(List.of("users.read", "users.write", "users.delete"));
@@ -43,14 +48,13 @@ public class TokenCustomizerConfig {
                 }
             }
             context.getClaims().claims(claims -> {
-                claims.put("userID", user.getId());
-                claims.put("roles", user.getRoles());
+                claims.put("userID", userId);
+                claims.put("roles", roles);
                 // ArrayList (não List.of / não o Set direto): o JdbcOAuth2AuthorizationService
                 // serializa os claims no Postgres com type-id, e o PolymorphicTypeValidator do SAS
                 // rejeita java.util.ImmutableCollections$* / Set$* na releitura (ex.: /userinfo).
                 claims.put("permissions", new ArrayList<>(permissions));
                 claims.put("scope", context.getAuthorizedScopes());
-
             });
         };
     }

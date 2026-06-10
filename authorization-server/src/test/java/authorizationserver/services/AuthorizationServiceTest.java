@@ -27,6 +27,7 @@ class AuthorizationServiceTest {
 
     private AuthDTO buildAuthDTO(String email, boolean active, Set<String> roles) {
         AuthDTO dto = new AuthDTO();
+        dto.setId("test-id");
         dto.setEmail(email);
         dto.setPasswordHash("$2a$10$hashed");
         dto.setActive(active);
@@ -83,13 +84,17 @@ class AuthorizationServiceTest {
     }
 
     @Test
-    void deveRetornarUserDetailsComAuthoritiesVazias_quandoRolesVazio() {
+    void deveTerApenasUserIdAuthority_quandoRolesVazio() {
         when(userClient.getUserByEmail("fulano@email.com"))
                 .thenReturn(buildAuthDTO("fulano@email.com", true, Set.of()));
 
         UserDetails result = service.loadUserByUsername("fulano@email.com");
 
         assertNotNull(result);
-        assertTrue(result.getAuthorities().isEmpty());
+        // Sem roles → sem ROLE_* authorities; apenas USER_ID: é adicionado
+        assertTrue(result.getAuthorities().stream()
+            .noneMatch(a -> a.getAuthority().startsWith("ROLE_")));
+        assertTrue(result.getAuthorities().stream()
+            .anyMatch(a -> a.getAuthority().startsWith("USER_ID:")));
     }
 }
