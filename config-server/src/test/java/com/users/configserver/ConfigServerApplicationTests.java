@@ -1,4 +1,4 @@
-package com.memelandia.configserver;
+package com.users.configserver;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
