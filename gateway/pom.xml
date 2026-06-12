@@ -142,6 +142,27 @@
     	  <scope>runtime</scope>
     	</dependency>
 
+    	<!-- Testes: StepVerifier para asserts reativos (Mono/Flux dos filtros e resolvers) -->
+    	<dependency>
+    	  <groupId>io.projectreactor</groupId>
+    	  <artifactId>reactor-test</artifactId>
+    	  <scope>test</scope>
+    	</dependency>
+    	<!-- Testes de integração: Redis real via Testcontainers (rate limiting/sessão);
+    	     WireMock no lugar dos downstream (user-service/authorization-server) resolvidos
+    	     pelo SimpleDiscoveryClient + load balancer (lb://). -->
+    	<dependency>
+    	  <groupId>org.springframework.boot</groupId>
+    	  <artifactId>spring-boot-testcontainers</artifactId>
+    	  <scope>test</scope>
+    	</dependency>
+    	<dependency>
+    	  <groupId>org.wiremock</groupId>
+    	  <artifactId>wiremock-standalone</artifactId>
+    	  <version>3.13.1</version>
+    	  <scope>test</scope>
+    	</dependency>
+
 	</dependencies>
 	<dependencyManagement>
 		<dependencies>
@@ -149,6 +170,13 @@
 				<groupId>org.springframework.cloud</groupId>
 				<artifactId>spring-cloud-dependencies</artifactId>
 				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.testcontainers</groupId>
+				<artifactId>testcontainers-bom</artifactId>
+				<version>${testcontainers.version}</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
