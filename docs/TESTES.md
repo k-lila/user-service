@@ -142,18 +142,33 @@ mvn -f user-service/pom.xml test -Dtest=UserControllerTest
 
 ## Inventário atual
 
-**Total: 140 testes — BUILD SUCCESS em ambos os módulos.**
+**Total: 220 testes — BUILD SUCCESS em user-service, authorization-server, gateway e config-server.**
 
-### Unitários (Mockito) — 45 testes
+### Unitários (Mockito / reativos) — 109 testes
 
 | Módulo | Classe de serviço | Arquivo de teste | Testes |
 | ------ | ----------------- | ---------------- | ------ |
 | `user-service` | `RegisterService` | `services/RegisterServiceTest.java` | 16 |
 | `user-service` | `SearchService` | `services/SearchServiceTest.java` | 7 |
 | `user-service` | `AuthenticationService` | `services/AuthenticationServiceTest.java` | 3 |
-| `authorization-server` | `AuthorizationService` | `services/AuthorizationServiceTest.java` | 6 |
+| `user-service` | `CacheService` (put/evict por cache; null-safe) | `services/CacheServiceTest.java` | 6 |
+| `user-service` | `GlobalExceptionHandler` (6 handlers: 404/409/400/validação/403 rethrow/500) | `exceptions/GlobalExceptionHandlerTest.java` | 6 |
+| `user-service` | `InternalTokenFilter` (`shouldNotFilter`, 403 sem/errado, passa com token) | `config/InternalTokenFilterTest.java` | 5 |
+| `user-service` | `LogUtils.maskEmail` (válido + bordas null/blank/sem-@) | `util/LogUtilsTest.java` | 7 |
+| `authorization-server` | `AuthorizationService` (inclui branch de lockout C19) | `services/AuthorizationServiceTest.java` | 8 |
 | `authorization-server` | `UserClientFallbackFactory` | `clients/UserClientFallbackFactoryTest.java` | 6 |
 | `authorization-server` | `LoginAttemptService` | `services/LoginAttemptServiceTest.java` | 7 |
+| `authorization-server` | `TokenCustomizerConfig` (claims `userID`/`roles`/`permissions` por role) | `config/TokenCustomizerConfigTest.java` | 7 |
+| `authorization-server` | `LoginAttemptListener` (guard form login vs client auth) | `listeners/LoginAttemptListenerTest.java` | 5 |
+| `authorization-server` | `ClientIpResolver` (em/fora de request, remoteAddr null) | `util/ClientIpResolverTest.java` | 3 |
+| `gateway` | `RateLimiterConfig` (limiters + key resolvers IP/usuário) | `config/RateLimiterConfigTest.java` | 8 |
+| `gateway` | `SecurityConfig` beans (cookie sessão, filtro CSRF, logout OIDC) | `config/SecurityConfigBeansTest.java` | 7 |
+| `gateway` | `RateLimitLogFilter` (log 429, precedência) | `filter/RateLimitLogFilterTest.java` | 4 |
+| `gateway` | `CorrelationIdFilter` (reuso/geração de UUID) | `filter/CorrelationIdFilterTest.java` | 2 |
+| `gateway` | `CORSConfig` (origin patterns, methods, credentials) | `config/CORSConfigTest.java` | 1 |
+| `gateway` | `OpenAPIConfig` (scheme OAuth2, URLs, scopes) | `config/OpenAPIConfigTest.java` | 1 |
+
+Os unitários do `gateway` rodam **sem contexto Spring** (`MockServerWebExchange` + `StepVerifier`), exceto a verificação reativa do bean de logout.
 
 ### Controller (`@WebMvcTest`) — 49 testes
 
@@ -164,9 +179,9 @@ MockMvc + `SecurityMockMvcRequestPostProcessors.jwt()`. Cobre status HTTP, autor
 | `user-service` | Endpoints públicos (`ROLE_USER` / `ROLE_ADMIN` / sem token) | `controller/UserControllerTest.java` | 45 |
 | `user-service` | Endpoint interno `/internal/users/email/{email}` (200/404 com `X-Internal-Token`, 403 sem/errado) | `controller/InternalUserControllerTest.java` | 4 |
 
-### Integração (Testcontainers) — 46 testes
+### Integração — 62 testes
 
-Bases comuns por módulo: `AbstractIntegrationTest` no `user-service` (MongoDB `mongo:7` + Redis `redis:7-alpine`) e `AbstractAuthIntegrationTest` no `authorization-server` (PostgreSQL `postgres:16-alpine` + Redis `redis:7-alpine` + WireMock standalone como dublê do user-service; `flushDb()`, `resetAll()` e reset do `CircuitBreakerRegistry` entre testes).
+Bases comuns por módulo: `AbstractIntegrationTest` no `user-service` (MongoDB `mongo:7` + Redis `redis:7-alpine`), `AbstractAuthIntegrationTest` no `authorization-server` (PostgreSQL `postgres:16-alpine` + Redis `redis:7-alpine` + WireMock standalone como dublê do user-service; `flushDb()`, `resetAll()` e reset do `CircuitBreakerRegistry` entre testes) e `AbstractGatewayIntegrationTest` no `gateway` (`@SpringBootTest(RANDOM_PORT)` + `WebTestClient`; Redis `redis:7-alpine` + WireMock como dublê dos dois downstream, resolvidos pelo `SimpleDiscoveryClient` + load balancer `lb://`; `ReactiveJwtDecoder` mockado para o boot não buscar JWKS). O `config-server` usa `@SpringBootTest` + `MockMvc` (sem containers — perfil `native` lê `classpath:/config`).
 
 | Módulo | Foco | Arquivo de teste | Testes |
 | ------ | ---- | ---------------- | ------ |
@@ -177,6 +192,12 @@ Bases comuns por módulo: `AbstractIntegrationTest` no `user-service` (MongoDB `
 | `authorization-server` | Circuit breaker C7: downstream 500 → `/login?error` com exatamente 1 chamada Feign (guarda o C14); timeout do TimeLimiter → falha rápida; circuito aberto → fallback direto sem nova chamada, resposta < timeout | `integration/UserServiceCircuitBreakerIntegrationTest.java` | 3 |
 | `authorization-server` | Seed idempotente do `gateway-client`: re-seed não duplica o client; `redirectUris` (5) e scopes (4) intactos no Postgres | `integration/RegisteredClientSeedIntegrationTest.java` | 2 |
 | `authorization-server` | Sessão Redis (Spring Session): cookie `AUTHSESSION` → chave `spring:session:sessions:<id>` no Redis; saved request sobrevive na sessão | `integration/RedisSessionIntegrationTest.java` | 2 |
+| `gateway` | Roteamento via `lb://`: `/v1/users/register` → user-service, `/oauth2/**` → auth-server, rewritePath dos `/v3/api-docs/user`; propagação do `X-Correlation-ID` ao downstream | `integration/GatewayRoutingIntegrationTest.java` | 4 |
+| `gateway` | Segurança BFF: rota protegida sem auth → **401 (não 302)**; `/v1/users/register` isento de CSRF; cookie `XSRF-TOKEN` emitido; preflight CORS para origem permitida; acesso autenticado liberado (`mockJwt`) | `integration/GatewaySecurityIntegrationTest.java` | 5 |
+| `gateway` | Rate limiting: rajada concentrada do mesmo IP estoura o bucket LOW (2 rps, burst 5) → 429 | `integration/RateLimitIntegrationTest.java` | 1 |
+| `gateway` | Smoke do contexto reativo completo (OAuth2/BFF + rotas + sessão Redis) | `GatewayApplicationTests.java` | 1 |
+| `config-server` | HTTP Basic C17/G3: config exige Basic (401 sem/errado, 200 correto); `/actuator/health` aberto | `ConfigServerSecurityTest.java` | 4 |
+| `config-server` | Smoke do contexto (perfil `native`) | `ConfigServerApplicationTests.java` | 1 |
 
 ---
 
@@ -211,6 +232,13 @@ O estado do circuit breaker (C7) vive no `CircuitBreakerRegistry` do contexto Sp
 
 Com Feign + Spring Cloud CircuitBreaker (group por nome do client), a resolução de configuração só enxerga `resilience4j.*.configs.*` — blocos `instances.user-service` apenas pré-criam um circuit breaker avulso que o Feign **não usa** (o id real é derivado do método, ex.: `IUserClientgetUserByEmailString`). Por isso o `application.yml` de teste do auth-server usa `configs.user-service`. O yml de **produção** ainda usa `instances.*` — risco registrado como **C20** em [TRABALHO_PENDENTE.md](TRABALHO_PENDENTE.md#4-eficiência-e-operação).
 
+### Gateway em teste: OAuth2 sem rede no boot e `mockJwt` só ligado ao contexto
+
+Dois pontos não óbvios na integração do `gateway`:
+
+- **Boot sem discovery OIDC:** o `application.yml` de teste configura o `gateway-client` com endpoints de provider **explícitos** (`authorization-uri`/`token-uri`/`jwk-set-uri`), **sem `issuer-uri`**, e mocka o `ReactiveJwtDecoder` (`@MockitoBean`). Sem isso o contexto tentaria descobrir o issuer/JWKS no startup e o boot falharia offline.
+- **`mockJwt()` não funciona contra a porta real:** os configurers de `spring-security-test` (`mockJwt`/`mockOidcLogin`) injetam o `SecurityContext` no servidor e só valem com `WebTestClient.bindToApplicationContext(...).apply(springSecurity())`. O `WebTestClient` ligado à porta (`bindToServer`) fala HTTP real e ignora o mutator. Por isso o teste de acesso autenticado usa um cliente ligado ao contexto; os demais (401, CSRF, rate limit, roteamento) usam a porta real.
+
 ---
 
 ## Lacunas e cobertura planejada
@@ -223,11 +251,11 @@ Mapeamento dos caminhos (felizes, de erro e de borda) ainda **sem teste**, levan
 
 | Módulo | Cobertura atual | Lacuna dominante | Prioridade |
 | ------ | --------------- | ---------------- | ---------- |
-| `authorization-server` | 19 unitários + 14 integração (fluxo OAuth2 + lockout + circuit breaker + seed + sessão) | Unitários pontuais do C10.4 (`TokenCustomizerConfig` sem unitário) | **2** |
-| `gateway` | só `contextLoads` | Tudo: rotas, rate limiting, CSRF/401, TokenRelay, filtros | **1** |
-| `user-service` | 94 testes (robusto) | Pontuais: `CacheService`, handlers 400/500, `LogUtils` | **3** |
-| `login-interface` | zero (sem test runner) | Componentes e fluxos BFF (C10) | **4** |
-| `config-server` | só `contextLoads` | HTTP Basic (C17) e config servida | **5** |
+| `authorization-server` | 34 unitários + 14 integração (fluxo OAuth2 + lockout + circuit breaker + seed + sessão) | — C10.4 entregue (`TokenCustomizerConfig`, lockout, `LoginAttemptListener`, `ClientIpResolver`) | — |
+| `gateway` | 23 unitários + 11 integração (rotas, rate limiting, CSRF/401, CORS, filtros) | Fluxo BFF OAuth2 ponta a ponta: login real, **TokenRelay** com `Authorization: Bearer` no downstream, logout RP-initiated (C10.7) | **3** |
+| `user-service` | 118 testes (robusto) | — C10.4 entregue (`CacheService`, handlers 400/500, `InternalTokenFilter`, `LogUtils`) | — |
+| `login-interface` | zero (sem test runner) | Componentes e fluxos BFF (C10.5) | **4** |
+| `config-server` | `contextLoads` + 4 de HTTP Basic | — C10.6 entregue | — |
 | `discovery-server` | só `contextLoads` | — fora de escopo (ver nota final) | — |
 
 ---
@@ -236,100 +264,15 @@ Mapeamento dos caminhos (felizes, de erro e de borda) ainda **sem teste**, levan
 
 #### `user-service`
 
-**`CacheService`** (`services/CacheService.java`) — Mockito com mock de `CacheManager`/`Cache`. Hoje coberto só indiretamente (`verify` no `RegisterServiceTest` e integração).
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| `putById` / `putByEmail` com cache presente | feliz | delega `cache.put(key, dto)` |
-| `evictById` / `evictByEmail` / `evictByEmailAuth` com cache presente | feliz | delega `cache.evict(key)` |
-| `cacheManager.getCache()` retorna `null` (em qualquer dos 5 métodos) | borda | não lança — null-safe, apenas loga |
-
-**`GlobalExceptionHandler`** (`exceptions/GlobalExceptionHandler.java`) — os handlers de 404/409/400-validação já são exercitados pelos testes de controller; faltam dois:
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| `IllegalArgumentException` | erro | 400 com `ProblemDetail` contendo a mensagem |
-| `Exception` genérica | erro | 500 com detail fixo "Erro interno" — **não vaza** a mensagem interna |
-
-Pode ser unitário direto ou `@WebMvcTest` forçando a exceção no service mockado.
-
-**`InternalTokenFilter`** (`config/InternalTokenFilter.java`) — hoje coberto só indiretamente pelos 403 do `InternalUserControllerTest`:
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| rota fora de `/internal` | borda | `shouldNotFilter` → filtro não interfere |
-| header `X-Internal-Token` ausente | erro | 403 com `ProblemDetail` |
-| header presente mas errado | erro | 403 (comparação timing-constant via `MessageDigest.isEqual`) |
-
-**`LogUtils.maskEmail`** (`utils/LogUtils.java`):
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| email válido | feliz | `fulano@email.com` → `f***@email.com` |
-| `null` / blank | borda | não lança, retorna valor seguro |
-| string sem `@` | borda | não lança, mascara de forma segura |
+**Entregue (C10.4)** — `CacheService` (mock de `CacheManager`/`Cache`: put/evict por cache + null-safe), `GlobalExceptionHandler` (todos os 6 handlers, com foco no 400 `IllegalArgumentException` e no 500 genérico que **não vaza** a mensagem interna), `InternalTokenFilter` (`shouldNotFilter`, passa com token correto, 403 sem/errado) e `LogUtils.maskEmail` (válido + bordas null/blank/sem-`@`). Ver [Inventário atual](#inventário-atual). Sem lacuna unitária no módulo.
 
 #### `authorization-server`
 
-**`TokenCustomizerConfig`** (`config/TokenCustomizerConfig.java`) — **arquivo crítico sem nenhum teste**; é a peça que injeta os claims que o user-service usa para autorização:
+**Entregue (C10.4)** — `TokenCustomizerConfig` (claims `userID`/`roles`/`permissions` por role, dedup USER+ADMIN, ramo não-access_token, `ArrayList` mutável), branch de lockout C19 do `AuthorizationService` (`isBlocked=true` → `isAccountNonLocked()==false`), `LoginAttemptListener` (guard form login vs client auth, em `onFailure`/`onSuccess`) e `ClientIpResolver` (em/fora de request, `remoteAddr` null). Ver [Inventário atual](#inventário-atual). Sem lacuna unitária no módulo.
 
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| access_token com authorities `USER_ID:` + `ROLE_USER` | feliz | claims `userID`, `roles=["USER"]`, `permissions=["users.read","users.write"]` |
-| access_token com `ROLE_ADMIN` | feliz | `permissions` inclui o conjunto de admin (distinto do USER) |
-| token que não é access_token (ex. id_token) | borda | não customiza nada |
-| sem authority `USER_ID:` | borda | claim `userID` ausente/null, sem lançar |
-| roles vazias | borda | `roles`/`permissions` vazios, sem lançar |
+#### `gateway` (unitários reativos)
 
-**`AuthorizationService`** (`services/AuthorizationService.java`) — branch do lockout C19 descoberto (o teste atual mocka `isBlocked=false` em todos os casos):
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| `loginAttempts.isBlocked()` retorna `true` | erro | `UserDetails.isAccountNonLocked() == false` → `LockedException` antes da checagem de senha |
-
-**`LoginAttemptListener`** (`listeners/LoginAttemptListener.java`):
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| failure com `UsernamePasswordAuthenticationToken` (form login) | feliz | chama `recordFailure(email, ip)` |
-| failure com outro tipo de token (client auth OAuth2) | borda | ignorado — **não** conta falha |
-| success com `UsernamePasswordAuthenticationToken` | feliz | chama `loginSucceeded(email, ip)` |
-| success com outro tipo de token | borda | ignorado |
-
-**`ClientIpResolver`** (`utils/ClientIpResolver.java`):
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| dentro de request HTTP | feliz | retorna `request.getRemoteAddr()` |
-| fora de contexto de request | borda | retorna `"unknown"` |
-| `remoteAddr` null | borda | retorna `"unknown"` |
-
-#### `gateway` (unitários reativos, sem contexto Spring)
-
-**`CorrelationIdFilter`** (`filter/CorrelationIdFilter.java`):
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| header `X-Correlation-ID` presente | feliz | propagado inalterado downstream |
-| header ausente | feliz | UUID gerado e injetado no request mutado |
-
-**`RateLimitLogFilter`** (`filter/RateLimitLogFilter.java`):
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| response status 429 | feliz | log WARN com método, path e IP |
-| status ≠ 429 | borda | silêncio (não loga) |
-| `remoteAddress` *unresolved* (pós `X-Forwarded-For` consumido pelo framework) | borda | usa `getHostString()` — **sem NPE** (regressão documentada no CLAUDE.md) |
-
-**`RateLimiterConfig` — key resolvers** (`config/RateLimiterConfig.java`):
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| `ipKeyResolver` com endereço normal | feliz | retorna o IP |
-| `ipKeyResolver` com `InetSocketAddress` unresolved | borda | `getHostString()` sem NPE |
-| `ipKeyResolver` com `remoteAddress` null | borda | fallback `"unknown"` |
-| `userKeyResolver` com principal autenticado | feliz | nome do principal |
-| `userKeyResolver` sem principal | borda | fallback (anônimo) |
+**Entregues** — `CorrelationIdFilter`, `RateLimitLogFilter`, `RateLimiterConfig` (limiters + key resolvers IP/usuário), `CORSConfig`, `OpenAPIConfig` e os beans isolados do `SecurityConfig` (cookie de sessão, filtro do cookie CSRF, logout OIDC). Ver [Inventário atual](#inventário-atual). Sem lacuna unitária no módulo.
 
 ---
 
@@ -341,25 +284,13 @@ Pode ser unitário direto ou `@WebMvcTest` forçando a exceção no service mock
 
 #### `gateway`
 
-Sem nenhum teste funcional hoje. Infra: `WebTestClient` + Testcontainers `redis` + WireMock como downstream.
+**Integração entregue** — `AbstractGatewayIntegrationTest` (`@SpringBootTest(RANDOM_PORT)` + `WebTestClient`; Testcontainers `redis:7-alpine` + WireMock como dublê dos dois downstream via `SimpleDiscoveryClient` + `lb://`) cobre roteamento, rewritePath dos api-docs, propagação do `X-Correlation-ID`, rate limiting (LOW → 429), segurança BFF (401 não-302, CSRF isento em `/register`, cookie `XSRF-TOKEN`, preflight CORS) e acesso autenticado — ver [Inventário atual](#inventário-atual).
 
-| Fluxo | Caminhos |
-| ----- | -------- |
-| **Roteamento** | `/v1/users/register` → user-service; `/oauth2/**` e `/login` → auth-server; rota autenticada `/v1/users/**` com **TokenRelay** → header `Authorization: Bearer` chega ao downstream |
-| **Rate limiting** | estouro do bucket LOW (2 req/s cap 5) → 429; buckets independentes por IP (IPs distintos não compartilham); HIGH chaveado por usuário autenticado; rejeição 429 logada pelo `RateLimitLogFilter` |
-| **Segurança BFF** | rota protegida sem sessão → **401, não 302**; `POST` sem `X-XSRF-TOKEN` → 403; `/v1/users/register` isento de CSRF; cookie `XSRF-TOKEN` emitido na resposta |
-| **Correlation ID** | `X-Correlation-ID` recebido é propagado ao downstream; ausente é gerado |
-| **Logout RP-initiated** | `POST /logout` → redirect ao `end_session_endpoint` com `id_token_hint` |
+**Lacuna remanescente (fase futura)** — fluxo BFF OAuth2 **ponta a ponta**: login real, troca de código, **TokenRelay** entregando `Authorization: Bearer` ao downstream e logout RP-initiated com `end_session_endpoint`. Exige stub de discovery OIDC/JWK e é a parte mais frágil; o logout OIDC já tem cobertura unitária (`SecurityConfigBeansTest`).
 
 #### `config-server`
 
-`@SpringBootTest(webEnvironment = RANDOM_PORT)` + `TestRestTemplate`, sem containers.
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| `GET /{app}/{profile}` sem credenciais | erro | 401 (HTTP Basic C17/G3) |
-| `GET /{app}/{profile}` com Basic correto | feliz | 200 com a config do classpath |
-| `GET /actuator/health` sem credenciais | feliz | 200 (aberto para healthchecks) |
+**Entregue (C10.6)** — `@SpringBootTest` + `MockMvc` (sem containers), `ConfigServerSecurityTest`: `GET /user-service/default` sem credenciais → 401, com Basic correto → 200, com Basic errado → 401, e `GET /actuator/health` aberto → 200. O `contextLoads` foi movido para o pacote correto (`com.users.configserver`) — antes, no pacote divergente, o `@SpringBootTest` não localizava o `ConfigServerApplication`. Ver [Inventário atual](#inventário-atual).
 
 #### `user-service` — menor prioridade (módulo já robusto)
 

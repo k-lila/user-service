@@ -1,0 +1,53 @@
+# Config de teste do gateway: sem config-server, sem Eureka, sem discovery OIDC de rede.
+# Redis (rate limiting/sessão) e os downstream (user-service/authorization-server via WireMock)
+# são injetados por @DynamicPropertySource na AbstractGatewayIntegrationTest.
+spring:
+  application:
+    name: gateway
+  cloud:
+    config:
+      enabled: false
+  security:
+    oauth2:
+      client:
+        registration:
+          gateway-client:
+            provider: authorization-server
+            client-id: gateway-client
+            client-secret: test-client-secret
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/gateway-client"
+            scope: openid,profile
+        # Provider com endpoints explícitos (sem issuer-uri): evita discovery OIDC no boot.
+        # As URLs não precisam ser alcançáveis no startup (resolução é lazy).
+        provider:
+          authorization-server:
+            authorization-uri: http://localhost:9/oauth2/authorize
+            token-uri: http://localhost:9/oauth2/token
+            jwk-set-uri: http://localhost:9/oauth2/jwks
+            user-info-uri: http://localhost:9/userinfo
+            user-name-attribute: sub
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+management:
+  server:
+    port: -1
+  tracing:
+    sampling:
+      probability: 0
+
+app:
+  cookie:
+    secure: false
+
+cors:
+  allowed-origins: http://localhost:5173
+
+logging:
+  level:
+    root: WARN
