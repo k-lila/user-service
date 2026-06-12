@@ -49,10 +49,11 @@ public class TokenCustomizerConfig {
             }
             context.getClaims().claims(claims -> {
                 claims.put("userID", userId);
-                claims.put("roles", roles);
-                // ArrayList (não List.of / não o Set direto): o JdbcOAuth2AuthorizationService
-                // serializa os claims no Postgres com type-id, e o PolymorphicTypeValidator do SAS
-                // rejeita java.util.ImmutableCollections$* / Set$* na releitura (ex.: /userinfo).
+                // ArrayList (não List.of / não Stream.toList / não o Set direto): o
+                // JdbcOAuth2AuthorizationService serializa os claims no Postgres com type-id,
+                // e o PolymorphicTypeValidator do SAS rejeita java.util.ImmutableCollections$*
+                // / Set$* na releitura (ex.: /userinfo).
+                claims.put("roles", new ArrayList<>(roles));
                 claims.put("permissions", new ArrayList<>(permissions));
                 claims.put("scope", context.getAuthorizedScopes());
             });
