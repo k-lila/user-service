@@ -1,0 +1,55 @@
+{
+  "project": "user-service (blueprint de sistema de usuários — Java + Spring)",
+  "schema_version": "1.0",
+  "services": {
+    "gateway": {
+      "port": 8081,
+      "role": "Único ponto de entrada externo; cliente OAuth2 do BFF; rate limiting; CSRF; TokenRelay",
+      "stack": ["Spring Cloud Gateway (WebFlux)", "Redis (sessão + rate limit)"],
+      "depends_on": ["authorization-server", "user-service", "discovery-server"]
+    },
+    "authorization-server": {
+      "port": 8082,
+      "role": "OAuth2 Authorization Server (authorization_code + PKCE + refresh + OIDC); customiza JWT; lockout",
+      "stack": ["Spring Authorization Server", "PostgreSQL (estado OAuth)", "Redis (sessão)", "OpenFeign + Resilience4j"],
+      "depends_on": ["user-service"]
+    },
+    "user-service": {
+      "port": 8090,
+      "role": "Domínio central: CRUD de usuários; canal interno para o auth-server",
+      "stack": ["Spring Boot", "MongoDB (replica set rs0)", "Redis (cache)"],
+      "depends_on": []
+    },
+    "config-server": {
+      "port": 8888,
+      "role": "Config centralizada (HA atrás de config-lb/nginx); HTTP Basic",
+      "stack": ["Spring Cloud Config"],
+      "depends_on": []
+    },
+    "discovery-server": {
+      "port": "9091/9092",
+      "role": "Eureka HA (peer replication)",
+      "stack": ["Netflix Eureka"],
+      "depends_on": ["config-server"]
+    },
+    "login-interface": {
+      "port": "5173 (dev) / 80 (docker)",
+      "role": "SPA React no padrão BFF; nunca manuseia JWT",
+      "stack": ["React 19", "TypeScript", "Vite", "TailwindCSS 4"],
+      "depends_on": ["gateway"]
+    }
+  },
+  "communication": {
+    "sync": "REST via OpenFeign (auth-server -> user-service /internal/users/email/{email})",
+    "resilience": "Resilience4j circuit breaker + UserClientFallbackFactory",
+    "async": "nenhum (sem Kafka/eventos hoje)",
+    "internal_channel_secret": "X-Internal-Token"
+  },
+  "current_task": {
+    "task_id": null,
+    "service_target": null,
+    "description": null,
+    "workflow": null,
+    "status": "idle"
+  }
+}

@@ -27,6 +27,7 @@ O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o clie
 - [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) — roadmap e correções (C7–C19)
 - [docs/AVALIACAO.md](docs/AVALIACAO.md) — avaliação técnica do projeto por nível
 - [docs/CHECKLIST.md](docs/CHECKLIST.md) — checklist de features obrigatórias de um blueprint de sistema de usuários + tabela de números-chave
+- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema
 
 ---
 
@@ -240,28 +241,63 @@ Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). **Gaps ativos:** sem TLS/H
 
 ---
 
-## Agentes Disponíveis
+## Sistema de Orquestração de Agentes
 
-Subagentes especializados em `.claude/agents/`. Use via Claude Code quando a tarefa se encaixar no escopo de cada um.
+Quando atuo como **orquestrador**, conduzo um time de subagentes especializados
+(`.claude/agents/`) sobre este ecossistema de microsserviços. A delegação acontece pelo
+thread principal: invoco cada subagente, recebo seu relatório estruturado e relaio o que
+importa ao próximo — **não há barramento de mensagens vivo** (subagentes do Claude Code
+rodam em contexto isolado e efêmero). O estado que persiste entre tarefas vive em
+`.claude/memory/`.
 
-| Agente | Arquivo | Quando usar |
-|--------|---------|-------------|
-| `security-auditor` | `.claude/agents/security-auditor.md` | Antes de PRs de hardening; "qual gap (G1–G12) fechar agora?" |
-| `doc-keeper` | `.claude/agents/doc-keeper.md` | Após commits que alteram endpoints, schema, testes ou itens do roadmap |
-| `backlog-driver` | `.claude/agents/backlog-driver.md` | "Execute o próximo item do backlog" ou "implemente C\<n\>" |
-| `error-analyst` | `.claude/agents/error-analyst.md` | Após sessão de mudanças grandes; testes quebrando; auditoria preventiva |
+### Agentes
 
-**Fluxo típico entre agentes:**
+| Agente | Modelo | Responsabilidade | Quando invocar |
+|--------|--------|------------------|----------------|
+| `pm` | sonnet-4-6 | Spec, impacto no ecossistema, critérios de aceite (AC-NN), DoD | Sempre primeiro |
+| `techlead` | sonnet-4-6 (opus-4-8 p/ arquitetura) | Implementa features, C7–C19 e gaps G1–G13; cria ADRs | Após spec aprovada |
+| `qa-tester` | sonnet-4-6 | Testes (unit/controller/integração), regressão, bugs P0–P3 | Após implementação |
+| `senso-critico` | opus-4-8 | Revisão adversarial: consistência entre agentes **+** diagnóstico de bugs latentes | Após o `pm` e após o `qa-tester` |
+| `doc-keeper` | sonnet-4-6 | Sincroniza `docs/` com o código | Fase final, após `APPROVED` |
+
+> Histórico: `techlead` funde os antigos `backlog-driver` + `security-auditor`;
+> `senso-critico` absorve o antigo `error-analyst`. A skill invocável `/suggest-tests`
+> alimenta o `qa-tester`.
+
+### Workflows (`.claude/workflows/`)
+
+`feature.md`, `bugfix.md`, `hotfix.md`, `new-service.md`. Cada um define a sequência
+`pm → senso-critico → techlead → qa-tester → senso-critico → doc-keeper` com os pontos
+de retry e escalonamento. Protocolo geral:
 
 ```
-backlog-driver (implementa C7–C19)
-       ├─► doc-keeper      (atualiza TRABALHO_PENDENTE.md e docs afetados)
-       └─► error-analyst   (verifica se a mudança introduz nova falha)
-
-security-auditor (fecha G1–G11)
-       └─► error-analyst   (valida que o patch não quebra comportamento existente)
-
-error-analyst (auditoria diagnóstica)
-       ├─► backlog-driver  (se o erro tem correção mapeada em C7–C19)
-       └─► security-auditor (se o erro tem implicação de segurança)
+1. Carregar .claude/memory/context.json → identificar serviço(s) alvo e workflow
+2. pm           → especificação (AC-NN)
+3. senso-critico → revisa a spec   (REJECTED 2x → escala ao humano, PARA)
+4. techlead     → implementa + ADR se mudar contrato/schema
+5. qa-tester    → testa            (bug P0 → devolve ao techlead, máx. 2x)
+6. senso-critico → revisão final   (REJECTED → agente responsável, máx. 1x → humano)
+7. APPROVED     → doc-keeper sincroniza docs/ e registra em decisions.md
 ```
+
+### Memória (`.claude/memory/`)
+
+- `context.json` — mapa de serviços + tarefa corrente
+- `decisions.md` — log de decisões/tech-debt (ADRs formais ficam em `docs/adr/`)
+- `blockers.md` — impedimentos ativos
+
+### Regras invioláveis
+
+- **Nunca** pule o `senso-critico` em tarefas que afetam contrato de API
+- **Nunca** permita que o `techlead` altere contrato de API sem ADR (`docs/adr/`)
+- Mudança de contrato ou de schema **exige ADR**; cobertura mínima **80%** nas classes
+  novas/alteradas (70% é o piso bloqueante)
+- Sempre registre decisões em `decisions.md` e bloqueadores em `blockers.md`
+- Após no máximo 2 rodadas de revisão sem aprovação, escale ao humano e pare
+
+### Uso direto (fora do pipeline)
+
+Os agentes também podem ser chamados isoladamente via Claude Code: `techlead` para
+"implemente C\<n\>" ou "feche o gap G\<n\>"; `senso-critico` para auditoria preventiva
+ou "qual gap fechar agora?"; `doc-keeper` após mudanças que afetem `docs/`;
+`/suggest-tests <Classe>` para gerar testes.
