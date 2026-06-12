@@ -1,0 +1,85 @@
+# Config de TESTE: faz sombra ao application.yml de produção (test-classes vem antes no
+# classpath), eliminando o import do config-server. Reúne as propriedades que em runtime
+# chegam via config-server (authorization-server.yml). As coordenadas dinâmicas
+# (Postgres/Redis dos Testcontainers e URL do WireMock) são injetadas por
+# AbstractAuthIntegrationTest via @DynamicPropertySource.
+spring:
+  application:
+    name: authorization-server
+  cloud:
+    config:
+      enabled: false
+    # Circuit breaker no Feign (C7): em runtime vem do config-server; este yml faz sombra,
+    # então precisa reabilitar aqui para os testes de integração exercitarem o fallback.
+    openfeign:
+      circuitbreaker:
+        enabled: true
+        group:
+          enabled: true
+  datasource:
+    driver-class-name: org.postgresql.Driver
+  # Schemas SAS adaptados (mesmo bootstrap de produção) aplicados no Postgres do Testcontainers
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+      schema-locations:
+        - classpath:schema/oauth2-registered-client-schema.sql
+        - classpath:schema/oauth2-authorization-schema.sql
+        - classpath:schema/oauth2-authorization-consent-schema.sql
+
+auth:
+  issuer: http://localhost:8082
+
+# Chaves de DESENVOLVIMENTO do classpath (mesmas do default de produção dev)
+jwk:
+  key-id: user-service-key
+  private-key: classpath:keys/app.key
+  public-key: classpath:keys/app.pub
+
+oauth:
+  client:
+    secret: test-client-secret
+
+internal:
+  api:
+    token: test-internal-token
+
+security:
+  lockout:
+    max-attempts: 5
+    duration: 15m
+
+# Resilience4j em modo de TESTE: janela mínima abre o circuito com 2 falhas consecutivas;
+# waitDurationInOpenState longo mantém o circuito aberto durante o teste (o reset entre
+# testes é feito pela classe base via CircuitBreakerRegistry); timeout de 2s encurta o
+# teste de timeout do TimeLimiter.
+#
+# NOTA: usa `configs.user-service` (configuração NOMEADA), e não `instances.user-service`
+# como o yml de produção. Com Spring Cloud CircuitBreaker + Feign (group por nome do client),
+# a resolução é registry.getConfiguration(id) → getConfiguration(group) → default — e
+# getConfiguration() só enxerga o que vem de `configs.*`; `instances.*` apenas pré-cria um
+# circuit breaker avulso chamado "user-service" que o Feign não usa (o id real é derivado
+# do método, ex.: IUserClientgetUserByEmailString). Verificado empiricamente no C10.2.
+resilience4j:
+  circuitbreaker:
+    configs:
+      user-service:
+        slidingWindowSize: 2
+        minimumNumberOfCalls: 2
+        failureRateThreshold: 50
+        waitDurationInOpenState: 60s
+        permittedNumberOfCallsInHalfOpenState: 1
+  timelimiter:
+    configs:
+      user-service:
+        timeoutDuration: 2s
+
+eureka:
+  client:
+    enabled: false
+
+management:
+  tracing:
+    sampling:
+      probability: 0.0

@@ -141,6 +141,20 @@
     	  <scope>runtime</scope>
     	</dependency>
 
+	    <!-- C10.1: testes de integração — Postgres (estado OAuth) e Redis (sessão/lockout)
+	         reais via Testcontainers; WireMock no lugar do user-service (canal Feign /internal) -->
+	    <dependency>
+	      <groupId>org.testcontainers</groupId>
+	      <artifactId>testcontainers-postgresql</artifactId>
+	      <scope>test</scope>
+	    </dependency>
+	    <dependency>
+	      <groupId>org.wiremock</groupId>
+	      <artifactId>wiremock-standalone</artifactId>
+	      <version>3.13.1</version>
+	      <scope>test</scope>
+	    </dependency>
+
 	</dependencies>
 	<dependencyManagement>
 		<dependencies>
@@ -148,6 +162,13 @@
 				<groupId>org.springframework.cloud</groupId>
 				<artifactId>spring-cloud-dependencies</artifactId>
 				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.testcontainers</groupId>
+				<artifactId>testcontainers-bom</artifactId>
+				<version>${testcontainers.version}</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
