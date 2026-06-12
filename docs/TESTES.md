@@ -230,7 +230,7 @@ O estado do circuit breaker (C7) vive no `CircuitBreakerRegistry` do contexto Sp
 
 ### Resilience4j com Feign: `configs.*` vale, `instances.*` não
 
-Com Feign + Spring Cloud CircuitBreaker (group por nome do client), a resolução de configuração só enxerga `resilience4j.*.configs.*` — blocos `instances.user-service` apenas pré-criam um circuit breaker avulso que o Feign **não usa** (o id real é derivado do método, ex.: `IUserClientgetUserByEmailString`). Por isso o `application.yml` de teste do auth-server usa `configs.user-service`. O yml de **produção** ainda usa `instances.*` — risco registrado como **C20** em [TRABALHO_PENDENTE.md](TRABALHO_PENDENTE.md#4-eficiência-e-operação).
+Com Feign + Spring Cloud CircuitBreaker (group por nome do client), a resolução de configuração só enxerga `resilience4j.*.configs.*` — blocos `instances.user-service` apenas pré-criam um circuit breaker avulso que o Feign **não usa** (o id real é derivado do método, ex.: `IUserClientgetUserByEmailString`). Por isso o `application.yml` de teste do auth-server usa `configs.user-service`. O yml de **produção** (`config-server/.../config/authorization-server.yml`) também usa `configs.user-service` desde o **C20** (antes usava `instances.*`, inerte; o fix somou `minimumNumberOfCalls: 10` para o circuito abrir na janela de 10, antes barrado pelo default 100).
 
 ### Gateway em teste: OAuth2 sem rede no boot e `mockJwt` só ligado ao contexto
 

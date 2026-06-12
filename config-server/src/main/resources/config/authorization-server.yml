@@ -79,17 +79,24 @@ logging:
   pattern:
     level: "%5p [${spring.application.name:},traceId=%X{traceId:-},spanId=%X{spanId:-}]"
 
+# Com Spring Cloud CircuitBreaker + Feign (group por nome do client, group.enabled=true),
+# a resolução é registry.getConfiguration(id) → getConfiguration(group) → default, e
+# getConfiguration() só enxerga `configs.*`. Usar `instances.*` apenas pré-cria um circuit
+# breaker avulso que o Feign não usa (o id real é derivado do método). O nome `user-service`
+# casa com o group name do @FeignClient. minimumNumberOfCalls=10 (= janela) é necessário:
+# o default é 100 e, com janela COUNT_BASED de 10, o circuito nunca abriria (C20).
 resilience4j:
   circuitbreaker:
-    instances:
+    configs:
       user-service:
         slidingWindowSize: 10
+        minimumNumberOfCalls: 10
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
         registerHealthIndicator: true
   timelimiter:
-    instances:
+    configs:
       user-service:
         timeoutDuration: 3s
 
