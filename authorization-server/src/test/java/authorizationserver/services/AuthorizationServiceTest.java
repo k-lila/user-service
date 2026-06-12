@@ -97,4 +97,27 @@ class AuthorizationServiceTest {
         assertTrue(result.getAuthorities().stream()
             .anyMatch(a -> a.getAuthority().startsWith("USER_ID:")));
     }
+
+    @Test
+    void deveMarcarContaBloqueada_quandoLoginAttemptsBloqueado() {
+        when(userClient.getUserByEmail("fulano@email.com"))
+                .thenReturn(buildAuthDTO("fulano@email.com", true, Set.of("USER")));
+        when(loginAttempts.isBlocked(eq("fulano@email.com"), anyString())).thenReturn(true);
+
+        UserDetails result = service.loadUserByUsername("fulano@email.com");
+
+        // accountNonLocked=false → DaoAuthenticationProvider lança LockedException antes da senha.
+        assertFalse(result.isAccountNonLocked());
+    }
+
+    @Test
+    void deveManterContaDesbloqueada_quandoLoginAttemptsLivre() {
+        when(userClient.getUserByEmail("fulano@email.com"))
+                .thenReturn(buildAuthDTO("fulano@email.com", true, Set.of("USER")));
+        when(loginAttempts.isBlocked(eq("fulano@email.com"), anyString())).thenReturn(false);
+
+        UserDetails result = service.loadUserByUsername("fulano@email.com");
+
+        assertTrue(result.isAccountNonLocked());
+    }
 }
