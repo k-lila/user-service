@@ -95,8 +95,6 @@ services:
     depends_on:
       config-lb:
         condition: service_healthy
-      zipkin:
-        condition: service_healthy
     environment:
       SERVER_PORT: 9091
       CONFIG_SERVER_URL: http://config-lb:8888
@@ -119,8 +117,6 @@ services:
     # Sem ports: em prod — Eureka só na rede interna (G2). Republicado em dev no override.
     depends_on:
       config-lb:
-        condition: service_healthy
-      zipkin:
         condition: service_healthy
     environment:
       SERVER_PORT: 9092
@@ -530,6 +526,54 @@ services:
   # Observabilidade (métricas)
   # ──────────────────────────────────────────────
 
+  mongodb-exporter:
+    image: percona/mongodb_exporter:0.43.1
+    networks:
+      - user-service-net
+    # Sem ports: em prod — exporters só na rede interna. Republicado em dev no override se necessário.
+    environment:
+      MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo-1:27017/?replicaSet=rs0&authSource=admin
+    command:
+      - --collect-all
+      - --discovering-mode
+    depends_on:
+      mongo-1:
+        condition: service_healthy
+      mongo-2:
+        condition: service_healthy
+      mongo-3:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    networks:
+      - user-service-net
+    # Sem ports: em prod — exporters só na rede interna.
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@auth-postgres:5432/authdb?sslmode=disable
+    depends_on:
+      auth-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    networks:
+      - user-service-net
+    # Sem ports: em prod — exporters só na rede interna.
+    # Modo multi-target: REDIS_ADDR não definido; o alvo concreto vem do Prometheus via ?target=.
+    depends_on:
+      redis-1:
+        condition: service_healthy
+      redis-2:
+        condition: service_healthy
+      redis-3:
+        condition: service_healthy
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -542,6 +586,9 @@ services:
       - gateway
       - user-service
       - authorization-server
+      - mongodb-exporter
+      - postgres-exporter
+      - redis-exporter
     restart: unless-stopped
 
   grafana:

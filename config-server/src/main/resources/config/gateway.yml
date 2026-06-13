@@ -7,6 +7,11 @@ spring:
     timeout-per-shutdown-phase: 30s
   application:
     name: gateway
+  # WebFlux é reativo: o MDC só recebe traceId/spanId (logging.pattern.level) se a
+  # propagação automática de contexto do Reactor estiver ativa. Sem isso, os logs do
+  # gateway saem com traceId vazio e a correlação log↔Zipkin quebra no edge.
+  reactor:
+    context-propagation: auto
   data:
     redis:
       sentinel:

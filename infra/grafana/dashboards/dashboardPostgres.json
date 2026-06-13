@@ -1,0 +1,157 @@
+{
+  "title": "PostgreSQL",
+  "uid": "postgresql",
+  "timezone": "browser",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "5s",
+
+  "panels": [
+    {
+      "type": "row",
+      "title": "📊 Overview"
+    },
+
+    {
+      "type": "stat",
+      "title": "Postgres UP",
+      "targets": [
+        {
+          "expr": "pg_up"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Conexões (authdb)",
+      "targets": [
+        {
+          "expr": "pg_stat_database_numbackends{datname=\"authdb\"}"
+        }
+      ],
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Locks",
+      "targets": [
+        {
+          "expr": "sum(pg_locks_count{datname=\"authdb\"})"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Tamanho do banco (authdb)",
+      "targets": [
+        {
+          "expr": "pg_database_size_bytes{datname=\"authdb\"}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "row",
+      "title": "🔌 Conexões"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Backends por banco",
+      "targets": [
+        {
+          "expr": "pg_stat_database_numbackends",
+          "legendFormat": "{{datname}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Atividade por estado",
+      "targets": [
+        {
+          "expr": "sum(pg_stat_activity_count) by (state)",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "🔁 Transações & Locks"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Transações/s (commit / rollback)",
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"authdb\"}[1m])",
+          "legendFormat": "commit"
+        },
+        {
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"authdb\"}[1m])",
+          "legendFormat": "rollback"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Deadlocks/s",
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_deadlocks{datname=\"authdb\"}[5m])",
+          "legendFormat": "deadlocks"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "💾 Cache"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Cache hit ratio (authdb)",
+      "targets": [
+        {
+          "expr": "pg_stat_database_blks_hit{datname=\"authdb\"} / (pg_stat_database_blks_hit{datname=\"authdb\"} + pg_stat_database_blks_read{datname=\"authdb\"})",
+          "legendFormat": "hit ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        }
+      },
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 8 }
+    }
+  ]
+}

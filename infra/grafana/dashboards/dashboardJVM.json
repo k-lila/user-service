@@ -1,0 +1,239 @@
+{
+  "title": "JVM",
+  "uid": "jvm",
+  "timezone": "browser",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "5s",
+
+  "templating": {
+    "list": [
+      {
+        "name": "application",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(jvm_memory_used_bytes, application)",
+        "current": {
+          "text": "user-service",
+          "value": "user-service"
+        }
+      }
+    ]
+  },
+
+  "panels": [
+    {
+      "type": "row",
+      "title": "📊 Overview"
+    },
+
+    {
+      "type": "stat",
+      "title": "Uptime",
+      "targets": [
+        {
+          "expr": "max(process_uptime_seconds{application=\"$application\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "CPU do Processo",
+      "targets": [
+        {
+          "expr": "max(process_cpu_usage{application=\"$application\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.6 },
+              { "color": "red", "value": 0.85 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Threads vivas",
+      "targets": [
+        {
+          "expr": "max(jvm_threads_live_threads{application=\"$application\"})"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Classes carregadas",
+      "targets": [
+        {
+          "expr": "max(jvm_classes_loaded_classes{application=\"$application\"})"
+        }
+      ],
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "row",
+      "title": "🧠 Memória"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Heap usado vs máximo",
+      "targets": [
+        {
+          "expr": "sum(jvm_memory_used_bytes{application=\"$application\",area=\"heap\"})",
+          "legendFormat": "usado"
+        },
+        {
+          "expr": "sum(jvm_memory_max_bytes{application=\"$application\",area=\"heap\"})",
+          "legendFormat": "máximo"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Non-heap usado",
+      "targets": [
+        {
+          "expr": "sum(jvm_memory_used_bytes{application=\"$application\",area=\"nonheap\"})",
+          "legendFormat": "non-heap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Memória por pool",
+      "targets": [
+        {
+          "expr": "sum(jvm_memory_used_bytes{application=\"$application\"}) by (id)",
+          "legendFormat": "{{id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "x": 0, "y": 14, "w": 24, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "♻️ Garbage Collection"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "GC — pausas/s",
+      "targets": [
+        {
+          "expr": "sum(rate(jvm_gc_pause_seconds_count{application=\"$application\"}[1m])) by (action, cause)",
+          "legendFormat": "{{action}} ({{cause}})"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 23, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "GC — tempo gasto/s",
+      "targets": [
+        {
+          "expr": "sum(rate(jvm_gc_pause_seconds_sum{application=\"$application\"}[1m])) by (action, cause)",
+          "legendFormat": "{{action}} ({{cause}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": { "x": 12, "y": 23, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "🧵 Threads & CPU"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Threads (vivas / daemon)",
+      "targets": [
+        {
+          "expr": "max(jvm_threads_live_threads{application=\"$application\"})",
+          "legendFormat": "vivas"
+        },
+        {
+          "expr": "max(jvm_threads_daemon_threads{application=\"$application\"})",
+          "legendFormat": "daemon"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 32, "w": 8, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Threads por estado",
+      "targets": [
+        {
+          "expr": "sum(jvm_threads_states_threads{application=\"$application\"}) by (state)",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "gridPos": { "x": 8, "y": 32, "w": 8, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "CPU (processo / sistema)",
+      "targets": [
+        {
+          "expr": "max(process_cpu_usage{application=\"$application\"})",
+          "legendFormat": "processo"
+        },
+        {
+          "expr": "max(system_cpu_usage{application=\"$application\"})",
+          "legendFormat": "sistema"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": { "x": 16, "y": 32, "w": 8, "h": 8 }
+    }
+  ]
+}

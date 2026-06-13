@@ -1,5 +1,6 @@
 {
-  "title": "Dashboard",
+  "title": "HTTP / Borda",
+  "uid": "http-edge",
   "timezone": "browser",
   "schemaVersion": 36,
   "version": 1,
@@ -111,7 +112,7 @@
 
     {
       "type": "timeseries",
-      "title": "Latência Média",
+      "title": "Latência Média (no tempo)",
       "targets": [
         {
           "expr": "1000 * (sum(rate(http_server_requests_seconds_sum{application=\"$application\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])))"
@@ -130,11 +131,11 @@
       "title": "Latência p95 / p99",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"$application\"}[5m])) by (le))",
+          "expr": "1000 * histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"$application\"}[5m])) by (le))",
           "legendFormat": "p95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"$application\"}[5m])) by (le))",
+          "expr": "1000 * histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"$application\"}[5m])) by (le))",
           "legendFormat": "p99"
         }
       ],
@@ -159,6 +160,11 @@
           "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m]))"
         }
       ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
       "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 }
     },
 
@@ -171,6 +177,11 @@
           "legendFormat": "{{method}} {{uri}}"
         }
       ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
       "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 }
     },
 
@@ -192,6 +203,11 @@
           "mode": "normal"
         }
       },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
       "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 }
     },
 
@@ -204,6 +220,11 @@
           "legendFormat": "{{uri}}"
         }
       ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
       "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 }
     }
   ]
