@@ -3,14 +3,34 @@
 .DS_Store
 
 # IDEs / Editors
-.vscode/
-!.vscode/extensions.json
-.idea/
+**/.vscode/*
+!**/.vscode/extensions.json
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Eclipse / STS
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
 
 # Logs
 logs/
@@ -28,7 +48,11 @@ lerna-debug.log*
 *.local
 
 # Java / Maven
+HELP.md
 target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+.mvn/wrapper/maven-wrapper.jar
 *.class
 *.jar
 *.war

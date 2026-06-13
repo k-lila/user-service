@@ -128,13 +128,24 @@ mvn -f authorization-server/pom.xml test -Dtest="*IntegrationTest"
 mvn -f user-service/pom.xml test -Dtest=UserControllerTest
 ```
 
+```bash
+# login-interface — todos os testes (Vitest, sem Docker)
+cd login-interface && npm run test:run
+
+# login-interface — modo watch (desenvolvimento)
+cd login-interface && npm test
+
+# login-interface — com relatório de cobertura (threshold 80%)
+cd login-interface && npm run coverage
+```
+
 **Quando rodar cada categoria:**
 
 | Momento | O que rodar |
 | ------- | ----------- |
-| Durante desenvolvimento | `!*IntegrationTest` — feedback em segundos |
+| Durante desenvolvimento | `!*IntegrationTest` — feedback em segundos; `npm test` no front |
 | Antes do commit | Suite completa do módulo alterado |
-| CI (pull request) | Suite completa de cada módulo (`mvn -f <módulo>/pom.xml test`) |
+| CI (pull request) | Suite completa de cada módulo (`mvn -f <módulo>/pom.xml test`) + `npm run test:run` no front |
 
 ---
 
@@ -178,9 +189,32 @@ Dois pontos não óbvios na integração do `gateway`:
 
 ---
 
+## Suíte do front-end (`login-interface`)
+
+**Stack:** Vitest 4 + React Testing Library + @testing-library/user-event + @testing-library/jest-dom + MSW (modo node). Ambiente jsdom. `vitest.config.ts` separado do `vite.config.ts` — o React Compiler/babel do build de produção não é carregado nos testes.
+
+**39 testes em 14 arquivos**, cobertura 100% nas classes cobertas, threshold 80% configurado (lines/functions/branches/statements).
+
+**Infra de teste** em `src/test/`: `setup.ts` (ciclo de vida MSW server + limpeza de cookie/mocks entre testes), `server.ts`, `handlers.ts` (handlers default `GET /v1/users/me` e `POST /v1/users/register`), `utils.tsx` (`renderWithProviders` com QueryClient isolado por teste + MemoryRouter).
+
+**Cobertura por camada:**
+
+| Camada | Arquivos de teste | O que verificam |
+| ------ | ----------------- | --------------- |
+| API (`src/api/`) | `apiAxios`, `authClient`, `userClient` | Config CSRF/credentials/baseURL; login redirect; logout via form `_csrf`; register com `X-XSRF-TOKEN`; erros |
+| Hooks (`src/hooks/`) | `useCurrentUser`, `useRegister` | 200 e 401 com `retry:false`; navegação `/login` no sucesso; `isError` no erro |
+| Componentes | `LoginBox`, `RegisterBox`, `NavBar`, `ProfileBox`, `ProtectedLayout` | Renderização e interações |
+| Páginas + rotas | `Login`, `Register`, `Dashboard`, `router` | Integração com BrowserRouter real controlando history do jsdom |
+
+**MSW intercepta no boundary HTTP** — testa `apiAxios`/`authClient`/`userClient` de verdade, incluindo CSRF (`X-XSRF-TOKEN`) e `withCredentials`. O login não faz fetch direto; redireciona para o gateway OAuth2 — testado via asserção sobre `window.location.href`.
+
+**Sem E2E/Playwright** — decisão explícita de escopo; o boundary HTTP coberto pelo MSW é o substituto.
+
+---
+
 ## Fora de escopo deliberado
 
 - **`discovery-server`** — Eureka puro, sem lógica própria; testar seria testar o framework.
 - **`CORSConfig` / `OpenAPIConfig`** (gateway e auth-server) — configuração declarativa sem branch.
 - **Getters/setters, DTOs sem lógica, código gerado** — conforme as diretrizes de unitários desta página.
-- **`login-interface`** — sem test runner configurado; único gate hoje é `npm run build` (type check).
+- **E2E / Playwright** — sem cobertura end-to-end; o boundary HTTP é coberto pelo MSW nos testes do `login-interface`.

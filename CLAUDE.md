@@ -215,7 +215,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 
 ## Estratégia de Testes
 
-Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 223 testes — 109 unitários (Mockito/reativos) + 49 controller (`@WebMvcTest` — 45 `UserControllerTest` + 4 `InternalUserControllerTest`) + 65 integração (user-service: Mongo+Redis; auth-server: Postgres+Redis+WireMock, fluxo OAuth2; gateway: Redis+WireMock via `WebTestClient`, roteamento/rate-limit/CSRF + fluxo BFF OAuth2 ponta a ponta; config-server: `MockMvc` p/ HTTP Basic, sem containers); front-end sem cobertura hoje.
+Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 262 testes — 109 unitários (Mockito/reativos) + 49 controller (`@WebMvcTest` — 45 `UserControllerTest` + 4 `InternalUserControllerTest`) + 65 integração (user-service: Mongo+Redis; auth-server: Postgres+Redis+WireMock, fluxo OAuth2; gateway: Redis+WireMock via `WebTestClient`, roteamento/rate-limit/CSRF + fluxo BFF OAuth2 ponta a ponta; config-server: `MockMvc` p/ HTTP Basic, sem containers) + 39 front-end (Vitest+RTL+MSW — API, hooks, componentes, páginas, rotas; threshold 80%).
 
 ---
 
