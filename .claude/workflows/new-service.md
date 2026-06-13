@@ -43,5 +43,5 @@ Foco adicional: acoplamento desnecessário introduzido? Contratos versionados?
 Observabilidade completa desde o início? JWT/sessão tratados conforme o padrão BFF?
 
 ### FASE 6 — Registro (`doc-keeper`)
-Atualiza `SERVICOS.md`, `CONFIG.md` (novas variáveis), `TESTES.md`, e o diagrama de
-arquitetura no `CLAUDE.md` (sinaliza ao humano, pois `CLAUDE.md` tem processo próprio).
+Atualiza `docs/SERVICOS.md`, `docs/CONFIG.md` (novas variáveis), `docs/TESTES.md`
+e o diagrama de arquitetura no `CLAUDE.md`.

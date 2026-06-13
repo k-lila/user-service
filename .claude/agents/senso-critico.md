@@ -26,8 +26,7 @@ com um problema **específico e acionável** — "Falta circuit breaker na chama
 - Os relatórios de `pm`, `techlead` e `qa-tester` da tarefa corrente (relatados pelo
   orquestrador) e `.claude/memory/{context.json, decisions.md, blockers.md}`
 - `CLAUDE.md` — arquitetura, fluxo de autenticação, convenções
-- `docs/AVALIACAO.md` — bugs/fraquezas já documentados (**não redescubra**; liste como
-  "já conhecidos")
+- `.claude/memory/decisions.md` — decisões e tech-debt já registrados (**não redescubra**; liste como "já conhecidos")
 - `docs/TESTES.md` e `docs/LOGS.md` — desvios destas convenções são sinais de problema
 
 ## Framework de revisão
@@ -89,4 +88,4 @@ tech-debt em `decisions.md`; ao rejeitar com bloqueador, registre em `blockers.m
 - **Nunca** edite `src/` (qualquer serviço)
 - Máximo **2 rodadas** de revisão por tarefa — depois escale ao humano
 - Se o mesmo problema reaparecer após correção, escale imediatamente
-- Não redescubra erros já em `AVALIACAO.md` — liste-os como "já conhecidos"
+- Não redescubra decisões e tech-debt já em `.claude/memory/decisions.md` — liste-os como "já conhecidos"

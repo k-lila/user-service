@@ -20,9 +20,9 @@
 - **Default dev** é o valor embutido (no `*.yml` do config-server ou em `@Value` no código) quando a variável não é exportada.
 - Variáveis **sem default** são _fail-fast_: o app não sobe sem elas (o `docker-compose.yml` injeta um valor de dev).
 - A coluna **Serviço(s)** indica quem consome a variável.
-- **Compose base prod-safe + override de dev (C16):** `docker-compose.yml` publica só a borda (`gateway:8081` e `interface`); `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas em dev. As URLs voltadas ao **browser** (front-channel/redirects) entram no compose como `${VAR:-localhost-default}` — em dev usam o default; em **prod** (`docker compose -f docker-compose.yml up`) um `.env` as sobrescreve com os hostnames públicos. Ver `.env.example`.
-- **Secrets sem default no config-server (C17):** `AUTH_DB_USER`, `AUTH_DB_PASSWORD` e `OAUTH_CLIENT_SECRET` deixaram de ter default nos YAMLs servidos → ausência da env no cliente derruba a subida (mesma filosofia do `INTERNAL_API_TOKEN`).
-- **Config-server com Basic auth (C17):** o endpoint do config-server exige autenticação (só `/actuator/health` fica aberto, para os healthchecks). O par `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` vale para o usuário in-memory do config-server (`spring.security.user.*`) **e** para os clientes (`spring.cloud.config.username`/`password`).
+- **Compose base prod-safe + override de dev:** `docker-compose.yml` publica só a borda (`gateway:8081` e `interface`); `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas em dev. As URLs voltadas ao **browser** (front-channel/redirects) entram no compose como `${VAR:-localhost-default}` — em dev usam o default; em **prod** (`docker compose -f docker-compose.yml up`) um `.env` as sobrescreve com os hostnames públicos. Ver `.env.example`.
+- **Secrets sem default no config-server:** `AUTH_DB_USER`, `AUTH_DB_PASSWORD` e `OAUTH_CLIENT_SECRET` deixaram de ter default nos YAMLs servidos → ausência da env no cliente derruba a subida (mesma filosofia do `INTERNAL_API_TOKEN`).
+- **Config-server com Basic auth:** o endpoint do config-server exige autenticação (só `/actuator/health` fica aberto, para os healthchecks). O par `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` vale para o usuário in-memory do config-server (`spring.security.user.*`) **e** para os clientes (`spring.cloud.config.username`/`password`).
 
 ## Infraestrutura e descoberta
 
@@ -30,8 +30,8 @@
 | ------------------- | ---------------------- | ------------------------------- | -------------------------------------------------------------------- |
 | `SERVER_PORT`       | todos                  | por serviço¹                    | Porta HTTP do serviço.                                                |
 | `CONFIG_SERVER_URL` | todos (exceto config)  | —                               | `spring.config.import=optional:configserver:...`. Compose: `http://config-lb:8888` (nginx LB na frente de `config-server-1` e `config-server-2`). |
-| `CONFIG_SERVER_USERNAME` | config-server · clientes | `config-client`             | Usuário do Basic auth do config-server (C17). No config-server vira `spring.security.user.name`; nos clientes, `spring.cloud.config.username`. |
-| `CONFIG_SERVER_PASSWORD` | config-server · clientes | `config-dev-secret`         | Senha do Basic auth (C17). **Cuidado:** o compose passa `${CONFIG_SERVER_PASSWORD}` **sem `:-default`** → se faltar no `.env`, o container recebe a var vazia (não cai no default do `application.yml`) e o config-server **falha na subida**. O `.env.example` lista ambas. |
+| `CONFIG_SERVER_USERNAME` | config-server · clientes | `config-client`             | Usuário do Basic auth do config-server. No config-server vira `spring.security.user.name`; nos clientes, `spring.cloud.config.username`. |
+| `CONFIG_SERVER_PASSWORD` | config-server · clientes | `config-dev-secret`         | Senha do Basic auth. **Cuidado:** o compose passa `${CONFIG_SERVER_PASSWORD}` **sem `:-default`** → se faltar no `.env`, o container recebe a var vazia (não cai no default do `application.yml`) e o config-server **falha na subida**. O `.env.example` lista ambas. |
 | `EUREKA_URI`        | todos (exceto discovery) | `http://localhost:9091/eureka` | `defaultZone` do Eureka. Compose: lista CSV com ambas as instâncias HA (`http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka`). |
 | `EUREKA_PEER_URL`   | discovery-server       | `http://localhost:9091/eureka`  | URL do **peer** Eureka (a outra instância). Cada nó aponta para o outro. |
 | `EUREKA_HOSTNAME`   | discovery-server       | `localhost`                     | Hostname que a instância anuncia ao peer. Compose: `discovery-server-1` / `discovery-server-2`. |
@@ -47,8 +47,8 @@
 | `REDIS_SENTINEL_MASTER` | user-service · gateway · auth-server | `mymaster`          | Nome do master monitorado pelos Sentinels. Substitui `REDIS_HOST`/`REDIS_PORT`.     |
 | `REDIS_SENTINEL_NODES`  | user-service · gateway · auth-server | `redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379` | Lista CSV de endereços dos processos Sentinel. |
 | `AUTH_DB_URL`       | authorization-server                | `jdbc:postgresql://localhost:5432/authdb`    | Datasource do Postgres que guarda o estado OAuth.                |
-| `AUTH_DB_USER`      | authorization-server                | — (fail-fast)                                | Sem default no config-server (C17); o compose injeta `${POSTGRES_USER}`. |
-| `AUTH_DB_PASSWORD`  | authorization-server                | — (fail-fast)                                | Sem default no config-server (C17); o compose injeta `${POSTGRES_PASSWORD}`. |
+| `AUTH_DB_USER`      | authorization-server                | — (fail-fast)                                | Sem default no config-server; o compose injeta `${POSTGRES_USER}`. |
+| `AUTH_DB_PASSWORD`  | authorization-server                | — (fail-fast)                                | Sem default no config-server; o compose injeta `${POSTGRES_PASSWORD}`. |
 
 ## OAuth2 e JWT
 
@@ -60,7 +60,7 @@
 | `JWK_PUBLIC_KEY`           | authorization-server  | `classpath:keys/app.pub`                             | Chave pública RSA (PEM). **Default dev**.                                                    |
 | `JWK_KEY_ID`               | authorization-server  | `user-service-key`                                   | `kid` estável da chave de assinatura.                                                        |
 | `OAUTH_CLIENT_ID`          | gateway · auth-server | `gateway-client`                                     | Client confidencial do BFF.                                                                  |
-| `OAUTH_CLIENT_SECRET`      | gateway · auth-server | — (fail-fast)                                        | Sem default no config-server (C17); o compose injeta via `.env`. Sobrescrever em produção.   |
+| `OAUTH_CLIENT_SECRET`      | gateway · auth-server | — (fail-fast)                                        | Sem default no config-server; o compose injeta via `.env`. Sobrescrever em produção.   |
 | `OAUTH_REDIRECT_URI`       | gateway               | `{baseUrl}/login/oauth2/code/gateway-client`         | `redirect-uri` do fluxo. Em **dev manual** (`npm run dev`), exporte `http://localhost:5173/login/oauth2/code/gateway-client`.² |
 | `OAUTH_AUTHORIZATION_URI`  | gateway               | `http://localhost:8082/oauth2/authorize`             | Endpoint de autorização **front-channel** (browser). Só este endpoint usa hostname externo. |
 | `OAUTH_END_SESSION_URI`    | gateway               | `http://localhost:8082/connect/logout`               | Endpoint de logout OIDC do IdP (browser). Lido em `gateway/.../SecurityConfig.java`.        |
@@ -87,7 +87,7 @@
 
 ## CORS
 
-CORS na borda + configurável por ambiente (C12). Cada serviço lê a property `cors.allowed-origins` da sua config servida, com `setAllowedOriginPatterns` (compatível com `allowCredentials`). O **user-service não tem CORS** (nunca recebe fetch cross-origin — só via gateway).
+CORS na borda + configurável por ambiente. Cada serviço lê a property `cors.allowed-origins` da sua config servida, com `setAllowedOriginPatterns` (compatível com `allowCredentials`). O **user-service não tem CORS** (nunca recebe fetch cross-origin — só via gateway).
 
 | Variável                    | Serviço(s)           | Default dev              | Observação                                                                                                   |
 | --------------------------- | -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
@@ -119,4 +119,4 @@ Consumidas pelos próprios containers de banco na inicialização, não pelos se
 | `POSTGRES_PASSWORD`           | `auth-postgres`        | `auth_1234321`  |                                                    |
 | `MONGO_INITDB_ROOT_USERNAME`  | `mongo-1`              | `user_service`  | Só no nó primário; secundários recebem por replicação. |
 | `MONGO_INITDB_ROOT_PASSWORD`  | `mongo-1`              | `user_1234321`  |                                                    |
-| `WEB_HOST_PORT`               | `interface`            | `5173`          | Porta do **host** da borda pública (mapeia para `:80` do container). Dev usa `5173`; prod tipicamente `80` (C16). |
+| `WEB_HOST_PORT`               | `interface`            | `5173`          | Porta do **host** da borda pública (mapeia para `:80` do container). Dev usa `5173`; prod tipicamente `80`. |

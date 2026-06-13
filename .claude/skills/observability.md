@@ -20,7 +20,7 @@
 ## Health checks
 
 - `/actuator/health` aberto para healthchecks (config-server e demais). Actuator
-  restante é interno (não exposto na borda pública — ver C18).
+  restante é interno (não exposto na borda pública).
 
 ## Logs estruturados
 

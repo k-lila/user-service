@@ -26,5 +26,5 @@ está coberta.
 - `APPROVED` → registra em `.claude/memory/decisions.md`.
 
 ### FASE 5 — Registro (`doc-keeper`)
-Atualiza docs apenas se o comportamento documentado mudou (ex.: `SERVICOS.md`,
-`TESTES.md` se a contagem de testes mudou).
+Atualiza docs apenas se o comportamento documentado mudou (ex.: `docs/SERVICOS.md`,
+`docs/TESTES.md` se uma armadilha nova foi descoberta).

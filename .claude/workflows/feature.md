@@ -17,9 +17,8 @@ Lê `context.json`; produz spec com impacto no ecossistema, AC-NN (Gherkin), DoD
 
 ### FASE 3 — Implementação (`techlead`)
 Lê spec + skills (`java-microservices`, `inter-service-communication` se aplicável) +
-status real em `TRABALHO_PENDENTE.md`. Relatório pré-implementação (razão/arquivos a
-criar/modificar) e **aguarda confirmação**. Cria ADR se mudar contrato/schema. Escreve
-código + testes.
+`CLAUDE.md`. Relatório pré-implementação (razão/arquivos a criar/modificar) e **aguarda
+confirmação**. Cria ADR se mudar contrato/schema. Escreve código + testes.
 
 ### FASE 4 — Testes (`qa-tester`)
 Estratégia por AC-NN; testes unit/controller/integração (usa `/suggest-tests`); regressão.
@@ -34,8 +33,8 @@ microsserviços; bugs latentes; raciocínio adversarial.
 - `APPROVED` → registrar decisões/tech-debt em `.claude/memory/decisions.md`.
 
 ### FASE 6 — Registro (`doc-keeper`)
-Sincroniza os docs afetados (`SERVICOS.md`, `TESTES.md`, `TRABALHO_PENDENTE.md`,
-`GAPS_SEGURANCA.md`, `LOGS.md`) conforme o que o techlead alterou.
+Sincroniza os docs afetados (`CLAUDE.md`, `docs/SERVICOS.md`, `docs/TESTES.md`,
+`docs/LOGS.md`, `docs/CONFIG.md`) conforme o que o techlead alterou.
 
 ## Regra inviolável
 Se a feature **altera contrato de API**, a revisão do `senso-critico` é obrigatória nas

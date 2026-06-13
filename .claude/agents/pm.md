@@ -20,7 +20,7 @@ usar — e que o `senso-critico` vai revisar antes de qualquer linha de código.
 a tarefa corrente. Em seguida, conforme o caso:
 - `CLAUDE.md` — arquitetura, fluxo de autenticação, convenções e decisões de design
 - `docs/SERVICOS.md` — endpoints, schema MongoDB, caches (para entender o contrato atual)
-- `docs/TRABALHO_PENDENTE.md` e `docs/GAPS_SEGURANCA.md` — se a tarefa referenciar C<n>/G<n>
+- `CLAUDE.md` seção "Gaps de Segurança Conhecidos" — se a tarefa referenciar G<n>
 
 ## Processo obrigatório
 

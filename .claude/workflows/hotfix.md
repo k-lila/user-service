@@ -30,4 +30,4 @@ Foco em Dimensão 3 (bugs latentes) e Dimensão 4 (adversarial: "o fix abre outr
 
 ### FASE 5 — Registro + follow-up (`doc-keeper`)
 Atualiza docs afetados e registra qualquer dívida deixada para tratar depois
-(ex.: novo item candidato em `TRABALHO_PENDENTE.md`).
+em `.claude/memory/decisions.md`.

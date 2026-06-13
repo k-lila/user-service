@@ -6,9 +6,7 @@
 
 - [Diretrizes de testes](#diretrizes-de-testes)
 - [Como executar](#como-executar)
-- [Inventário atual](#inventário-atual)
 - [Armadilhas e comportamentos não óbvios do stack](#armadilhas-e-comportamentos-não-óbvios-do-stack)
-- [Lacunas e cobertura planejada](#lacunas-e-cobertura-planejada)
 
 ---
 
@@ -140,68 +138,6 @@ mvn -f user-service/pom.xml test -Dtest=UserControllerTest
 
 ---
 
-## Inventário atual
-
-**Total: 223 testes — BUILD SUCCESS em user-service, authorization-server, gateway e config-server.**
-
-### Unitários (Mockito / reativos) — 109 testes
-
-| Módulo | Classe de serviço | Arquivo de teste | Testes |
-| ------ | ----------------- | ---------------- | ------ |
-| `user-service` | `RegisterService` | `services/RegisterServiceTest.java` | 16 |
-| `user-service` | `SearchService` | `services/SearchServiceTest.java` | 7 |
-| `user-service` | `AuthenticationService` | `services/AuthenticationServiceTest.java` | 3 |
-| `user-service` | `CacheService` (put/evict por cache; null-safe) | `services/CacheServiceTest.java` | 6 |
-| `user-service` | `GlobalExceptionHandler` (6 handlers: 404/409/400/validação/403 rethrow/500) | `exceptions/GlobalExceptionHandlerTest.java` | 6 |
-| `user-service` | `InternalTokenFilter` (`shouldNotFilter`, 403 sem/errado, passa com token) | `config/InternalTokenFilterTest.java` | 5 |
-| `user-service` | `LogUtils.maskEmail` (válido + bordas null/blank/sem-@) | `util/LogUtilsTest.java` | 7 |
-| `authorization-server` | `AuthorizationService` (inclui branch de lockout C19) | `services/AuthorizationServiceTest.java` | 8 |
-| `authorization-server` | `UserClientFallbackFactory` | `clients/UserClientFallbackFactoryTest.java` | 6 |
-| `authorization-server` | `LoginAttemptService` | `services/LoginAttemptServiceTest.java` | 7 |
-| `authorization-server` | `TokenCustomizerConfig` (claims `userID`/`roles`/`permissions` por role) | `config/TokenCustomizerConfigTest.java` | 7 |
-| `authorization-server` | `LoginAttemptListener` (guard form login vs client auth) | `listeners/LoginAttemptListenerTest.java` | 5 |
-| `authorization-server` | `ClientIpResolver` (em/fora de request, remoteAddr null) | `util/ClientIpResolverTest.java` | 3 |
-| `gateway` | `RateLimiterConfig` (limiters + key resolvers IP/usuário) | `config/RateLimiterConfigTest.java` | 8 |
-| `gateway` | `SecurityConfig` beans (cookie sessão, filtro CSRF, logout OIDC) | `config/SecurityConfigBeansTest.java` | 7 |
-| `gateway` | `RateLimitLogFilter` (log 429, precedência) | `filter/RateLimitLogFilterTest.java` | 4 |
-| `gateway` | `CorrelationIdFilter` (reuso/geração de UUID) | `filter/CorrelationIdFilterTest.java` | 2 |
-| `gateway` | `CORSConfig` (origin patterns, methods, credentials) | `config/CORSConfigTest.java` | 1 |
-| `gateway` | `OpenAPIConfig` (scheme OAuth2, URLs, scopes) | `config/OpenAPIConfigTest.java` | 1 |
-
-Os unitários do `gateway` rodam **sem contexto Spring** (`MockServerWebExchange` + `StepVerifier`), exceto a verificação reativa do bean de logout.
-
-### Controller (`@WebMvcTest`) — 49 testes
-
-MockMvc + `SecurityMockMvcRequestPostProcessors.jwt()`. Cobre status HTTP, autorização por role, extração de claims JWT e validação via Bean Validation.
-
-| Módulo | Foco | Arquivo de teste | Testes |
-| ------ | ---- | ---------------- | ------ |
-| `user-service` | Endpoints públicos (`ROLE_USER` / `ROLE_ADMIN` / sem token) | `controller/UserControllerTest.java` | 45 |
-| `user-service` | Endpoint interno `/internal/users/email/{email}` (200/404 com `X-Internal-Token`, 403 sem/errado) | `controller/InternalUserControllerTest.java` | 4 |
-
-### Integração — 65 testes
-
-Bases comuns por módulo: `AbstractIntegrationTest` no `user-service` (MongoDB `mongo:7` + Redis `redis:7-alpine`), `AbstractAuthIntegrationTest` no `authorization-server` (PostgreSQL `postgres:16-alpine` + Redis `redis:7-alpine` + WireMock standalone como dublê do user-service; `flushDb()`, `resetAll()` e reset do `CircuitBreakerRegistry` entre testes) e `AbstractGatewayIntegrationTest` no `gateway` (`@SpringBootTest(RANDOM_PORT)` + `WebTestClient`; Redis `redis:7-alpine` + WireMock como dublê dos dois downstream, resolvidos pelo `SimpleDiscoveryClient` + load balancer `lb://`; `ReactiveJwtDecoder` mockado para o boot não buscar JWKS). O `config-server` usa `@SpringBootTest` + `MockMvc` (sem containers — perfil `native` lê `classpath:/config`).
-
-| Módulo | Foco | Arquivo de teste | Testes |
-| ------ | ---- | ---------------- | ------ |
-| `user-service` | Fluxo registro → busca → atualização → desativação/remoção; unicidade de e-mail; índice único no banco | `integration/UserFlowIntegrationTest.java` | 18 |
-| `user-service` | Comportamento do cache Redis: popular/evictar `usersById` e `usersByEmail` | `integration/CacheIntegrationTest.java` | 14 |
-| `authorization-server` | Fluxo authorization_code + PKCE ponta a ponta: feliz → JWT com claims `userID`/`roles`/`permissions` reais (`TokenCustomizerConfig`/`JWKConfig`/seed do `gateway-client`); credenciais inválidas → `302 /login?error` sem code; sem PKCE → `error=invalid_request` | `integration/OAuth2AuthorizationCodeFlowIntegrationTest.java` | 3 |
-| `authorization-server` | Lockout C19 e2e: 5 falhas → 6ª com senha correta bloqueada (redirect idêntico ao de senha errada, sem vazar distinção); sucesso antes do limite remove a chave `login_fail:*`; contas e IPs distintos não se contaminam (IP via `request.setRemoteAddr`) | `integration/LoginLockoutIntegrationTest.java` | 4 |
-| `authorization-server` | Circuit breaker C7: downstream 500 → `/login?error` com exatamente 1 chamada Feign (guarda o C14); timeout do TimeLimiter → falha rápida; circuito aberto → fallback direto sem nova chamada, resposta < timeout | `integration/UserServiceCircuitBreakerIntegrationTest.java` | 3 |
-| `authorization-server` | Seed idempotente do `gateway-client`: re-seed não duplica o client; `redirectUris` (5) e scopes (4) intactos no Postgres | `integration/RegisteredClientSeedIntegrationTest.java` | 2 |
-| `authorization-server` | Sessão Redis (Spring Session): cookie `AUTHSESSION` → chave `spring:session:sessions:<id>` no Redis; saved request sobrevive na sessão | `integration/RedisSessionIntegrationTest.java` | 2 |
-| `gateway` | Roteamento via `lb://`: `/v1/users/register` → user-service, `/oauth2/**` → auth-server, rewritePath dos `/v3/api-docs/user`; propagação do `X-Correlation-ID` ao downstream | `integration/GatewayRoutingIntegrationTest.java` | 4 |
-| `gateway` | Segurança BFF: rota protegida sem auth → **401 (não 302)**; `/v1/users/register` isento de CSRF; cookie `XSRF-TOKEN` emitido; preflight CORS para origem permitida; acesso autenticado liberado (`mockJwt`) | `integration/GatewaySecurityIntegrationTest.java` | 5 |
-| `gateway` | Rate limiting: rajada concentrada do mesmo IP estoura o bucket LOW (2 rps, burst 5) → 429 | `integration/RateLimitIntegrationTest.java` | 1 |
-| `gateway` | Fluxo BFF OAuth2 ponta a ponta (C10.7): `authorization_code`+PKCE+OIDC real contra a porta — redirect com `code_challenge`/S256/`nonce`; **TokenRelay** entrega `Authorization: Bearer` ao downstream; logout RP-initiated → 302 ao `end_session` com `id_token_hint` | `integration/GatewayOAuth2FlowIntegrationTest.java` | 3 |
-| `gateway` | Smoke do contexto reativo completo (OAuth2/BFF + rotas + sessão Redis) | `GatewayApplicationTests.java` | 1 |
-| `config-server` | HTTP Basic C17/G3: config exige Basic (401 sem/errado, 200 correto); `/actuator/health` aberto | `ConfigServerSecurityTest.java` | 4 |
-| `config-server` | Smoke do contexto (perfil `native`) | `ConfigServerApplicationTests.java` | 1 |
-
----
-
 ## Armadilhas e comportamentos não óbvios do stack
 
 ### Visibilidade eventual do `RedisCache`
@@ -227,11 +163,11 @@ O `IUserClient` resolve `user-service` por service discovery. Nos testes de inte
 
 ### Estado do circuit breaker é compartilhado entre testes de integração
 
-O estado do circuit breaker (C7) vive no `CircuitBreakerRegistry` do contexto Spring, que é reusado entre as classes de teste — um circuito aberto por um teste de falha contaminaria os seguintes (fallback direto sem chamada Feign). Fix: `AbstractAuthIntegrationTest` reseta o `CircuitBreakerRegistry` entre testes.
+O estado do circuit breaker vive no `CircuitBreakerRegistry` do contexto Spring, que é reusado entre as classes de teste — um circuito aberto por um teste de falha contaminaria os seguintes (fallback direto sem chamada Feign). Fix: `AbstractAuthIntegrationTest` reseta o `CircuitBreakerRegistry` entre testes.
 
 ### Resilience4j com Feign: `configs.*` vale, `instances.*` não
 
-Com Feign + Spring Cloud CircuitBreaker (group por nome do client), a resolução de configuração só enxerga `resilience4j.*.configs.*` — blocos `instances.user-service` apenas pré-criam um circuit breaker avulso que o Feign **não usa** (o id real é derivado do método, ex.: `IUserClientgetUserByEmailString`). Por isso o `application.yml` de teste do auth-server usa `configs.user-service`. O yml de **produção** (`config-server/.../config/authorization-server.yml`) também usa `configs.user-service` desde o **C20** (antes usava `instances.*`, inerte; o fix somou `minimumNumberOfCalls: 10` para o circuito abrir na janela de 10, antes barrado pelo default 100).
+Com Feign + Spring Cloud CircuitBreaker (group por nome do client), a resolução de configuração só enxerga `resilience4j.*.configs.*` — blocos `instances.user-service` apenas pré-criam um circuit breaker avulso que o Feign **não usa** (o id real é derivado do método, ex.: `IUserClientgetUserByEmailString`). Por isso o `application.yml` de teste do auth-server usa `configs.user-service`. O yml de **produção** (`config-server/.../config/authorization-server.yml`) também usa `configs.user-service` (antes usava `instances.*`, inerte; o fix somou `minimumNumberOfCalls: 10` para o circuito abrir na janela de 10, antes barrado pelo default 100).
 
 ### Gateway em teste: OAuth2 sem rede no boot e `mockJwt` só ligado ao contexto
 
@@ -242,91 +178,9 @@ Dois pontos não óbvios na integração do `gateway`:
 
 ---
 
-## Lacunas e cobertura planejada
-
-Mapeamento dos caminhos (felizes, de erro e de borda) ainda **sem teste**, levantado por varredura do código de produção de todos os módulos cruzada com o inventário atual. Caminhos já cobertos não aparecem aqui.
-
-> **Roadmap de implementação:** as fases de execução (C10.1–C10.6, com infra, dependências e critério de pronto) estão em [TRABALHO_PENDENTE.md § 3](TRABALHO_PENDENTE.md#3-qualidade-e-api).
-
-### Visão geral por módulo
-
-| Módulo | Cobertura atual | Lacuna dominante | Prioridade |
-| ------ | --------------- | ---------------- | ---------- |
-| `authorization-server` | 34 unitários + 14 integração (fluxo OAuth2 + lockout + circuit breaker + seed + sessão) | — C10.4 entregue (`TokenCustomizerConfig`, lockout, `LoginAttemptListener`, `ClientIpResolver`) | — |
-| `gateway` | 23 unitários + 14 integração (rotas, rate limiting, CSRF/401, CORS, filtros, fluxo BFF OAuth2 ponta a ponta) | — C10.7 entregue (login real + **TokenRelay** + logout RP-initiated) | — |
-| `user-service` | 118 testes (robusto) | — C10.4 entregue (`CacheService`, handlers 400/500, `InternalTokenFilter`, `LogUtils`) | — |
-| `login-interface` | zero (sem test runner) | Componentes e fluxos BFF (C10.5) | **4** |
-| `config-server` | `contextLoads` + 4 de HTTP Basic | — C10.6 entregue | — |
-| `discovery-server` | só `contextLoads` | — fora de escopo (ver nota final) | — |
-
----
-
-### Testes unitários faltantes
-
-#### `user-service`
-
-**Entregue (C10.4)** — `CacheService` (mock de `CacheManager`/`Cache`: put/evict por cache + null-safe), `GlobalExceptionHandler` (todos os 6 handlers, com foco no 400 `IllegalArgumentException` e no 500 genérico que **não vaza** a mensagem interna), `InternalTokenFilter` (`shouldNotFilter`, passa com token correto, 403 sem/errado) e `LogUtils.maskEmail` (válido + bordas null/blank/sem-`@`). Ver [Inventário atual](#inventário-atual). Sem lacuna unitária no módulo.
-
-#### `authorization-server`
-
-**Entregue (C10.4)** — `TokenCustomizerConfig` (claims `userID`/`roles`/`permissions` por role, dedup USER+ADMIN, ramo não-access_token, `ArrayList` mutável), branch de lockout C19 do `AuthorizationService` (`isBlocked=true` → `isAccountNonLocked()==false`), `LoginAttemptListener` (guard form login vs client auth, em `onFailure`/`onSuccess`) e `ClientIpResolver` (em/fora de request, `remoteAddr` null). Ver [Inventário atual](#inventário-atual). Sem lacuna unitária no módulo.
-
-#### `gateway` (unitários reativos)
-
-**Entregues** — `CorrelationIdFilter`, `RateLimitLogFilter`, `RateLimiterConfig` (limiters + key resolvers IP/usuário), `CORSConfig`, `OpenAPIConfig` e os beans isolados do `SecurityConfig` (cookie de sessão, filtro do cookie CSRF, logout OIDC). Ver [Inventário atual](#inventário-atual). Sem lacuna unitária no módulo.
-
----
-
-### Testes de integração faltantes
-
-#### `authorization-server`
-
-**Integração entregue (C10.1 + C10.2)** — `AbstractAuthIntegrationTest` (Testcontainers `postgres:16-alpine` + `redis:7-alpine`, WireMock como dublê do user-service; o módulo não acessa MongoDB — só Feign) cobre o fluxo authorization_code + PKCE (C10.1) e as 4 frentes do C10.2 — lockout C19 e2e, circuit breaker C7, seed idempotente do `gateway-client` e sessão Redis — ver [Inventário atual](#inventário-atual). Sem lacuna de integração; restam os unitários pontuais do C10.4 (seção acima).
-
-#### `gateway`
-
-**Integração entregue** — `AbstractGatewayIntegrationTest` (`@SpringBootTest(RANDOM_PORT)` + `WebTestClient`; Testcontainers `redis:7-alpine` + WireMock como dublê dos dois downstream via `SimpleDiscoveryClient` + `lb://`) cobre roteamento, rewritePath dos api-docs, propagação do `X-Correlation-ID`, rate limiting (LOW → 429), segurança BFF (401 não-302, CSRF isento em `/register`, cookie `XSRF-TOKEN`, preflight CORS) e acesso autenticado — ver [Inventário atual](#inventário-atual).
-
-**Fluxo BFF OAuth2 ponta a ponta entregue (C10.7)** — `GatewayOAuth2FlowIntegrationTest` dirige o `authorization_code`+PKCE+OIDC **real** contra a porta (sem mutators): inicia o `oauth2Login` (302 com `code_challenge`/S256/`nonce`), stuba `token`/`jwks`/`userinfo` no WireMock, minera um **id_token RS256 assinado** (JWKS servido no `jwk-set-uri`) e completa o callback. Daí valida o **TokenRelay** (`GET /v1/users/me` chega ao downstream com `Authorization: Bearer`) e o **logout RP-initiated** (`POST /logout` → 302 ao `end_session` com `id_token_hint`). Truque-chave: o claim `nonce` reusa o parâmetro `nonce` capturado do redirect — o Spring envia ali o hash e compara o id_token contra esse mesmo hash, então não há hash a reimplementar.
-
-#### `config-server`
-
-**Entregue (C10.6)** — `@SpringBootTest` + `MockMvc` (sem containers), `ConfigServerSecurityTest`: `GET /user-service/default` sem credenciais → 401, com Basic correto → 200, com Basic errado → 401, e `GET /actuator/health` aberto → 200. O `contextLoads` foi movido para o pacote correto (`com.users.configserver`) — antes, no pacote divergente, o `@SpringBootTest` não localizava o `ConfigServerApplication`. Ver [Inventário atual](#inventário-atual).
-
-#### `user-service` — menor prioridade (módulo já robusto)
-
-| Caminho | Tipo | Comportamento esperado |
-| ------- | ---- | ---------------------- |
-| `/internal/users/email/{email}` com contexto completo (filtro real + Mongo) | feliz/erro | 200 com `X-Internal-Token` correto; 403 sem/errado — hoje só em slice `@WebMvcTest`, sem o stack de segurança completo |
-
-#### `login-interface` — C10 (Vitest + React Testing Library + MSW)
-
-Não há `vitest`, React Testing Library nem script `test` no `package.json` — o único gate é `npm run build` (`tsc -b`, valida apenas tipos). O BFF foi validado manualmente ponta a ponta; a bateria automatizada é o item **C10** em [TRABALHO_PENDENTE.md](TRABALHO_PENDENTE.md). **Não cobrir parcialmente** antes de C10 definir a estrutura de teste.
-
-Testes de componente (unitários do front):
-
-| Alvo | Caminhos |
-| ---- | -------- |
-| `LoginBox` | "Entrar" → redirect a `/oauth2/authorization/gateway-client`; "Registrar" → navega a `/register` |
-| `RegisterBox` | submit feliz → navega a `/login`; erro da API (409/400) → exibe "Dados inválidos!" |
-| `ProfileBox` | loading → "Carregando usuário..."; user → card com dados; null → "Usuário não encontrado" |
-| `ProtectedLayout` | loading → placeholder; 200 → renderiza `<Outlet />`; 401 → redirect a `/login` |
-| `NavBar` | logout monta form oculto `POST /logout` com `_csrf` lido do cookie `XSRF-TOKEN` |
-| `authClient.readCookie` | cookie presente → valor decodificado; ausente → `""` |
-| `useCurrentUser` | 401 → `isError` sem retry (`retry: false` é a fonte de verdade do estado de auth) |
-| `useRegister` | sucesso → navegação a `/login` |
-
-Testes de fluxo (integração do front, com MSW):
-
-| Fluxo | Caminhos |
-| ----- | -------- |
-| Registro ponta a ponta | form → `POST /v1/users/register` → redirect a `/login`; e o caminho de erro 409 |
-| Estado de autenticação | `/v1/users/me` 200 → dashboard acessível; 401 → redirect a `/login` |
-
----
-
-### Fora de escopo deliberado
+## Fora de escopo deliberado
 
 - **`discovery-server`** — Eureka puro, sem lógica própria; testar seria testar o framework.
 - **`CORSConfig` / `OpenAPIConfig`** (gateway e auth-server) — configuração declarativa sem branch.
 - **Getters/setters, DTOs sem lógica, código gerado** — conforme as diretrizes de unitários desta página.
+- **`login-interface`** — sem test runner configurado; único gate hoje é `npm run build` (type check).

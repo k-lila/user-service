@@ -23,10 +23,6 @@ O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o clie
 - [docs/CONFIG.md](docs/CONFIG.md) — variáveis de ambiente
 - [docs/TESTES.md](docs/TESTES.md) — estratégia de testes
 - [docs/LOGS.md](docs/LOGS.md) — estratégia de logs
-- [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md) — gaps de segurança conhecidos
-- [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) — roadmap e correções (C7–C19)
-- [docs/AVALIACAO.md](docs/AVALIACAO.md) — avaliação técnica do projeto por nível
-- [docs/CHECKLIST.md](docs/CHECKLIST.md) — checklist de features obrigatórias de um blueprint de sistema de usuários + tabela de números-chave
 - [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema
 
 ---
@@ -76,7 +72,7 @@ login-interface (React)
 - Arquivos em `config-server/.../config/{servico}.yml`.
 - **HA:** duas instâncias (`config-server-1`, `config-server-2`) atrás de `config-lb` (nginx). `CONFIG_SERVER_URL` aponta para `config-lb:8888`. Stateless — qualquer instância serve a mesma config.
 - **Deve subir primeiro** — todos os demais dependem dele via `config-lb`.
-- **HTTP Basic (C17):** `SecurityConfig` exige autenticação no endpoint (`/actuator/health` aberto p/ healthchecks; CSRF off — cliente é máquina). Os clientes enviam `spring.cloud.config.username/password`; par único `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` (default dev no `application.yml`, sem default no compose → fail-fast).
+- **HTTP Basic:** `SecurityConfig` exige autenticação no endpoint (`/actuator/health` aberto p/ healthchecks; CSRF off — cliente é máquina). Os clientes enviam `spring.cloud.config.username/password`; par único `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` (default dev no `application.yml`, sem default no compose → fail-fast).
 
 ### discovery-server (9091 / 9092)
 
@@ -98,8 +94,8 @@ login-interface (React)
   - `@EnableRedisHttpSession` no `SecurityConfig` — exige anotação explícita no Spring Boot 4.0.
   - Cookie renomeado para **`AUTHSESSION`** (`CookieSerializer`) para não colidir com o `SESSION` do gateway (ver _Convenções_).
 - **Credenciais e token:** busca credenciais via Feign (`GET /internal/users/email/{email}`); customiza o JWT em `TokenCustomizerConfig.java` (**arquivo crítico**) com `userID`, `roles`, `permissions`.
-- **Resiliência Feign (C7):** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com a config nomeada `configs.user-service` (C20 — com group habilitado, `instances.*` é inerte): janela 10, `minimumNumberOfCalls` 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout.
-- **Lockout anti-brute-force (C19):** `LoginAttemptService` mantém contador de falhas no Redis por par **(conta, IP)** — chave `sha256(emailLower|ip)`, janela fixa (TTL 15 min na 1ª falha), lockout após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha (mensagem genérica). Prod exige `server.forward-headers-strategy` + proxy sanitizando `X-Forwarded-For`.
+- **Resiliência Feign:** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com a config nomeada `configs.user-service` (com group habilitado, `instances.*` é inerte — use `configs.*`): janela 10, `minimumNumberOfCalls` 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout.
+- **Lockout anti-brute-force:** `LoginAttemptService` mantém contador de falhas no Redis por par **(conta, IP)** — chave `sha256(emailLower|ip)`, janela fixa (TTL 15 min na 1ª falha), lockout após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha (mensagem genérica). Prod exige `server.forward-headers-strategy` + proxy sanitizando `X-Forwarded-For`.
 
 ### user-service (8090)
 
@@ -188,7 +184,7 @@ docker compose up -d --build
 
 O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`.
 
-**TLS/HTTPS na borda em dev (opcional, G1):** overlay opt-in `docker-compose.tls.yml` sobe um reverse-proxy nginx (`infra/tls-proxy`) que termina TLS com cert do **mkcert** e fala HTTPS com o browser (`app.localhost`/`auth.localhost`), mantendo o interno em HTTP. `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`. O Swagger-UI segue funcional nesse modo: o fluxo OAuth2 passa pela borda (`AUTH_URL`/`AUTH_TOKEN` → `https://auth.localhost`; CORS do auth-server inclui `http://localhost:8081`) — a porta 8082 não é publicada sem o override de dev. Setup e verificação em [docs/TLS_DEV.md](docs/TLS_DEV.md).
+**TLS/HTTPS na borda em dev (opcional):** overlay opt-in `docker-compose.tls.yml` sobe um reverse-proxy nginx (`infra/tls-proxy`) que termina TLS com cert do **mkcert** e fala HTTPS com o browser (`app.localhost`/`auth.localhost`), mantendo o interno em HTTP. `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`. O Swagger-UI segue funcional nesse modo: o fluxo OAuth2 passa pela borda (`AUTH_URL`/`AUTH_TOKEN` → `https://auth.localhost`; CORS do auth-server inclui `http://localhost:8081`) — a porta 8082 não é publicada sem o override de dev.
 
 ### Ordem manual (sem Docker)
 
@@ -229,15 +225,9 @@ Ver [docs/LOGS.md](docs/LOGS.md). Resumo: SLF4J parametrizado (`{}`), formato em
 
 ---
 
-## Trabalho Pendente e Correções Necessárias
-
-Ver [docs/TRABALHO_PENDENTE.md](docs/TRABALHO_PENDENTE.md) (roadmap por tema/prioridade + correções C7–C19).
-
----
-
 ## Gaps de Segurança Conhecidos
 
-Ver [docs/GAPS_SEGURANCA.md](docs/GAPS_SEGURANCA.md). **Gaps ativos:** sem TLS/HTTPS em prod (alta, G1 — **curativo:** borda TLS de dev via nginx+mkcert no overlay `docker-compose.tls.yml`, ver [docs/TLS_DEV.md](docs/TLS_DEV.md); falta cert ACME/domínios reais em prod), chave JWK dev no classpath (média, G5 — aceito, override em prod via `JWK_*`), Grafana `admin/admin` (baixa, G11 — curativo, externalizado para `.env`), keyfile MongoDB de dev rastreado no repositório (média, G12 — aceito, análogo a G5), Redis/Sentinel sem autenticação (média, G13 — aberto, mitigado por portas nunca publicadas). **Resolvidos** (IDs preservados, não reusados): G2 (C16, compose prod-safe), G3 (C17, config-server Basic auth + porta fechada + sem defaults de secret), G4 (C11, secrets em `.env`), G6 (C18, management interna), G7 (C12, CORS configurável: gateway p/ SPA, auth-server p/ Swagger; user-service sem CORS), G8 (C8, `permissions` por roles), G9 (C13, validação de senha declarativa — 8–72 chars com letra e número), G10 (C19, lockout por conta+IP); JWT em `localStorage` via BFF.
+**Ativos:** sem TLS em prod (curativo: overlay `docker-compose.tls.yml` para dev; falta cert ACME/domínios reais em prod), chave JWK dev no classpath (aceito; override em prod via `JWK_*`), Grafana `admin/admin` (curativo, externalizado para `.env`; trocar em prod), keyfile MongoDB de dev no repo (aceito, análogo à chave JWK), Redis/Sentinel sem autenticação (aberto; mitigado por portas nunca publicadas).
 
 ---
 
@@ -255,10 +245,10 @@ rodam em contexto isolado e efêmero). O estado que persiste entre tarefas vive 
 | Agente | Modelo | Responsabilidade | Quando invocar |
 |--------|--------|------------------|----------------|
 | `pm` | sonnet-4-6 | Spec, impacto no ecossistema, critérios de aceite (AC-NN), DoD | Sempre primeiro |
-| `techlead` | sonnet-4-6 (opus-4-8 p/ arquitetura) | Implementa features, C7–C19 e gaps G1–G13; cria ADRs | Após spec aprovada |
+| `techlead` | sonnet-4-6 (opus-4-8 p/ arquitetura) | Implementa features e fecha gaps de segurança; cria ADRs | Após spec aprovada |
 | `qa-tester` | sonnet-4-6 | Testes (unit/controller/integração), regressão, bugs P0–P3 | Após implementação |
 | `senso-critico` | opus-4-8 | Revisão adversarial: consistência entre agentes **+** diagnóstico de bugs latentes | Após o `pm` e após o `qa-tester` |
-| `doc-keeper` | sonnet-4-6 | Sincroniza `docs/` com o código | Fase final, após `APPROVED` |
+| `doc-keeper` | sonnet-4-6 | Sincroniza `CLAUDE.md` e `docs/` com o código | Fase final, após `APPROVED` |
 
 > Histórico: `techlead` funde os antigos `backlog-driver` + `security-auditor`;
 > `senso-critico` absorve o antigo `error-analyst`. A skill invocável `/suggest-tests`
