@@ -209,8 +209,11 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 ### Observabilidade
 
 - **Zipkin** — B3, 100% sampling
-- **Prometheus** — `/actuator/prometheus`, scrape 5s
-- **Grafana** — dashboards pré-provisionados
+- **Prometheus** — `/actuator/prometheus`, scrape 5s; job `microservices` (discovery×2, auth-server, user-service, gateway) + job `config-server` (config-server-1/2:8888, `basic_auth` com credenciais default dev `config-client`/`config-dev-secret` — o `/actuator/prometheus` do config-server fica atrás de HTTP Basic; migrar para `password_file` em prod); 3 exporters de infra (sem `ports:` no base — prod-safe):
+  - `mongodb-exporter:9216` (percona/mongodb_exporter:0.43.1) — RS via seed único `mongo-1:27017` + `replicaSet=rs0`; credencial via env (`MONGODB_URI`)
+  - `postgres-exporter:9187` (prometheuscommunity/postgres-exporter:v0.16.0) — `DATA_SOURCE_NAME` para `auth-postgres:5432/authdb`
+  - `redis-exporter:9121` (oliver006/redis_exporter:v1.62.0) — modo multi-target (`/scrape`): 3 data nodes (`redis-1/2/3:6379`) + 3 sentinels (`redis-sentinel-1/2/3:26379`); relabel `__address__`→`instance` (sem colisão)
+- **Grafana** — 5 dashboards pré-provisionados (`dashboardHTTP.json` — HTTP de borda; `dashboardJVM.json` — heap/non-heap/GC/threads/CPU, template var `application` com os 5 serviços via `label_values(jvm_memory_used_bytes, application)`; `dashboardMongo.json` — estado do RS/conexões/opcounters/memória/rede; `dashboardPostgres.json` — up/conexões/transações/deadlocks/cache hit ratio/tamanho; `dashboardRedis.json` — nós up/memória/hit ratio/comandos/Sentinel); todos referenciam o datasource por nome `"Prometheus"` (consistente com o provider `file` do provisioning)
 - **SLOs** — 50ms / 100ms / 200ms / 500ms / 1s / 2s
 
 ---

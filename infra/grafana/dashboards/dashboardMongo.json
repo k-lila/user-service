@@ -1,0 +1,154 @@
+{
+  "title": "MongoDB",
+  "uid": "mongodb",
+  "timezone": "browser",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "5s",
+
+  "panels": [
+    {
+      "type": "row",
+      "title": "📊 Replica Set"
+    },
+
+    {
+      "type": "stat",
+      "title": "MongoDB UP",
+      "targets": [
+        {
+          "expr": "mongodb_up"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Membros saudáveis",
+      "targets": [
+        {
+          "expr": "sum(mongodb_rs_members_health)"
+        }
+      ],
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Estado dos membros (1=PRIMARY, 2=SECONDARY)",
+      "targets": [
+        {
+          "expr": "mongodb_rs_members_state",
+          "legendFormat": "{{rs_nm}} / {{name}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Ping entre membros (ms)",
+      "targets": [
+        {
+          "expr": "mongodb_rs_members_pingMs",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 4 }
+    },
+
+    {
+      "type": "row",
+      "title": "🔌 Conexões & Operações"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Conexões atuais",
+      "targets": [
+        {
+          "expr": "mongodb_ss_connections{conn_type=\"current\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Operações/s",
+      "targets": [
+        {
+          "expr": "sum(rate(mongodb_ss_opcounters[1m])) by (legacy_op_type)",
+          "legendFormat": "{{legacy_op_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "🧠 Memória & Rede"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Memória (resident / virtual)",
+      "targets": [
+        {
+          "expr": "mongodb_ss_mem_resident",
+          "legendFormat": "resident {{instance}}"
+        },
+        {
+          "expr": "mongodb_ss_mem_virtual",
+          "legendFormat": "virtual {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes"
+        }
+      },
+      "gridPos": { "x": 0, "y": 19, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Rede (bytes/s)",
+      "targets": [
+        {
+          "expr": "rate(mongodb_ss_network_bytesIn[1m])",
+          "legendFormat": "in {{instance}}"
+        },
+        {
+          "expr": "rate(mongodb_ss_network_bytesOut[1m])",
+          "legendFormat": "out {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        }
+      },
+      "gridPos": { "x": 12, "y": 19, "w": 12, "h": 8 }
+    }
+  ]
+}

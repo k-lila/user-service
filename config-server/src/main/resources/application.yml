@@ -26,7 +26,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, info, metrics
+        include: health, info, metrics, prometheus
   endpoint:
     health:
       probes:
@@ -36,3 +36,6 @@ management:
       enabled: true
     liveness-state:
       enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

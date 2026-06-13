@@ -1,0 +1,204 @@
+{
+  "title": "Redis",
+  "uid": "redis",
+  "timezone": "browser",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "5s",
+
+  "panels": [
+    {
+      "type": "row",
+      "title": "📊 Overview"
+    },
+
+    {
+      "type": "stat",
+      "title": "Nós UP",
+      "targets": [
+        {
+          "expr": "count(redis_up == 1)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 4 },
+              { "color": "green", "value": 6 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Masters monitorados (Sentinel)",
+      "targets": [
+        {
+          "expr": "max(redis_sentinel_masters)"
+        }
+      ],
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Clientes conectados",
+      "targets": [
+        {
+          "expr": "sum(redis_connected_clients)"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Memória usada (total)",
+      "targets": [
+        {
+          "expr": "sum(redis_memory_used_bytes)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+    },
+
+    {
+      "type": "row",
+      "title": "🧠 Memória & Hit ratio"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Memória usada por nó",
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Keyspace hit ratio",
+      "targets": [
+        {
+          "expr": "sum(rate(redis_keyspace_hits_total[5m])) / (sum(rate(redis_keyspace_hits_total[5m])) + sum(rate(redis_keyspace_misses_total[5m])))",
+          "legendFormat": "hit ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        }
+      },
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "⚡ Comandos & Clientes"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Comandos processados/s",
+      "targets": [
+        {
+          "expr": "rate(redis_commands_processed_total[1m])",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Clientes conectados por nó",
+      "targets": [
+        {
+          "expr": "redis_connected_clients",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 }
+    },
+
+    {
+      "type": "row",
+      "title": "🔁 Replicação & Sentinel"
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Réplicas conectadas (master)",
+      "targets": [
+        {
+          "expr": "redis_connected_slaves",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 24, "w": 8, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Master link up (réplicas)",
+      "targets": [
+        {
+          "expr": "redis_master_link_up",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "max": 1,
+          "min": 0,
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      },
+      "gridPos": { "x": 8, "y": 24, "w": 8, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Sentinel — sentinels/slaves OK",
+      "targets": [
+        {
+          "expr": "redis_sentinel_master_ok_sentinels",
+          "legendFormat": "ok_sentinels {{instance}}"
+        },
+        {
+          "expr": "redis_sentinel_master_ok_slaves",
+          "legendFormat": "ok_slaves {{instance}}"
+        }
+      ],
+      "gridPos": { "x": 16, "y": 24, "w": 8, "h": 8 }
+    }
+  ]
+}

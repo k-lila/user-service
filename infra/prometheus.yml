@@ -7,7 +7,50 @@ scrape_configs:
 
     static_configs:
       - targets:
-          - discovery-server:9091
+          - discovery-server-1:9091
+          - discovery-server-2:9092
           - authorization-server:8082
           - user-service:8090
           - gateway:8181
+
+  - job_name: "mongodb"
+    static_configs:
+      - targets:
+          - mongodb-exporter:9216
+
+  - job_name: "postgres"
+    static_configs:
+      - targets:
+          - postgres-exporter:9187
+
+  - job_name: "redis"
+    metrics_path: /scrape
+    static_configs:
+      - targets:
+          - redis://redis-1:6379
+          - redis://redis-2:6379
+          - redis://redis-3:6379
+          - redis://redis-sentinel-1:26379
+          - redis://redis-sentinel-2:26379
+          - redis://redis-sentinel-3:26379
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: redis-exporter:9121
+
+  - job_name: "config-server"
+    metrics_path: "/actuator/prometheus"
+    # /actuator/prometheus do config-server fica atrás de HTTP Basic (SecurityConfig:
+    # anyRequest().authenticated()), então o scrape precisa autenticar. Default dev
+    # (idem config-server/application.yml e .env). Em prod, migrar para
+    # basic_auth.password_file em vez de senha literal no arquivo.
+    basic_auth:
+      username: config-client
+      password: config-dev-secret
+    static_configs:
+      - targets:
+          - config-server-1:8888
+          - config-server-2:8888
