@@ -53,9 +53,9 @@ DEBUG [user-service,traceId=...,spanId=...]          | cache usersById | put | I
 ## Correlação entre serviços
 
 - O `logging.pattern.level` (definido nos `*.yml` do config-server para user-service, gateway e authorization-server) inclui `traceId`/`spanId` do Micrometer.
-- Esses IDs são propagados via **B3/Zipkin** de ponta a ponta.
-- O gateway também loga o `X-Correlation-ID` na borda (`CorrelationIdFilter`).
-- MDC **não** é usado no gateway (reativo) porque não propaga de forma confiável no WebFlux.
+- Esses IDs são propagados via **B3/Zipkin** de ponta a ponta — inclusive no salto Feign auth-server → user-service, graças ao `FeignTracingConfig` (a instrumentação automática do feign-micrometer registrava o span cliente mas não emitia os headers B3; o interceptor injeta o contexto corrente, evitando o trace órfão no user-service).
+- O gateway é reativo (WebFlux): o `traceId`/`spanId` no MDC só é preenchido com `spring.reactor.context-propagation: auto` (no `gateway.yml`). Sem isso o log da borda sai com `traceId=` vazio.
+- O gateway também loga o `X-Correlation-ID` na borda (`CorrelationIdFilter`), **semeado a partir do traceId B3 corrente** (fallback UUID) — um id de correlação único alinhado ao trace.
 
 ## PII / LGPD
 

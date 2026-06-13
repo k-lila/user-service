@@ -13,18 +13,23 @@ import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
 
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.TraceContext;
+import io.micrometer.tracing.Tracer;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 /**
- * Unitários do {@link CorrelationIdFilter}: reaproveita o X-Correlation-ID quando presente
- * e gera um UUID quando ausente, sempre propagando o header na request mutada.
+ * Unitários do {@link CorrelationIdFilter}: reaproveita o X-Correlation-ID recebido,
+ * senão semeia o correlationId a partir do traceId B3 do span corrente, e só cai num
+ * UUID quando não há header nem span — sempre propagando o header na request mutada.
  */
 class CorrelationIdFilterTest {
 
     private static final String HEADER = "X-Correlation-ID";
 
-    private final CorrelationIdFilter filter = new CorrelationIdFilter();
+    private final Tracer tracer = mock(Tracer.class);
+    private final CorrelationIdFilter filter = new CorrelationIdFilter(tracer);
 
     @Test
     void deveReusarCorrelationId_quandoHeaderPresente() {
@@ -37,7 +42,25 @@ class CorrelationIdFilterTest {
     }
 
     @Test
-    void deveGerarCorrelationIdUuid_quandoHeaderAusente() {
+    void deveSemearCorrelationIdDoTraceId_quandoHeaderAusente() {
+        Span span = mock(Span.class);
+        TraceContext context = mock(TraceContext.class);
+        when(span.context()).thenReturn(context);
+        when(context.traceId()).thenReturn("a1b2c3d4e5f60718");
+        when(tracer.currentSpan()).thenReturn(span);
+
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/v1/users/me"));
+
+        ServerWebExchange forwarded = runFilter(exchange);
+
+        assertThat(forwarded.getRequest().getHeaders().getFirst(HEADER)).isEqualTo("a1b2c3d4e5f60718");
+    }
+
+    @Test
+    void deveGerarCorrelationIdUuid_quandoHeaderAusenteESemSpan() {
+        when(tracer.currentSpan()).thenReturn(null);
+
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/v1/users/me"));
 

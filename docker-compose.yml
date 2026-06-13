@@ -95,8 +95,6 @@ services:
     depends_on:
       config-lb:
         condition: service_healthy
-      zipkin:
-        condition: service_healthy
     environment:
       SERVER_PORT: 9091
       CONFIG_SERVER_URL: http://config-lb:8888
@@ -119,8 +117,6 @@ services:
     # Sem ports: em prod — Eureka só na rede interna (G2). Republicado em dev no override.
     depends_on:
       config-lb:
-        condition: service_healthy
-      zipkin:
         condition: service_healthy
     environment:
       SERVER_PORT: 9092
