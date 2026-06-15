@@ -19,6 +19,13 @@
 
 <!-- Novas entradas abaixo -->
 
+## [2026-06-13] infra/compose · Limites de CPU/memória por serviço
+- **Decisão:** todos os 26 serviços do `docker-compose.yml` ganharam teto/reserva de recursos via as chaves de nível de serviço `cpus`/`mem_limit`/`mem_reservation` (não `deploy.resources`). Razão: `docker compose up` (v2) aplica essas chaves de forma determinística **fora do Swarm**, enquanto parte de `deploy:` só vale em Swarm — buscamos efeito garantido em standalone. Perfis por classe (App JVM pesado 1.0/1024m/512m; App JVM leve 0.75/512m/256m; Mongo 1.0/1024m/512m; PG 0.75/512m/256m; Redis 0.5/256m/64m; Sentinel 0.25/128m; Zipkin/Prometheus 0.5/512m/256m; Grafana 0.5/256m/128m; exporters/nginx 0.25/128m-64m; mongo-init 0.5/256m). Valores são defaults de dev-blueprint (folga para não OOMKillar no boot; JVM 21 calibra heap ~25% via MaxRAMPercentage).
+- **ADR:** não — operação/infra, sem mudança de contrato de API ou schema.
+- **Verificação:** `docker compose -f docker-compose.yml config` exit 0 (só o warning pré-existente de `version`); config resolvida renderiza 69 chaves de recurso (17 serviços×3 + 9×2); dev (base+override) também exit 0. Valores documentados em `docs/CONFIG.md` (nova seção "Limites de recursos").
+- **Tech-debt / observações:** (a) `version: "3.9"` segue obsoleto (warning pré-existente, fora de escopo); (b) limites não exercitados sob carga real — são tetos de contenção, calibrar no consumidor do blueprint.
+- **Tipo:** decisão.
+
 ## [2026-06-13] user-service + authorization-server · Hardening (login + leitura de ativos + isolamento de config de teste)
 - **Decisão:** três ajustes de finalização do blueprint:
   - **Login (auth-server):** `AuthorizationService.loadUserByUsername` deixou de engolir tudo em `RuntimeException("Erro de comunicação interna")`. Agora `UsernameNotFoundException` (fallback do CB / não-encontrado) propaga sem reembrulhar (→ credenciais inválidas, volta ao login em vez de 500), `null` é tratado explicitamente, e só o inesperado vira uma `UsernameNotFoundException` genérica (sem vazar a causa). Alinha o código com o intent do CLAUDE.md ("indisponibilidade retorna UsernameNotFoundException imediatamente").

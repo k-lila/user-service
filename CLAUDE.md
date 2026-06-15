@@ -184,7 +184,7 @@ login-interface (React)
 docker compose up -d --build
 ```
 
-O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`.
+O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`. Todos os 26 serviços declaram `cpus` / `mem_limit` / `mem_reservation` (chaves de nível de serviço, não `deploy.resources`) — perfis e racional em [docs/CONFIG.md § Limites de recursos](docs/CONFIG.md#limites-de-recursos-cpu--memória).
 
 **TLS/HTTPS na borda em dev (opcional):** overlay opt-in `docker-compose.tls.yml` sobe um reverse-proxy nginx (`infra/tls-proxy`) que termina TLS com cert do **mkcert** e fala HTTPS com o browser (`app.localhost`/`auth.localhost`), mantendo o interno em HTTP. `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`. O Swagger-UI segue funcional nesse modo: o fluxo OAuth2 passa pela borda (`AUTH_URL`/`AUTH_TOKEN` → `https://auth.localhost`; CORS do auth-server inclui `http://localhost:8081`) — a porta 8082 não é publicada sem o override de dev.
 

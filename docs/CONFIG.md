@@ -14,6 +14,7 @@
 - [Observabilidade](#observabilidade)
 - [Front-end](#front-end)
 - [Containers de infraestrutura (só `docker-compose`)](#containers-de-infraestrutura-só-docker-compose)
+- [Limites de recursos (CPU / memória)](#limites-de-recursos-cpu--memória)
 
 ## Como ler esta referência
 
@@ -120,3 +121,40 @@ Consumidas pelos próprios containers de banco na inicialização, não pelos se
 | `MONGO_INITDB_ROOT_USERNAME`  | `mongo-1`              | `user_service`  | Só no nó primário; secundários recebem por replicação. |
 | `MONGO_INITDB_ROOT_PASSWORD`  | `mongo-1`              | `user_1234321`  |                                                    |
 | `WEB_HOST_PORT`               | `interface`            | `5173`          | Porta do **host** da borda pública (mapeia para `:80` do container). Dev usa `5173`; prod tipicamente `80`. |
+
+## Limites de recursos (CPU / memória)
+
+Cada serviço do `docker-compose.yml` declara teto e reserva de recursos para que um serviço
+com leak não consuma o host inteiro e derrube os vizinhos. Usamos as chaves de nível de
+serviço **`cpus` / `mem_limit` / `mem_reservation`** (não o bloco `deploy.resources`):
+`docker compose up` (v2) as aplica de forma determinística **fora do Swarm**, enquanto parte
+de `deploy:` só vale em modo Swarm. Validar com `docker compose -f docker-compose.yml config`
+(exit 0).
+
+- **`cpus`** — teto de CPU (fração de núcleos). Limite, não reserva.
+- **`mem_limit`** — teto de memória; o container é morto (OOMKilled) se ultrapassar.
+- **`mem_reservation`** — alvo de memória usado pelo scheduler para distribuir os containers
+  (soft); omitido nos serviços pequenos/efêmeros.
+
+Os valores são **defaults de dev-blueprint**: `mem_limit` folgado para não causar OOMKill no
+boot (a JVM 21 calibra o heap em ~25% do limite do container via `MaxRAMPercentage`). Ajuste
+conforme a carga real do consumidor do blueprint.
+
+| Classe                | Serviços                                            | `cpus` | `mem_limit` | `mem_reservation` |
+| --------------------- | --------------------------------------------------- | ------ | ----------- | ----------------- |
+| App JVM (pesado)      | `gateway`, `authorization-server`, `user-service`   | 1.0    | 1024m       | 512m              |
+| App JVM (leve)        | `config-server-1/2`, `discovery-server-1/2`         | 0.75   | 512m        | 256m              |
+| MongoDB               | `mongo-1/2/3`                                        | 1.0    | 1024m       | 512m              |
+| PostgreSQL            | `auth-postgres`                                      | 0.75   | 512m        | 256m              |
+| Redis (data)          | `redis-1/2/3`                                        | 0.5    | 256m        | 64m               |
+| Redis Sentinel        | `redis-sentinel-1/2/3`                               | 0.25   | 128m        | —                 |
+| Zipkin (in-memory)    | `zipkin`                                             | 0.5    | 512m        | 256m              |
+| Prometheus            | `prometheus`                                         | 0.5    | 512m        | 256m              |
+| Grafana               | `grafana`                                            | 0.5    | 256m        | 128m              |
+| Exporters             | `mongodb-exporter`, `postgres-exporter`, `redis-exporter` | 0.25 | 128m    | —                 |
+| Nginx                 | `config-lb`, `interface`                            | 0.25   | 64m         | —                 |
+| One-shot              | `mongo-init`                                         | 0.5    | 256m        | —                 |
+
+> A soma das **reservas** (~5,2 GB) é o que dimensiona o host; os `mem_limit` são tetos de
+> contenção, não memória pré-alocada. O `docker-compose.override.yml` (dev) só republica
+> portas — os limites do base valem em dev e no deploy prod-like.
