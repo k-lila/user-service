@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancela runs obsoletos do mesmo ref (ex.: novos pushes num PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Back-end: um job por módulo Maven (não há POM-pai agregador, então
+  # cada serviço é construído isoladamente). `mvn verify` dispara o gate
+  # JaCoCo já plugado nessa fase. Testcontainers usa o Docker do runner.
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - config-server
+          - discovery-server
+          - authorization-server
+          - user-service
+          - gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: mvn verify (${{ matrix.module }})
+        working-directory: ${{ matrix.module }}
+        run: mvn -B verify
+
+      - name: Upload test & coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-reports-${{ matrix.module }}
+          path: |
+            ${{ matrix.module }}/target/surefire-reports
+            ${{ matrix.module }}/target/failsafe-reports
+            ${{ matrix.module }}/target/site/jacoco
+          if-no-files-found: ignore
+
+  # Front-end: testes Vitest com gate de cobertura (threshold 80% no
+  # vitest.config.ts). Usa `npm run coverage`, não `npm test` (watch mode).
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: login-interface
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: login-interface/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test with coverage
+        run: npm run coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: login-interface/coverage
+          if-no-files-found: ignore
+
+  # Validação estrutural da topologia do Compose base (prod-safe) a cada PR.
+  compose-validate:
+    name: compose-validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Provide a dummy .env
+        run: cp .env.example .env
+
+      - name: Validate compose topology
+        run: docker compose -f docker-compose.yml config -q

@@ -118,3 +118,13 @@
 - **ADR:** não — decisões de configuração de container, sem mudança de contrato/schema.
 - **Tech-debt / observações:** seed único cria dependência de disponibilidade de `mongo-1` na subida do exporter (mitigado pelo `depends_on: service_healthy`); em caso de falha permanente de `mongo-1`, o exporter não resolveria o RS (edge improvável dado o replica set).
 - **Tipo:** decisão.
+
+## [2026-06-15] esteira · Item 8 do Roadmap — Pipeline de CI + branch protection (v1 fechada)
+- **Decisão:** criado `.github/workflows/ci.yml` (GitHub Actions) disparado em `push` na `main` e em `pull_request`, com 3 jobs paralelos:
+  1. **`backend`** (matrix por módulo — não há POM-pai agregador): `mvn -B verify` em cada um dos 5 serviços (`config-server`, `discovery-server`, `authorization-server`, `user-service`, `gateway`). O `verify` dispara o gate JaCoCo já plugado (item 7). Testcontainers usa o Docker do runner `ubuntu-latest`. `fail-fast: false`.
+  2. **`frontend`**: `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold 80% no `vitest.config.ts`. **Escolhido `npm run coverage` (não o literal `npm test`)** porque `test` é `vitest` em watch mode (travaria o runner) e `coverage` enforça o piso de cobertura, espelhando o gate JaCoCo do back.
+  3. **`compose-validate`**: `docker compose -f docker-compose.yml config -q` (passo opcional 5 do roadmap) — valida a topologia base a cada PR, com `.env` dummy via `cp .env.example .env` (compose base não tem vars mandatórias `:?`).
+- **Branch protection (8b):** a `main` exige os 7 checks verdes (5 do back + frontend + compose-validate) para merge, `strict: true`. Aplicada via `gh api ... /branches/main/protection`; comando documentado no `README.md`. Os nomes de check só existem após a 1ª run, então a regra é aplicada depois da primeira execução verde.
+- **ADR:** não — esteira/documentação, sem mudança de contrato de API ou schema (logo, sem pipeline de agentes).
+- **Arquivos:** novo `.github/workflows/ci.yml`; `README.md` (badge + seção "Integração Contínua (CI)"); `docs/ROADMAP.md` (8a/8b marcados); este registro.
+- **Tipo:** decisão.

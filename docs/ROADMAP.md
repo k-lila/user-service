@@ -284,5 +284,5 @@ salto de credibilidade por unidade de esforço, e materializa todos os itens ant
 **Esteira**
 - [x] **7a.** JaCoCo plugado em todos os módulos; regra `check` (piso 70% LINE, bundle) nos 3 de domínio; config/discovery report-only.
 - [x] **7b.** `mvn verify` verde com o gate ativo; cobertura de linha medida bem acima do piso (user-service ~98%, auth-server ~95%, gateway 100%).
-- [ ] **8a.** `.github/workflows/ci.yml` rodando `mvn verify` (back) + `npm test` (front) em cada PR.
-- [ ] **8b.** CI verde exigida para merge (branch protection) e `README.md` atualizado.
+- [x] **8a.** `.github/workflows/ci.yml` rodando `mvn verify` (back, matrix por módulo) + `npm run coverage` (front, threshold 80%) + validação do compose em cada PR.
+- [x] **8b.** CI verde exigida para merge (branch protection na `main`) e `README.md` atualizado (badge + seção CI).
