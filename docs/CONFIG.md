@@ -100,8 +100,23 @@ CORS na borda + configurável por ambiente. Cada serviço lê a property `cors.a
 | Variável                                       | Serviço(s)                          | Compose                              | Observação                                  |
 | ---------------------------------------------- | ----------------------------------- | ------------------------------------ | ------------------------------------------- |
 | `MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT`    | user-service · gateway · auth-server | `http://zipkin:9411/api/v2/spans`    | Endpoint do Zipkin para exportar spans.     |
+| `MANAGEMENT_TRACING_SAMPLING_PROBABILITY`      | user-service · gateway · auth-server | `1.0`                                | Probabilidade de sampling de tracing. Default dev `1.0` (100%) nos `*.yml` do config-server; em **prod** reduza para conter custo/volume (ex.: `0.1`). |
 | `LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SESSION`    | gateway                             | `DEBUG`                              | Toggle de debug (dev) da sessão.            |
 | `LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY_WEB` | gateway                           | `DEBUG`                              | Toggle de debug (dev) do Spring Security.   |
+
+**Storage do Zipkin** (container `zipkin`, só `docker-compose`). O Zipkin roda **in-memory por
+default** (`STORAGE_TYPE=mem`) — adequado a dev, mas os traces somem no restart. Para
+persistência em prod, aponte-o para um **Elasticsearch externo** (o base não sobe um ES para
+não pesar a stack local; backend é exercício do consumidor do blueprint). As chaves abaixo são
+host vars com prefixo `ZIPKIN_` que o compose injeta nos nomes nativos do container
+(`STORAGE_TYPE`/`ES_HOSTS`/`ES_USERNAME`/`ES_PASSWORD`):
+
+| Variável               | Container | Default dev | Observação                                                        |
+| ---------------------- | --------- | ----------- | ---------------------------------------------------------------- |
+| `ZIPKIN_STORAGE_TYPE`  | `zipkin`  | `mem`       | `mem` (in-memory) ou `elasticsearch` em prod.                    |
+| `ZIPKIN_ES_HOSTS`      | `zipkin`  | _vazio_     | URL(s) do Elasticsearch (ex.: `https://es.exemplo.com:9200`).    |
+| `ZIPKIN_ES_USERNAME`   | `zipkin`  | _vazio_     | Usuário do ES (se autenticado).                                  |
+| `ZIPKIN_ES_PASSWORD`   | `zipkin`  | _vazio_     | Senha do ES (se autenticado).                                    |
 
 ## Front-end
 

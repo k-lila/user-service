@@ -96,7 +96,8 @@ management:
       produce: b3
       consume: b3
     sampling:
-      probability: 1.0
+      # Default dev 100%; override em prod via MANAGEMENT_TRACING_SAMPLING_PROBABILITY.
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
     export:
       zipkin:
         enabled: true

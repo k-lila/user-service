@@ -208,7 +208,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 
 ### Observabilidade
 
-- **Zipkin** — B3, 100% sampling
+- **Zipkin** — B3; sampling default dev 100% (`MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0` nos `*.yml` do config-server); reduza via env em prod (ex.: `0.1`); storage default `mem` (in-memory, traces somem no restart), parametrizável para Elasticsearch externo via `ZIPKIN_STORAGE_TYPE`/`ZIPKIN_ES_*` (ver `docs/CONFIG.md`)
 - **Prometheus** — `/actuator/prometheus`, scrape 5s; job `microservices` (discovery×2, auth-server, user-service, gateway) + job `config-server` (config-server-1/2:8888, `basic_auth` com credenciais default dev `config-client`/`config-dev-secret` — o `/actuator/prometheus` do config-server fica atrás de HTTP Basic; migrar para `password_file` em prod); 3 exporters de infra (sem `ports:` no base — prod-safe):
   - `mongodb-exporter:9216` (percona/mongodb_exporter:0.43.1) — RS via seed único `mongo-1:27017` + `replicaSet=rs0`; credencial via env (`MONGODB_URI`)
   - `postgres-exporter:9187` (prometheuscommunity/postgres-exporter:v0.16.0) — `DATA_SOURCE_NAME` para `auth-postgres:5432/authdb`

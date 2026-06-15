@@ -24,6 +24,15 @@ services:
     networks:
       - user-service-net
     # Sem ports: em prod — observabilidade só na rede interna (G2). Republicado em dev no override.
+    environment:
+      # Storage do Zipkin: in-memory por default (dev) — traces somem no restart. Em prod, setar
+      # ZIPKIN_STORAGE_TYPE=elasticsearch + ZIPKIN_ES_HOSTS/USERNAME/PASSWORD apontando para um
+      # Elasticsearch externo (persistência após restart). Ver docs/CONFIG.md § Observabilidade e
+      # .env.example. As chaves do container são os nomes nativos do Zipkin.
+      STORAGE_TYPE: ${ZIPKIN_STORAGE_TYPE:-mem}
+      ES_HOSTS: ${ZIPKIN_ES_HOSTS:-}
+      ES_USERNAME: ${ZIPKIN_ES_USERNAME:-}
+      ES_PASSWORD: ${ZIPKIN_ES_PASSWORD:-}
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:9411/health"]
       interval: 5s

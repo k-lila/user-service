@@ -19,6 +19,16 @@
 
 <!-- Novas entradas abaixo -->
 
+## [2026-06-15] observabilidade · Externalização de sampling + storage do Zipkin
+- **Decisão:** fecha os dois tech-debts de tracing anotados na entrada [2026-06-13] · tracing (itens (b) sampling hardcoded e (c) Zipkin in-memory).
+  - **Sampling:** `management.tracing.sampling.probability` deixou de ser `1.0` hardcoded nos 3 YAMLs que tracejam (`gateway.yml`, `user-service.yml`, `authorization-server.yml`) → `${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}`. Dev segue 100%; prod reduz via env (ex.: 0.1).
+  - **Zipkin storage:** serviço `zipkin` no `docker-compose.yml` ganhou `environment` parametrizando o storage: `STORAGE_TYPE=${ZIPKIN_STORAGE_TYPE:-mem}` + `ES_HOSTS/ES_USERNAME/ES_PASSWORD` via host vars `ZIPKIN_ES_*`. Default dev = `mem` (in-memory).
+- **Decisão de escopo (Opção A, escolhida pelo humano):** NÃO subir um Elasticsearch local (nem overlay opt-in). O base segue leve e prod-safe; apontar o Zipkin para um ES externo e validar persistência após restart é **exercício do consumidor do blueprint** — mesma filosofia dos gaps de prod já aceitos (cert ACME, chave JWK). Trade-offs avaliados (A env-only vs. B env-only+overlay de ES); B fica como adição futura isolada se a prova local for desejada.
+- **ADR:** não — config de runtime/observabilidade, sem mudança de contrato de API ou schema.
+- **Verificação:** `docker compose -f docker-compose.yml config` exit 0 (só warning de `version`); env do zipkin renderiza `STORAGE_TYPE: mem` + ES vazios. Placeholder de sampling usa a forma `${VAR:default}` idêntica a placeholders já funcionais nos mesmos YAMLs; config servida (container antigo, ainda hardcoded) devolve o default `1.0` esperado. Docs: `docs/CONFIG.md` (§ Observabilidade: linha de sampling + tabela de storage do Zipkin) e `.env.example` (bloco de observabilidade prod).
+- **Tech-debt / observações:** (a) prova em runtime da edição de sampling requer rebuild do config-server (não feito para não derrubar o stack no ar) — baixo risco dado o padrão idêntico; (b) overlay de ES (Opção B) permanece como possível adição futura.
+- **Tipo:** decisão.
+
 ## [2026-06-13] infra/compose · Limites de CPU/memória por serviço
 - **Decisão:** todos os 26 serviços do `docker-compose.yml` ganharam teto/reserva de recursos via as chaves de nível de serviço `cpus`/`mem_limit`/`mem_reservation` (não `deploy.resources`). Razão: `docker compose up` (v2) aplica essas chaves de forma determinística **fora do Swarm**, enquanto parte de `deploy:` só vale em Swarm — buscamos efeito garantido em standalone. Perfis por classe (App JVM pesado 1.0/1024m/512m; App JVM leve 0.75/512m/256m; Mongo 1.0/1024m/512m; PG 0.75/512m/256m; Redis 0.5/256m/64m; Sentinel 0.25/128m; Zipkin/Prometheus 0.5/512m/256m; Grafana 0.5/256m/128m; exporters/nginx 0.25/128m-64m; mongo-init 0.5/256m). Valores são defaults de dev-blueprint (folga para não OOMKillar no boot; JVM 21 calibra heap ~25% via MaxRAMPercentage).
 - **ADR:** não — operação/infra, sem mudança de contrato de API ou schema.
