@@ -17,6 +17,12 @@ import org.testcontainers.containers.MongoDBContainer;
 @SpringBootTest
 @TestPropertySource(properties = {
         "eureka.client.enabled=false",
+        // Isola o config import: sem isto, com a stack Docker no ar o config-server
+        // serve a config de Redis Sentinel (hostnames internos do Compose) ao JVM de teste,
+        // que o Lettuce prioriza sobre o spring.data.redis.host/port do Testcontainer
+        // (UnknownHostException: redis-sentinel-1). A suíte passa a ser determinística
+        // independentemente de a stack estar rodando.
+        "spring.cloud.config.enabled=false",
         "management.tracing.sampling.probability=0",
         "spring.data.mongodb.database=testdb",
         "internal.api.token=test-internal-token"

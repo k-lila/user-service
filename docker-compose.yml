@@ -18,9 +18,21 @@ services:
 
   zipkin:
     image: openzipkin/zipkin:latest
+    cpus: 0.5
+    mem_limit: 512m
+    mem_reservation: 256m
     networks:
       - user-service-net
     # Sem ports: em prod — observabilidade só na rede interna (G2). Republicado em dev no override.
+    environment:
+      # Storage do Zipkin: in-memory por default (dev) — traces somem no restart. Em prod, setar
+      # ZIPKIN_STORAGE_TYPE=elasticsearch + ZIPKIN_ES_HOSTS/USERNAME/PASSWORD apontando para um
+      # Elasticsearch externo (persistência após restart). Ver docs/CONFIG.md § Observabilidade e
+      # .env.example. As chaves do container são os nomes nativos do Zipkin.
+      STORAGE_TYPE: ${ZIPKIN_STORAGE_TYPE:-mem}
+      ES_HOSTS: ${ZIPKIN_ES_HOSTS:-}
+      ES_USERNAME: ${ZIPKIN_ES_USERNAME:-}
+      ES_PASSWORD: ${ZIPKIN_ES_PASSWORD:-}
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:9411/health"]
       interval: 5s
@@ -34,6 +46,9 @@ services:
 
   config-server-1:
     build: ./config-server
+    cpus: 0.75
+    mem_limit: 512m
+    mem_reservation: 256m
     networks:
       - user-service-net
     environment:
@@ -50,6 +65,9 @@ services:
 
   config-server-2:
     build: ./config-server
+    cpus: 0.75
+    mem_limit: 512m
+    mem_reservation: 256m
     networks:
       - user-service-net
     environment:
@@ -66,6 +84,8 @@ services:
 
   config-lb:
     image: nginx:alpine
+    cpus: 0.25
+    mem_limit: 64m
     networks:
       - user-service-net
     # Sem ports: em prod — config-server não publicado (G3). Republicado em dev no override.
@@ -89,6 +109,9 @@ services:
 
   discovery-server-1:
     build: ./discovery-server
+    cpus: 0.75
+    mem_limit: 512m
+    mem_reservation: 256m
     networks:
       - user-service-net
     # Sem ports: em prod — Eureka só na rede interna (G2). Republicado em dev no override.
@@ -112,6 +135,9 @@ services:
 
   discovery-server-2:
     build: ./discovery-server
+    cpus: 0.75
+    mem_limit: 512m
+    mem_reservation: 256m
     networks:
       - user-service-net
     # Sem ports: em prod — Eureka só na rede interna (G2). Republicado em dev no override.
@@ -139,6 +165,9 @@ services:
 
   mongo-1:
     image: mongo:8.2
+    cpus: 1.0
+    mem_limit: 1024m
+    mem_reservation: 512m
     networks:
       - user-service-net
     entrypoint:
@@ -160,6 +189,9 @@ services:
 
   mongo-2:
     image: mongo:8.2
+    cpus: 1.0
+    mem_limit: 1024m
+    mem_reservation: 512m
     networks:
       - user-service-net
     entrypoint:
@@ -178,6 +210,9 @@ services:
 
   mongo-3:
     image: mongo:8.2
+    cpus: 1.0
+    mem_limit: 1024m
+    mem_reservation: 512m
     networks:
       - user-service-net
     entrypoint:
@@ -196,6 +231,8 @@ services:
 
   mongo-init:
     image: mongo:8.2
+    cpus: 0.5
+    mem_limit: 256m
     networks:
       - user-service-net
     depends_on:
@@ -231,6 +268,9 @@ services:
 
   redis-1:
     image: redis:7
+    cpus: 0.5
+    mem_limit: 256m
+    mem_reservation: 64m
     networks:
       - user-service-net
     command: redis-server
@@ -243,6 +283,9 @@ services:
 
   redis-2:
     image: redis:7
+    cpus: 0.5
+    mem_limit: 256m
+    mem_reservation: 64m
     networks:
       - user-service-net
     command: redis-server --replicaof redis-1 6379
@@ -258,6 +301,9 @@ services:
 
   redis-3:
     image: redis:7
+    cpus: 0.5
+    mem_limit: 256m
+    mem_reservation: 64m
     networks:
       - user-service-net
     command: redis-server --replicaof redis-1 6379
@@ -273,6 +319,8 @@ services:
 
   redis-sentinel-1:
     image: redis:7
+    cpus: 0.25
+    mem_limit: 128m
     networks:
       - user-service-net
     command: sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"
@@ -294,6 +342,8 @@ services:
 
   redis-sentinel-2:
     image: redis:7
+    cpus: 0.25
+    mem_limit: 128m
     networks:
       - user-service-net
     command: sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"
@@ -315,6 +365,8 @@ services:
 
   redis-sentinel-3:
     image: redis:7
+    cpus: 0.25
+    mem_limit: 128m
     networks:
       - user-service-net
     command: sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"
@@ -340,6 +392,9 @@ services:
 
   auth-postgres:
     image: postgres:16
+    cpus: 0.75
+    mem_limit: 512m
+    mem_reservation: 256m
     networks:
       - user-service-net
     volumes:
@@ -361,6 +416,9 @@ services:
 
   authorization-server:
     build: ./authorization-server
+    cpus: 1.0
+    mem_limit: 1024m
+    mem_reservation: 512m
     networks:
       - user-service-net
     # Sem ports: em prod. O front-channel (browser → /oauth2/authorize, /login, /connect/logout)
@@ -409,6 +467,9 @@ services:
 
   user-service:
     build: ./user-service
+    cpus: 1.0
+    mem_limit: 1024m
+    mem_reservation: 512m
     networks:
       - user-service-net
     # Sem ports: em prod — acesso só via gateway (G2: 8090 direto contorna rate limit/CORS).
@@ -460,6 +521,9 @@ services:
 
   gateway:
     build: ./gateway
+    cpus: 1.0
+    mem_limit: 1024m
+    mem_reservation: 512m
     networks:
       - user-service-net
     ports:
@@ -514,6 +578,8 @@ services:
       context: ./login-interface
       args:
         VITE_API_URL: ""
+    cpus: 0.25
+    mem_limit: 64m
     # Borda pública (SPA + proxy BFF). Porta do host por env (listas de ports: são concatenadas
     # entre base/override, então não dá para "remapear" via override): dev usa o default 5173
     # (URL documentada); prod seta WEB_HOST_PORT (ex.: 80, atrás do TLS/ingress — G1).
@@ -528,6 +594,8 @@ services:
 
   mongodb-exporter:
     image: percona/mongodb_exporter:0.43.1
+    cpus: 0.25
+    mem_limit: 128m
     networks:
       - user-service-net
     # Sem ports: em prod — exporters só na rede interna. Republicado em dev no override se necessário.
@@ -549,6 +617,8 @@ services:
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.16.0
+    cpus: 0.25
+    mem_limit: 128m
     networks:
       - user-service-net
     # Sem ports: em prod — exporters só na rede interna.
@@ -561,6 +631,8 @@ services:
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.62.0
+    cpus: 0.25
+    mem_limit: 128m
     networks:
       - user-service-net
     # Sem ports: em prod — exporters só na rede interna.
@@ -577,6 +649,9 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
+    cpus: 0.5
+    mem_limit: 512m
+    mem_reservation: 256m
     networks:
       - user-service-net
     # Sem ports: em prod — métricas só na rede interna (G2/G6). Republicado em dev no override.
@@ -594,6 +669,9 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
+    cpus: 0.5
+    mem_limit: 256m
+    mem_reservation: 128m
     networks:
       - user-service-net
     # Sem ports: em prod — dashboards só na rede interna (G2/G11). Republicado em dev no override.

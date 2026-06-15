@@ -19,6 +19,59 @@
 
 <!-- Novas entradas abaixo -->
 
+## [2026-06-15] ROADMAP item 7 · esteira · JaCoCo com gate de cobertura
+- **Decisão:** plugado o `jacoco-maven-plugin` (versão herdada do `spring-boot-starter-parent` 4.0.3, sem pin) nos 5 módulos back-end. Sem POM agregador (decisão do humano: manter a estrutura atual, agregador fora do escopo da v1) → bloco replicado por POM.
+  - **Gate (falha o build) nos 3 módulos de domínio** (`user-service`, `authorization-server`, `gateway`): execution `check` na fase `verify`, regra `BUNDLE`/`LINE`/`COVEREDRATIO` mínimo **0.70** (piso bloqueante do projeto; 80% segue como meta perseguida via testes, não como gate, para não reprovar por poucos %).
+  - **Report-only** em `config-server` e `discovery-server` (só `prepare-agent` + `report`, sem `check`) — código de framework fora do escopo de teste deliberado (ver TESTES.md §Fora de escopo); gate de 70% ali seria artificial.
+  - **Exclusões mínimas** (escopo report+check): `**/*Application.class` e `**/dtos/**`. `@Configuration` fica dentro da métrica (coberto pelos `@SpringBootTest` de integração).
+  - Sem Failsafe no projeto → `prepare-agent` injeta `argLine` que o Surefire (que roda unit + integração) consome automaticamente.
+- **Decisão de escopo (escolha do humano):** (1) por módulo, sem agregador; (2) gate no piso 70% (não 80% estrito); (3) config/discovery report-only.
+- **ADR:** não — item de esteira/build, sem mudança de contrato de API ou schema.
+- **Verificação:** `mvn -f <módulo>/pom.xml verify` exit 0 nos 5; jacoco 0.8.15 resolveu pelo parent. "All coverage checks have been met" nos 3 de domínio (testes mantidos: user-service 136, auth-server 51, gateway 38). Cobertura de LINE medida (via jacoco.csv, já com exclusões): user-service 98,3%, auth-server 95,4%, gateway 100% — nenhum teste faltante a escrever. config-server 81,8% / discovery-server 33,3% (sem gate). Docs em `docs/TESTES.md` (nova §Cobertura (JaCoCo)).
+- **Tech-debt / observações:** (a) duplicação do bloco JaCoCo nos POMs é o custo aceito de não ter agregador — se um POM-pai for criado no futuro, mover para `pluginManagement`; (b) a regra `check` não distingue classe nova/alterada (intent do CLAUDE.md) de classe legada — o gate é por bundle do módulo; o discernimento por classe segue manual/senso-critico; (c) prova de que o gate "morde" (forçar <70% reprovar) não foi exercida destrutivamente — a execution `check` rodou e avaliou a regra (não "skipped"), confirmando que está ativa.
+- **Tipo:** decisão.
+
+## [2026-06-15] ROADMAP item 6 · documentação · ADRs retroativos essenciais
+- **Decisão:** formalizados 6 ADRs retroativos para decisões estruturais já implementadas e em produção no blueprint, que existiam sem registro formal (`docs/adr/` só tinha o TEMPLATE + ADR-001). Os ADRs são a fonte canônica; esta entrada só aponta:
+  - **ADR-002** — `docs/adr/ADR-002-padrao-bff.md` · Padrão BFF (gateway é o cliente OAuth2; SPA usa sessão por cookie e nunca manuseia JWT).
+  - **ADR-003** — `docs/adr/ADR-003-estado-oauth-postgresql.md` · Estado OAuth (client/authorizations/consents) em PostgreSQL via JDBC repositories do SAS (escala horizontal).
+  - **ADR-004** — `docs/adr/ADR-004-resiliencia-feign-circuit-breaker.md` · Resiliência da chamada auth→user via Feign (Resilience4j + `UserClientFallbackFactory`). Referencia o refinamento C20 ([2026-06-12], `instances.*`→`configs.*`) sem reescrevê-lo.
+  - **ADR-005** — `docs/adr/ADR-005-chave-jwk-persistente.md` · Par RSA fixo com `kid` estável carregado de PEM (em vez de gerar por boot).
+  - **ADR-006** — `docs/adr/ADR-006-canal-interno-isolado.md` · Canal exclusivo auth↔user (`/internal/users/email/{email}`) fora do gateway, protegido por `X-Internal-Token`.
+  - **ADR-007** — `docs/adr/ADR-007-sessao-redis-cookies-distintos.md` · Sessão server-side no Redis (Spring Session) com cookies distintos por serviço (`SESSION` vs `AUTHSESSION`).
+- **Escopo (escolha do humano):** além dos 3 mínimos do roadmap (BFF/Postgres/Feign), adicionados 3 estruturais (JWK/canal interno/sessão). Índice de ADRs registrado como linha no `CLAUDE.md` §Mapa de documentos (não criado `docs/adr/README.md`).
+- **ADR:** as próprias entradas em `docs/adr/` (este é um item de documentação; nenhum código, config, contrato ou schema foi tocado).
+- **Verificação:** `docs/adr/` agora tem ADR-001..007 + TEMPLATE; cada ADR segue o cabeçalho do TEMPLATE (Status/Data/Serviço/Tarefa) e as 4 seções; conteúdo conferido contra as fontes de verdade (CLAUDE.md + `OAuth2ClientConfig`/`JWKConfig`/`IUserClient`/`UserClientFallbackFactory`/`GatewayRouter`/`SecurityConfig`/`InternalTokenFilter`/`FeignConfig`).
+- **Tech-debt / observações:** nenhuma decisão técnica pré-existente foi reescrita — C20, hardening [2026-06-13] e tracing [2026-06-13] são apenas referenciados pelos ADRs.
+- **Tipo:** decisão.
+
+## [2026-06-15] observabilidade · Externalização de sampling + storage do Zipkin
+- **Decisão:** fecha os dois tech-debts de tracing anotados na entrada [2026-06-13] · tracing (itens (b) sampling hardcoded e (c) Zipkin in-memory).
+  - **Sampling:** `management.tracing.sampling.probability` deixou de ser `1.0` hardcoded nos 3 YAMLs que tracejam (`gateway.yml`, `user-service.yml`, `authorization-server.yml`) → `${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}`. Dev segue 100%; prod reduz via env (ex.: 0.1).
+  - **Zipkin storage:** serviço `zipkin` no `docker-compose.yml` ganhou `environment` parametrizando o storage: `STORAGE_TYPE=${ZIPKIN_STORAGE_TYPE:-mem}` + `ES_HOSTS/ES_USERNAME/ES_PASSWORD` via host vars `ZIPKIN_ES_*`. Default dev = `mem` (in-memory).
+- **Decisão de escopo (Opção A, escolhida pelo humano):** NÃO subir um Elasticsearch local (nem overlay opt-in). O base segue leve e prod-safe; apontar o Zipkin para um ES externo e validar persistência após restart é **exercício do consumidor do blueprint** — mesma filosofia dos gaps de prod já aceitos (cert ACME, chave JWK). Trade-offs avaliados (A env-only vs. B env-only+overlay de ES); B fica como adição futura isolada se a prova local for desejada.
+- **ADR:** não — config de runtime/observabilidade, sem mudança de contrato de API ou schema.
+- **Verificação:** `docker compose -f docker-compose.yml config` exit 0 (só warning de `version`); env do zipkin renderiza `STORAGE_TYPE: mem` + ES vazios. Placeholder de sampling usa a forma `${VAR:default}` idêntica a placeholders já funcionais nos mesmos YAMLs; config servida (container antigo, ainda hardcoded) devolve o default `1.0` esperado. Docs: `docs/CONFIG.md` (§ Observabilidade: linha de sampling + tabela de storage do Zipkin) e `.env.example` (bloco de observabilidade prod).
+- **Tech-debt / observações:** (a) prova em runtime da edição de sampling requer rebuild do config-server (não feito para não derrubar o stack no ar) — baixo risco dado o padrão idêntico; (b) overlay de ES (Opção B) permanece como possível adição futura.
+- **Tipo:** decisão.
+
+## [2026-06-13] infra/compose · Limites de CPU/memória por serviço
+- **Decisão:** todos os 26 serviços do `docker-compose.yml` ganharam teto/reserva de recursos via as chaves de nível de serviço `cpus`/`mem_limit`/`mem_reservation` (não `deploy.resources`). Razão: `docker compose up` (v2) aplica essas chaves de forma determinística **fora do Swarm**, enquanto parte de `deploy:` só vale em Swarm — buscamos efeito garantido em standalone. Perfis por classe (App JVM pesado 1.0/1024m/512m; App JVM leve 0.75/512m/256m; Mongo 1.0/1024m/512m; PG 0.75/512m/256m; Redis 0.5/256m/64m; Sentinel 0.25/128m; Zipkin/Prometheus 0.5/512m/256m; Grafana 0.5/256m/128m; exporters/nginx 0.25/128m-64m; mongo-init 0.5/256m). Valores são defaults de dev-blueprint (folga para não OOMKillar no boot; JVM 21 calibra heap ~25% via MaxRAMPercentage).
+- **ADR:** não — operação/infra, sem mudança de contrato de API ou schema.
+- **Verificação:** `docker compose -f docker-compose.yml config` exit 0 (só o warning pré-existente de `version`); config resolvida renderiza 69 chaves de recurso (17 serviços×3 + 9×2); dev (base+override) também exit 0. Valores documentados em `docs/CONFIG.md` (nova seção "Limites de recursos").
+- **Tech-debt / observações:** (a) `version: "3.9"` segue obsoleto (warning pré-existente, fora de escopo); (b) limites não exercitados sob carga real — são tetos de contenção, calibrar no consumidor do blueprint.
+- **Tipo:** decisão.
+
+## [2026-06-13] user-service + authorization-server · Hardening (login + leitura de ativos + isolamento de config de teste)
+- **Decisão:** três ajustes de finalização do blueprint:
+  - **Login (auth-server):** `AuthorizationService.loadUserByUsername` deixou de engolir tudo em `RuntimeException("Erro de comunicação interna")`. Agora `UsernameNotFoundException` (fallback do CB / não-encontrado) propaga sem reembrulhar (→ credenciais inválidas, volta ao login em vez de 500), `null` é tratado explicitamente, e só o inesperado vira uma `UsernameNotFoundException` genérica (sem vazar a causa). Alinha o código com o intent do CLAUDE.md ("indisponibilidade retorna UsernameNotFoundException imediatamente").
+  - **Leitura de ativos (user-service):** endpoints de leitura passam a expor só `active=true` — `searchAll` usa `findByActiveTrue`; `searchById`/`searchByEmail` tratam inativo como 404. **Mudança de contrato → ADR-001** (`docs/adr/ADR-001-leitura-somente-ativos.md`). Decisão do humano entre filtrar (escolhida) vs. documentar-como-está.
+  - **Isolamento de config de teste (user-service):** `AbstractIntegrationTest` ganhou `spring.cloud.config.enabled=false` no `@TestPropertySource`. Sem isso, com a stack Docker no ar o config-server servia a config de Redis Sentinel (hostnames do Compose) ao JVM de teste → `UnknownHostException: redis-sentinel-1` (descoberto ao validar o alinhamento de versão do Spring Boot). Suíte agora determinística com a stack rodando.
+- **ADR:** docs/adr/ADR-001-leitura-somente-ativos.md (leitura de ativos).
+- **Verificação:** user-service 131→136 testes, auth-server 50→51, ambos verdes com a stack no ar e SEM flag de config (prova o isolamento de config de teste).
+- **Tech-debt / observações:** (a) sem endpoint admin para listar inativos (auditoria) — se necessário, novo endpoint admin-only em ADR própria; (b) import duplicado `java.util.List` em `AuthorizationService.java` permanece (fora de escopo).
+- **Tipo:** decisão + observação.
+
 ## [2026-06-13] · tracing · Fechamento de gaps de tracing distribuído (Zipkin/B3)
 - **Decisão:** quatro ajustes na camada de tracing, verificados em runtime (login real + inspeção no Zipkin):
   1. **discovery-server** deixou de declarar `depends_on: zipkin` no `docker-compose.yml` — emitia zero spans (sem dep/config de tracing), o acoplamento só atrasava o boot.

@@ -13,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
 import authorizationserver.clients.IUserClient;
 import authorizationserver.dtos.AuthDTO;
@@ -59,27 +60,43 @@ class AuthorizationServiceTest {
     }
 
     @Test
-    void deveLancarRuntimeException_quandoUsuarioInativo() {
-        // UsernameNotFoundException lançada internamente é capturada e relançada como RuntimeException
+    void deveLancarUsernameNotFound_quandoUsuarioInativo() {
         when(userClient.getUserByEmail("inativo@email.com"))
                 .thenReturn(buildAuthDTO("inativo@email.com", false, Set.of("USER")));
 
-        assertThrows(RuntimeException.class, () -> service.loadUserByUsername("inativo@email.com"));
+        assertThrows(UsernameNotFoundException.class,
+                () -> service.loadUserByUsername("inativo@email.com"));
     }
 
     @Test
-    void deveLancarRuntimeException_quandoClienteLancaExcecao() {
+    void devePropagarUsernameNotFound_quandoFallbackOuNaoEncontrado() {
+        // O fallback (user-service indisponível / CB aberto) e o "não encontrado" chegam
+        // como UsernameNotFoundException: deve propagar SEM reembrulhar em RuntimeException
+        // genérica (credenciais inválidas → volta ao login, não 500).
+        when(userClient.getUserByEmail(any()))
+                .thenThrow(new UsernameNotFoundException("user-service unavailable"));
+
+        UsernameNotFoundException ex = assertThrows(UsernameNotFoundException.class,
+                () -> service.loadUserByUsername("fulano@email.com"));
+        assertEquals("user-service unavailable", ex.getMessage());
+    }
+
+    @Test
+    void deveLancarUsernameNotFound_quandoErroInesperado() {
+        // Exceção inesperada (não-UsernameNotFound) é convertida em UsernameNotFoundException
+        // genérica — não escala a 500 nem vaza a causa.
         when(userClient.getUserByEmail(any())).thenThrow(new RuntimeException("timeout"));
 
-        assertThrows(RuntimeException.class,
+        UsernameNotFoundException ex = assertThrows(UsernameNotFoundException.class,
                 () -> service.loadUserByUsername("fulano@email.com"));
+        assertEquals("Não foi possível autenticar o usuário", ex.getMessage());
     }
 
     @Test
-    void deveLancarRuntimeException_quandoClienteRetornaNull() {
+    void deveLancarUsernameNotFound_quandoClienteRetornaNull() {
         when(userClient.getUserByEmail(any())).thenReturn(null);
 
-        assertThrows(RuntimeException.class,
+        assertThrows(UsernameNotFoundException.class,
                 () -> service.loadUserByUsername("fulano@email.com"));
     }
 

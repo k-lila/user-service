@@ -23,7 +23,7 @@ O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o clie
 - [docs/CONFIG.md](docs/CONFIG.md) — variáveis de ambiente
 - [docs/TESTES.md](docs/TESTES.md) — estratégia de testes
 - [docs/LOGS.md](docs/LOGS.md) — estratégia de logs
-- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema
+- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos
 
 ---
 
@@ -94,7 +94,7 @@ login-interface (React)
   - `@EnableRedisHttpSession` no `SecurityConfig` — exige anotação explícita no Spring Boot 4.0.
   - Cookie renomeado para **`AUTHSESSION`** (`CookieSerializer`) para não colidir com o `SESSION` do gateway (ver _Convenções_).
 - **Credenciais e token:** busca credenciais via Feign (`GET /internal/users/email/{email}`); customiza o JWT em `TokenCustomizerConfig.java` (**arquivo crítico**) com `userID`, `roles`, `permissions`.
-- **Resiliência Feign:** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com a config nomeada `configs.user-service` (com group habilitado, `instances.*` é inerte — use `configs.*`): janela 10, `minimumNumberOfCalls` 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout.
+- **Resiliência Feign:** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com a config nomeada `configs.user-service` (com group habilitado, `instances.*` é inerte — use `configs.*`): janela 10, `minimumNumberOfCalls` 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout. `AuthorizationService.loadUserByUsername` propaga essa exceção sem reembrulhar — o `DaoAuthenticationProvider` a trata como credenciais inválidas e devolve o usuário ao form de login (não escala a 500); só exceções inesperadas são convertidas em `UsernameNotFoundException` genérica sem vazar a causa.
 - **Propagação de trace no Feign (`FeignTracingConfig.java`):** na cadeia Feign + circuit breaker a instrumentação automática (feign-micrometer) registrava o span cliente no trace correto, mas **não emitia os headers B3** — o user-service recebia a request sem `X-B3-*` e abria um trace **órfão**. `FeignTracingConfig` adiciona um `RequestInterceptor` que injeta o contexto de trace corrente no template via o `Propagator` do Micrometer (formato `b3`); assim o user-service (`consume: b3`) continua o trace e seu span vira filho do auth-server. Degrada graciosamente quando não há contexto ativo.
 - **Lockout anti-brute-force:** `LoginAttemptService` mantém contador de falhas no Redis por par **(conta, IP)** — chave `sha256(emailLower|ip)`, janela fixa (TTL 15 min na 1ª falha), lockout após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha (mensagem genérica). Prod exige `server.forward-headers-strategy` + proxy sanitizando `X-Forwarded-For`.
 
@@ -184,7 +184,7 @@ login-interface (React)
 docker compose up -d --build
 ```
 
-O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`.
+O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`. Todos os 26 serviços declaram `cpus` / `mem_limit` / `mem_reservation` (chaves de nível de serviço, não `deploy.resources`) — perfis e racional em [docs/CONFIG.md § Limites de recursos](docs/CONFIG.md#limites-de-recursos-cpu--memória).
 
 **TLS/HTTPS na borda em dev (opcional):** overlay opt-in `docker-compose.tls.yml` sobe um reverse-proxy nginx (`infra/tls-proxy`) que termina TLS com cert do **mkcert** e fala HTTPS com o browser (`app.localhost`/`auth.localhost`), mantendo o interno em HTTP. `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`. O Swagger-UI segue funcional nesse modo: o fluxo OAuth2 passa pela borda (`AUTH_URL`/`AUTH_TOKEN` → `https://auth.localhost`; CORS do auth-server inclui `http://localhost:8081`) — a porta 8082 não é publicada sem o override de dev.
 
@@ -208,7 +208,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 
 ### Observabilidade
 
-- **Zipkin** — B3, 100% sampling
+- **Zipkin** — B3; sampling default dev 100% (`MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0` nos `*.yml` do config-server); reduza via env em prod (ex.: `0.1`); storage default `mem` (in-memory, traces somem no restart), parametrizável para Elasticsearch externo via `ZIPKIN_STORAGE_TYPE`/`ZIPKIN_ES_*` (ver `docs/CONFIG.md`)
 - **Prometheus** — `/actuator/prometheus`, scrape 5s; job `microservices` (discovery×2, auth-server, user-service, gateway) + job `config-server` (config-server-1/2:8888, `basic_auth` com credenciais default dev `config-client`/`config-dev-secret` — o `/actuator/prometheus` do config-server fica atrás de HTTP Basic; migrar para `password_file` em prod); 3 exporters de infra (sem `ports:` no base — prod-safe):
   - `mongodb-exporter:9216` (percona/mongodb_exporter:0.43.1) — RS via seed único `mongo-1:27017` + `replicaSet=rs0`; credencial via env (`MONGODB_URI`)
   - `postgres-exporter:9187` (prometheuscommunity/postgres-exporter:v0.16.0) — `DATA_SOURCE_NAME` para `auth-postgres:5432/authdb`
@@ -220,7 +220,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 
 ## Estratégia de Testes
 
-Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 262 testes — 109 unitários (Mockito/reativos) + 49 controller (`@WebMvcTest` — 45 `UserControllerTest` + 4 `InternalUserControllerTest`) + 65 integração (user-service: Mongo+Redis; auth-server: Postgres+Redis+WireMock, fluxo OAuth2; gateway: Redis+WireMock via `WebTestClient`, roteamento/rate-limit/CSRF + fluxo BFF OAuth2 ponta a ponta; config-server: `MockMvc` p/ HTTP Basic, sem containers) + 39 front-end (Vitest+RTL+MSW — API, hooks, componentes, páginas, rotas; threshold 80%).
+Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 271 testes — 113 unitários (Mockito/reativos) + 51 controller (`@WebMvcTest` — 46 `UserControllerTest` + 5 `InternalUserControllerTest`) + 68 integração (user-service: Mongo+Redis; auth-server: Postgres+Redis+WireMock, fluxo OAuth2; gateway: Redis+WireMock via `WebTestClient`, roteamento/rate-limit/CSRF + fluxo BFF OAuth2 ponta a ponta; config-server: `MockMvc` p/ HTTP Basic, sem containers) + 39 front-end (Vitest+RTL+MSW — API, hooks, componentes, páginas, rotas; threshold 80%).
 
 ---
 

@@ -1,11 +1,10 @@
 package authorizationserver.services;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.util.ArrayList;
-import java.util.List;
 
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -36,17 +35,26 @@ public class AuthorizationService implements UserDetailsService {
         AuthDTO user;
         try {
             user = userClient.getUserByEmail(email);
+        } catch (UsernameNotFoundException e) {
+            // Propaga sem reembrulhar: vem do fallback (user-service indisponível /
+            // circuit breaker aberto) ou de "não encontrado". O DaoAuthenticationProvider
+            // trata como credenciais inválidas (mensagem genérica) e devolve o usuário ao
+            // login — em vez de escalar a 500 como o antigo catch (Exception) fazia.
+            throw e;
         } catch (Exception e) {
+            // Só o inesperado (ex.: erro de (de)serialização) cai aqui. Loga o detalhe
+            // para diagnóstico, mas devolve UsernameNotFoundException (não RuntimeException)
+            // para não escalar a 500 nem vazar a causa ao usuário.
             LOGGER.error(
-                "| auth | falha Feign user-service | email: {}",
+                "| auth | falha inesperada ao carregar usuário | email: {}",
                 LogUtils.maskEmail(email),
                 e
             );
-            throw new RuntimeException("Erro de comunicação interna entre serviços");
+            throw new UsernameNotFoundException("Não foi possível autenticar o usuário");
         }
-        if (!user.getActive()) {
+        if (user == null || !user.getActive()) {
             LOGGER.warn("| auth | inexistente ou inativo | email: {}", LogUtils.maskEmail(email));
-            throw new UsernameNotFoundException("Usuário inativo: " + email);
+            throw new UsernameNotFoundException("Usuário inexistente ou inativo: " + email);
         }
         // userId embutido como authority para que o jwtCustomizer o leia sem nova chamada Feign.
         // Filtrado em TokenCustomizerConfig: nunca entra no JWT como role ou permission.

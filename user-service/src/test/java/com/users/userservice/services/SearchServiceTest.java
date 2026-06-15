@@ -33,6 +33,10 @@ class SearchServiceTest {
     @InjectMocks private SearchService service;
 
     private User buildUser(String id, String email) {
+        return buildUser(id, email, true);
+    }
+
+    private User buildUser(String id, String email, boolean active) {
         User u = new User();
         u.setId(id);
         u.setName("Fulano");
@@ -40,13 +44,13 @@ class SearchServiceTest {
         u.setPasswordHash("$2a$10$hashed");
         u.setRegistrationDate(Instant.now());
         u.setRoles(Set.of("USER"));
-        u.setActive(true);
+        u.setActive(active);
         return u;
     }
 
     @Test
     void deveRetornarPaginaVazia_quandoNaoExistemRegistros() {
-        when(userRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        when(userRepository.findByActiveTrue(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
         Page<UserResponseDTO> result = service.searchAll(PageRequest.of(0, 10));
 
@@ -70,6 +74,24 @@ class SearchServiceTest {
         when(userRepository.findById("id-invalido")).thenReturn(Optional.empty());
 
         assertThrows(DomainEntityNotFound.class, () -> service.searchById("id-invalido"));
+    }
+
+    // ADR-001: usuário inativo (soft-deleted) é tratado como inexistente nas leituras.
+    @Test
+    void deveLancarDomainEntityNotFound_quandoUsuarioInativoPorId() {
+        when(userRepository.findById("id-inativo"))
+                .thenReturn(Optional.of(buildUser("id-inativo", "inativo@email.com", false)));
+
+        assertThrows(DomainEntityNotFound.class, () -> service.searchById("id-inativo"));
+    }
+
+    // ADR-001: usuário inativo (soft-deleted) é tratado como inexistente nas leituras.
+    @Test
+    void deveLancarDomainEntityNotFound_quandoUsuarioInativoPorEmail() {
+        when(userRepository.findByEmail("inativo@email.com"))
+                .thenReturn(Optional.of(buildUser("id-inativo", "inativo@email.com", false)));
+
+        assertThrows(DomainEntityNotFound.class, () -> service.searchByEmail("inativo@email.com"));
     }
 
     @Test
@@ -109,7 +131,7 @@ class SearchServiceTest {
     void deveMapearCamposDosUsuariosNaPagina_quandoBuscaTodos() {
         User user = buildUser("id-1", "fulano@email.com");
 
-        when(userRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(user)));
+        when(userRepository.findByActiveTrue(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(user)));
 
         Page<UserResponseDTO> result = service.searchAll(PageRequest.of(0, 10));
 
