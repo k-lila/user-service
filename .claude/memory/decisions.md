@@ -19,6 +19,16 @@
 
 <!-- Novas entradas abaixo -->
 
+## [2026-06-13] user-service + authorization-server · Hardening (login + leitura de ativos + isolamento de config de teste)
+- **Decisão:** três ajustes de finalização do blueprint:
+  - **Login (auth-server):** `AuthorizationService.loadUserByUsername` deixou de engolir tudo em `RuntimeException("Erro de comunicação interna")`. Agora `UsernameNotFoundException` (fallback do CB / não-encontrado) propaga sem reembrulhar (→ credenciais inválidas, volta ao login em vez de 500), `null` é tratado explicitamente, e só o inesperado vira uma `UsernameNotFoundException` genérica (sem vazar a causa). Alinha o código com o intent do CLAUDE.md ("indisponibilidade retorna UsernameNotFoundException imediatamente").
+  - **Leitura de ativos (user-service):** endpoints de leitura passam a expor só `active=true` — `searchAll` usa `findByActiveTrue`; `searchById`/`searchByEmail` tratam inativo como 404. **Mudança de contrato → ADR-001** (`docs/adr/ADR-001-leitura-somente-ativos.md`). Decisão do humano entre filtrar (escolhida) vs. documentar-como-está.
+  - **Isolamento de config de teste (user-service):** `AbstractIntegrationTest` ganhou `spring.cloud.config.enabled=false` no `@TestPropertySource`. Sem isso, com a stack Docker no ar o config-server servia a config de Redis Sentinel (hostnames do Compose) ao JVM de teste → `UnknownHostException: redis-sentinel-1` (descoberto ao validar o alinhamento de versão do Spring Boot). Suíte agora determinística com a stack rodando.
+- **ADR:** docs/adr/ADR-001-leitura-somente-ativos.md (leitura de ativos).
+- **Verificação:** user-service 131→136 testes, auth-server 50→51, ambos verdes com a stack no ar e SEM flag de config (prova o isolamento de config de teste).
+- **Tech-debt / observações:** (a) sem endpoint admin para listar inativos (auditoria) — se necessário, novo endpoint admin-only em ADR própria; (b) import duplicado `java.util.List` em `AuthorizationService.java` permanece (fora de escopo).
+- **Tipo:** decisão + observação.
+
 ## [2026-06-13] · tracing · Fechamento de gaps de tracing distribuído (Zipkin/B3)
 - **Decisão:** quatro ajustes na camada de tracing, verificados em runtime (login real + inspeção no Zipkin):
   1. **discovery-server** deixou de declarar `depends_on: zipkin` no `docker-compose.yml` — emitia zero spans (sem dep/config de tracing), o acoplamento só atrasava o boot.

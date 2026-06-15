@@ -24,7 +24,8 @@ public class SearchService {
     }
 
     public Page<UserResponseDTO> searchAll(Pageable pageable) {
-        Page<UserResponseDTO> mapped = userRepository.findAll(pageable).map((user) -> {
+        // Só usuários ativos: soft-deleted (active=false) ficam ocultos nas leituras. Ver ADR-001.
+        Page<UserResponseDTO> mapped = userRepository.findByActiveTrue(pageable).map((user) -> {
             return UserResponseDTO.toResponseDTO(user);
         });
         LOGGER.info(
@@ -39,8 +40,9 @@ public class SearchService {
     @Cacheable(value = "usersById", key = "#userID")
     public UserResponseDTO searchById(String userID) {
         Optional<User> user = userRepository.findById(userID);
-        if (user.isEmpty()) {
-            LOGGER.warn("| busca por ID | não encontrado | ID: {}", userID);
+        // Usuário inativo (soft-deleted) é tratado como inexistente nas leituras. Ver ADR-001.
+        if (user.isEmpty() || !user.get().getActive()) {
+            LOGGER.warn("| busca por ID | inexistente ou inativo | ID: {}", userID);
             throw new DomainEntityNotFound(User.class, "ID", userID);
         }
         User found = user.get();
@@ -51,8 +53,9 @@ public class SearchService {
     @Cacheable(value = "usersByEmail", key = "#email")
     public UserResponseDTO searchByEmail(String email) {
         Optional<User> user = userRepository.findByEmail(email);
-        if (user.isEmpty()) {
-            LOGGER.warn("| busca por email | não encontrado");
+        // Usuário inativo (soft-deleted) é tratado como inexistente nas leituras. Ver ADR-001.
+        if (user.isEmpty() || !user.get().getActive()) {
+            LOGGER.warn("| busca por email | inexistente ou inativo");
             throw new DomainEntityNotFound(User.class, "Email", email);
         }
         User found = user.get();

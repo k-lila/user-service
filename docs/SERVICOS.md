@@ -31,7 +31,15 @@
 - `DELETE /v1/users/del/{id}` (ADMIN) → hard-delete (`deleteUser`)
 - `DELETE /v1/users/remove/me` (USER) → soft-delete
 
-> Ver _Convenções_ no [CLAUDE.md](../CLAUDE.md).
+**Leituras só de usuários ativos (ADR-001):** os endpoints de leitura ocultam usuários
+soft-deleted (`active=false`):
+
+- `GET /v1/users` lista apenas ativos (`findByActiveTrue`).
+- `GET /v1/users/{id}` e `GET /v1/users/email/{email}` retornam **404** para usuário inativo
+  (tratado como inexistente).
+- `GET /v1/users/me` retorna **404** se a própria conta estiver desativada.
+
+> Ver _Convenções_ no [CLAUDE.md](../CLAUDE.md) e [ADR-001](adr/ADR-001-leitura-somente-ativos.md).
 
 ## Exemplos de payload
 

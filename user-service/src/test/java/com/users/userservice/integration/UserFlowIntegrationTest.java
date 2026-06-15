@@ -114,6 +114,39 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertFalse(dbUser.getActive());
     }
 
+    // ADR-001: após soft-delete, o usuário some das leituras (busca por ID/email e listagem).
+    @Test
+    void deveOcultarUsuarioInativo_naBuscaPorId() {
+        UserResponseDTO registrado = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+        registerService.deactivateUser(registrado.getId());
+
+        assertThrows(DomainEntityNotFound.class, () -> searchService.searchById(registrado.getId()));
+    }
+
+    // ADR-001
+    @Test
+    void deveOcultarUsuarioInativo_naBuscaPorEmail() {
+        UserResponseDTO registrado = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+        registerService.deactivateUser(registrado.getId());
+
+        assertThrows(DomainEntityNotFound.class, () -> searchService.searchByEmail("fulano@email.com"));
+    }
+
+    // ADR-001
+    @Test
+    void deveExcluirUsuariosInativos_daListagem() {
+        registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
+        UserResponseDTO paraInativar = registerService.registerUser(
+                buildDTO("Ciclano", "ciclano@email.com", "senha456"));
+        registerService.deactivateUser(paraInativar.getId());
+
+        Page<UserResponseDTO> pagina = searchService.searchAll(PageRequest.of(0, 10));
+
+        assertEquals(1, pagina.getTotalElements());
+    }
+
     @Test
     void deveDeletarUsuario_quandoIdExiste() {
         UserResponseDTO registrado = registerService.registerUser(
