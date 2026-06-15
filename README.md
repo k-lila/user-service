@@ -1,5 +1,7 @@
 # users
 
+[![CI](https://github.com/k-lila/user-service/actions/workflows/ci.yml/badge.svg)](https://github.com/k-lila/user-service/actions/workflows/ci.yml)
+
 API REST de gerenciamento de usuários construída com arquitetura de microsserviços — blueprint de um sistema de usuários (autenticação, registro e controle de acesso) pronto para produção multi-instância, sobre o qual outras camadas de domínio podem ser adicionadas.
 
 O front-end segue o padrão **BFF**: o gateway é o cliente OAuth2, o SPA usa sessão por cookie e nunca manuseia JWT — o token fica na sessão do gateway (Redis) e é relayado aos serviços internos.
@@ -132,6 +134,44 @@ Acesso: **https://app.localhost** (SPA + API) · **https://auth.localhost** (fro
 | Zipkin        | http://localhost:9411                         |
 | Prometheus    | http://localhost:9090                         |
 | Grafana       | http://localhost:3000 (credenciais do `.env`) |
+
+---
+
+## Integração Contínua (CI)
+
+A cada `push` na `main` e a cada `pull_request`, o workflow [`ci.yml`](.github/workflows/ci.yml)
+roda no GitHub Actions três frentes em paralelo:
+
+| Job                | O que roda                                                                 |
+| ------------------ | -------------------------------------------------------------------------- |
+| `backend` (matrix) | `mvn -B verify` por módulo (5 serviços) — dispara o gate de cobertura JaCoCo; integração via Testcontainers no Docker do runner |
+| `frontend`         | `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold de 80% |
+| `compose-validate` | `docker compose -f docker-compose.yml config -q` — valida a topologia base |
+
+Não há POM-pai agregador, por isso o back-end roda como **matrix** (um job por módulo).
+Os relatórios (Surefire/Failsafe, JaCoCo, cobertura do Vitest) são publicados como artefatos do run.
+
+**Gate de merge (branch protection):** a `main` exige todos os checks acima verdes antes de
+aceitar merge. Para (re)aplicar a regra via API (precisa de admin no repo):
+
+```bash
+gh api -X PUT repos/k-lila/user-service/branches/main/protection \
+  -H "Accept: application/vnd.github+json" \
+  -f 'required_status_checks[strict]=true' \
+  -f 'required_status_checks[contexts][]=backend (config-server)' \
+  -f 'required_status_checks[contexts][]=backend (discovery-server)' \
+  -f 'required_status_checks[contexts][]=backend (authorization-server)' \
+  -f 'required_status_checks[contexts][]=backend (user-service)' \
+  -f 'required_status_checks[contexts][]=backend (gateway)' \
+  -f 'required_status_checks[contexts][]=frontend' \
+  -f 'required_status_checks[contexts][]=compose-validate' \
+  -F 'enforce_admins=false' \
+  -F 'required_pull_request_reviews=null' \
+  -F 'restrictions=null'
+```
+
+> Os nomes dos checks só existem no GitHub após o workflow rodar ao menos uma vez — aplique
+> a regra depois da primeira run verde.
 
 ---
 
