@@ -19,7 +19,7 @@
 
 <!-- Novas entradas abaixo -->
 
-## [2026-06-15] ROADMAP item 7 · esteira · JaCoCo com gate de cobertura
+## [2026-06-15] esteira · JaCoCo com gate de cobertura
 - **Decisão:** plugado o `jacoco-maven-plugin` (versão herdada do `spring-boot-starter-parent` 4.0.3, sem pin) nos 5 módulos back-end. Sem POM agregador (decisão do humano: manter a estrutura atual, agregador fora do escopo da v1) → bloco replicado por POM.
   - **Gate (falha o build) nos 3 módulos de domínio** (`user-service`, `authorization-server`, `gateway`): execution `check` na fase `verify`, regra `BUNDLE`/`LINE`/`COVEREDRATIO` mínimo **0.70** (piso bloqueante do projeto; 80% segue como meta perseguida via testes, não como gate, para não reprovar por poucos %).
   - **Report-only** em `config-server` e `discovery-server` (só `prepare-agent` + `report`, sem `check`) — código de framework fora do escopo de teste deliberado (ver TESTES.md §Fora de escopo); gate de 70% ali seria artificial.
@@ -31,7 +31,7 @@
 - **Tech-debt / observações:** (a) duplicação do bloco JaCoCo nos POMs é o custo aceito de não ter agregador — se um POM-pai for criado no futuro, mover para `pluginManagement`; (b) a regra `check` não distingue classe nova/alterada (intent do CLAUDE.md) de classe legada — o gate é por bundle do módulo; o discernimento por classe segue manual/senso-critico; (c) prova de que o gate "morde" (forçar <70% reprovar) não foi exercida destrutivamente — a execution `check` rodou e avaliou a regra (não "skipped"), confirmando que está ativa.
 - **Tipo:** decisão.
 
-## [2026-06-15] ROADMAP item 6 · documentação · ADRs retroativos essenciais
+## [2026-06-15] documentação · ADRs retroativos essenciais
 - **Decisão:** formalizados 6 ADRs retroativos para decisões estruturais já implementadas e em produção no blueprint, que existiam sem registro formal (`docs/adr/` só tinha o TEMPLATE + ADR-001). Os ADRs são a fonte canônica; esta entrada só aponta:
   - **ADR-002** — `docs/adr/ADR-002-padrao-bff.md` · Padrão BFF (gateway é o cliente OAuth2; SPA usa sessão por cookie e nunca manuseia JWT).
   - **ADR-003** — `docs/adr/ADR-003-estado-oauth-postgresql.md` · Estado OAuth (client/authorizations/consents) em PostgreSQL via JDBC repositories do SAS (escala horizontal).
@@ -39,7 +39,7 @@
   - **ADR-005** — `docs/adr/ADR-005-chave-jwk-persistente.md` · Par RSA fixo com `kid` estável carregado de PEM (em vez de gerar por boot).
   - **ADR-006** — `docs/adr/ADR-006-canal-interno-isolado.md` · Canal exclusivo auth↔user (`/internal/users/email/{email}`) fora do gateway, protegido por `X-Internal-Token`.
   - **ADR-007** — `docs/adr/ADR-007-sessao-redis-cookies-distintos.md` · Sessão server-side no Redis (Spring Session) com cookies distintos por serviço (`SESSION` vs `AUTHSESSION`).
-- **Escopo (escolha do humano):** além dos 3 mínimos do roadmap (BFF/Postgres/Feign), adicionados 3 estruturais (JWK/canal interno/sessão). Índice de ADRs registrado como linha no `CLAUDE.md` §Mapa de documentos (não criado `docs/adr/README.md`).
+- **Escopo (escolha do humano):** além dos 3 mínimos (BFF/Postgres/Feign), adicionados 3 estruturais (JWK/canal interno/sessão). Índice de ADRs registrado como linha no `CLAUDE.md` §Mapa de documentos (não criado `docs/adr/README.md`).
 - **ADR:** as próprias entradas em `docs/adr/` (este é um item de documentação; nenhum código, config, contrato ou schema foi tocado).
 - **Verificação:** `docs/adr/` agora tem ADR-001..007 + TEMPLATE; cada ADR segue o cabeçalho do TEMPLATE (Status/Data/Serviço/Tarefa) e as 4 seções; conteúdo conferido contra as fontes de verdade (CLAUDE.md + `OAuth2ClientConfig`/`JWKConfig`/`IUserClient`/`UserClientFallbackFactory`/`GatewayRouter`/`SecurityConfig`/`InternalTokenFilter`/`FeignConfig`).
 - **Tech-debt / observações:** nenhuma decisão técnica pré-existente foi reescrita — C20, hardening [2026-06-13] e tracing [2026-06-13] são apenas referenciados pelos ADRs.
@@ -119,12 +119,12 @@
 - **Tech-debt / observações:** seed único cria dependência de disponibilidade de `mongo-1` na subida do exporter (mitigado pelo `depends_on: service_healthy`); em caso de falha permanente de `mongo-1`, o exporter não resolveria o RS (edge improvável dado o replica set).
 - **Tipo:** decisão.
 
-## [2026-06-15] esteira · Item 8 do Roadmap — Pipeline de CI + branch protection (v1 fechada)
+## [2026-06-15] esteira · Pipeline de CI + branch protection (v1 fechada)
 - **Decisão:** criado `.github/workflows/ci.yml` (GitHub Actions) disparado em `push` na `main` e em `pull_request`, com 3 jobs paralelos:
-  1. **`backend`** (matrix por módulo — não há POM-pai agregador): `mvn -B verify` em cada um dos 5 serviços (`config-server`, `discovery-server`, `authorization-server`, `user-service`, `gateway`). O `verify` dispara o gate JaCoCo já plugado (item 7). Testcontainers usa o Docker do runner `ubuntu-latest`. `fail-fast: false`.
+  1. **`backend`** (matrix por módulo — não há POM-pai agregador): `mvn -B verify` em cada um dos 5 serviços (`config-server`, `discovery-server`, `authorization-server`, `user-service`, `gateway`). O `verify` dispara o gate JaCoCo já plugado. Testcontainers usa o Docker do runner `ubuntu-latest`. `fail-fast: false`.
   2. **`frontend`**: `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold 80% no `vitest.config.ts`. **Escolhido `npm run coverage` (não o literal `npm test`)** porque `test` é `vitest` em watch mode (travaria o runner) e `coverage` enforça o piso de cobertura, espelhando o gate JaCoCo do back.
-  3. **`compose-validate`**: `docker compose -f docker-compose.yml config -q` (passo opcional 5 do roadmap) — valida a topologia base a cada PR, com `.env` dummy via `cp .env.example .env` (compose base não tem vars mandatórias `:?`).
+  3. **`compose-validate`**: `docker compose -f docker-compose.yml config -q` — valida a topologia base a cada PR, com `.env` dummy via `cp .env.example .env` (compose base não tem vars mandatórias `:?`).
 - **Branch protection (8b):** a `main` exige os 7 checks verdes (5 do back + frontend + compose-validate) para merge, `strict: true`. Aplicada via `gh api ... /branches/main/protection`; comando documentado no `README.md`. Os nomes de check só existem após a 1ª run, então a regra é aplicada depois da primeira execução verde.
 - **ADR:** não — esteira/documentação, sem mudança de contrato de API ou schema (logo, sem pipeline de agentes).
-- **Arquivos:** novo `.github/workflows/ci.yml`; `README.md` (badge + seção "Integração Contínua (CI)"); `docs/ROADMAP.md` (8a/8b marcados); este registro.
+- **Arquivos:** novo `.github/workflows/ci.yml`; `README.md` (badge + seção "Integração Contínua (CI)"); este registro.
 - **Tipo:** decisão.

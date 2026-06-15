@@ -1,7 +1,9 @@
 # Skill (referência): Padrões Java + Spring Boot deste projeto
 
-> Documento de conhecimento lido por `techlead` e `senso-critico` antes de agir.
-> Não é uma skill invocável — é carregado por path. Reflete **apenas o stack real**.
+> Documento de conhecimento lido por `techlead`, `senso-critico` e `security-reviewer`
+> antes de agir. Não é uma skill invocável — é carregado por path. Reflete **apenas o
+> stack real** da v1. As invariantes a preservar estão em
+> `.claude/skills/invariants-and-contracts.md` e `docs/CONVENCOES.md`.
 
 ## Stack
 

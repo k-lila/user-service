@@ -2,7 +2,8 @@
 
 > Documento de conhecimento lido por `qa-tester` e `senso-critico`. Resume `docs/TESTES.md`
 > — **a fonte de verdade**. Para gerar testes de uma classe, use a skill invocável
-> `/suggest-tests <Classe>`. **Não há Pact/contract-testing neste projeto.**
+> `/suggest-tests <Classe>`. **Não há Pact/contract-testing neste projeto.** A
+> **regressão da suíte existente é a rede que sustenta cada nova entrega** — nunca pule.
 
 ## Pirâmide (stack real)
 

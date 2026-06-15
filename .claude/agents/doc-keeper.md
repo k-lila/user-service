@@ -18,8 +18,11 @@ sem invenção, sem suposição.
 
 | Arquivo | O que sincronizar | Gatilho de atualização |
 |---------|-------------------|------------------------|
-| `CLAUDE.md` | Resumo de testes (linha "Estratégia de Testes"), seção "Gaps de Segurança Conhecidos", seção de arquitetura se novo serviço | Gap fechado/aberto, contagem de testes alterada, novo serviço adicionado |
+| `CLAUDE.md` | Resumo de "Qualidade e Verificação" (linha de contagem de testes), resumo de "Gaps de Segurança Conhecidos", "Orquestração de Agentes", arquitetura se novo serviço | Contagem de testes alterada, gap fechado/aberto, roster de agentes alterado, novo serviço |
 | `docs/SERVICOS.md` | Endpoints (método, path, auth, rate limit), payloads, schema MongoDB, caches Redis, formato de erros | Mudança em controller, DTO, entidade `User`, `CacheConfig` |
+| `docs/CONVENCOES.md` | Invariantes e decisões de design; cross-refs aos ADRs | Nova invariante/convenção, novo ADR que a formaliza |
+| `docs/SECURITY.md` | Controles ativos e gaps conhecidos (mitigação, caminho p/ prod) | Gap fechado/aberto, novo controle, dívida de segurança aceita |
+| `docs/ORQUESTRACAO.md` | Roster de agentes, skills, workflows, regras invioláveis | Agente/skill/workflow adicionado, alterado ou removido |
 | `docs/TESTES.md` | Seção "Armadilhas e comportamentos não óbvios" e "Fora de escopo deliberado" | Nova armadilha descoberta, mudança de abordagem de testes |
 | `docs/LOGS.md` | Classes mapeadas, novos campos logados, convenções de nível | Mudança em `LogUtils`, novos loggers em classes existentes |
 | `docs/CONFIG.md` | Tabelas de variáveis de ambiente (default, serviço consumidor, observação) | Adição, remoção ou mudança de variável de ambiente |
@@ -42,8 +45,8 @@ sem invenção, sem suposição.
 - Em `CLAUDE.md`, edite **apenas** as seções mapeadas na tabela acima — nunca
   reescreva o arquivo inteiro nem altere seções de Arquitetura ou de Serviços sem
   gatilho explícito de novo serviço.
-- Em `CLAUDE.md`, a linha de resumo de testes segue o formato:
-  `NNN testes — NNN unitários (…) + NNN controller (…) + NNN integração (…)`.
+- Em `CLAUDE.md`, a linha de resumo de testes (seção "Qualidade e Verificação") segue o
+  formato: `NNN testes — NNN unitários (…) + NNN controller (…) + NNN integração (…)`.
 - Nunca adicione novas seções sem ser pedido explicitamente.
 - Nunca remova seções mesmo que o conteúdo esteja desatualizado — atualize o conteúdo.
 

@@ -10,7 +10,7 @@ justificativa antes de qualquer scaffolding.
 
 ## Sequência
 
-### FASE 1 — Justificativa (`pm`)
+### FASE 1 — Justificativa (`product-manager`)
 Além da spec normal, responda:
 - Por que **não** expandir um serviço existente (user-service / authorization-server)?
 - Qual o **bounded context** deste serviço?
@@ -18,14 +18,14 @@ Além da spec normal, responda:
   mensageria)
 - Como ele se encaixa na borda (gateway) e no descobrimento (Eureka HA)?
 
-### FASE 2 — Revisão adversarial da justificativa (`senso-critico`, reviewing: pm)
+### FASE 2 — Revisão adversarial da justificativa (`senso-critico`, reviewing: product-manager)
 Foco: **isto é premature decomposition?** O custo operacional (mais um módulo Maven,
 config no config-server, registro no Eureka, observabilidade) se justifica?
-- `REJECTED` → reavaliar com `pm` (máx. 2x) → escalar ao humano.
+- `REJECTED` → reavaliar com `product-manager` (máx. 2x) → escalar ao humano.
 
 ### FASE 3 — Scaffolding + implementação (`techlead`)
 Obrigações adicionais:
-- Criar **ADR** justificando a criação (`docs/adr/`).
+- Criar **ADR** justificando a criação (use `/new-adr`).
 - Novo módulo Maven seguindo a estrutura de pacotes do projeto
   (`config/controller/services/repositories/domain/dtos/exception/utils`).
 - Definir o contrato (OpenAPI/Swagger primeiro, depois código); versionar sob `/v1/`.
@@ -38,10 +38,16 @@ Obrigações adicionais:
 Pirâmide completa (unit/controller/integração com Testcontainers). Validar que o serviço
 **falha graciosamente** quando dependências estão down (circuit breaker nas chamadas Feign).
 
-### FASE 5 — Revisão final (`senso-critico`, reviewing: full)
-Foco adicional: acoplamento desnecessário introduzido? Contratos versionados?
-Observabilidade completa desde o início? JWT/sessão tratados conforme o padrão BFF?
+### FASE 5 — Revisão de segurança (`security-reviewer`, **obrigatória**)
+Novo serviço = nova superfície de ataque. Revisa authn/authz das rotas, segredos via
+config-server, canal interno se houver, CORS/CSRF e exposição na borda (`/security-scan`).
+- `REJECTED` com BLOQUEADOR → devolve ao `techlead` (máx. 2x) → humano.
 
-### FASE 6 — Registro (`doc-keeper`)
-Atualiza `docs/SERVICOS.md`, `docs/CONFIG.md` (novas variáveis), `docs/TESTES.md`
-e o diagrama de arquitetura no `CLAUDE.md`.
+### FASE 6 — Revisão final (`senso-critico`, reviewing: full)
+Foco adicional: acoplamento desnecessário introduzido? Contratos versionados
+(`/check-compat`)? Observabilidade completa desde o início? JWT/sessão conforme o BFF?
+
+### FASE 7 — Registro (`doc-keeper`)
+Atualiza `docs/SERVICOS.md`, `docs/CONFIG.md` (novas variáveis), `docs/TESTES.md`,
+`docs/CONVENCOES.md`/`docs/SECURITY.md` se aplicável, e o diagrama de arquitetura no
+`CLAUDE.md`.

@@ -1,7 +1,8 @@
 # Skill (referência): Comunicação entre serviços
 
 > Documento de conhecimento lido por `techlead` e `senso-critico`. Reflete **apenas o
-> que o projeto usa hoje**: REST síncrono via OpenFeign. Não há mensageria.
+> que o projeto usa hoje**: REST síncrono via OpenFeign. Não há mensageria. Para checar
+> se uma mudança quebra este contrato, use a skill `/check-compat`.
 
 ## REST síncrono (OpenFeign) — o único canal entre serviços hoje
 

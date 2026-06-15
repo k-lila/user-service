@@ -173,7 +173,7 @@ da métrica — os testes de integração (`@SpringBootTest`) sobem o contexto e
 `report`), mas **sem a regra `check`**: são código de framework (Eureka/Config Server puros,
 fora do escopo de teste deliberado), não de domínio, e um gate de 70% ali seria artificial.
 
-O gate é disparado por **`mvn verify`** (não por `mvn test`). A CI (roadmap item 8) invoca
+O gate é disparado por **`mvn verify`** (não por `mvn test`). A CI invoca
 `mvn verify`, então o gate de cobertura roda automaticamente a cada PR.
 
 ```bash

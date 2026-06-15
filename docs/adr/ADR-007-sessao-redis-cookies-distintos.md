@@ -3,7 +3,6 @@
 - **Status:** aceita
 - **Data:** 2026-06-15
 - **Serviço alvo:** gateway / authorization-server
-- **Tarefa relacionada:** ROADMAP item 6 — ADR retroativo
 
 > ADR retroativo: a decisão já está implementada e em produção no blueprint; este
 > registro a formaliza para dar rastreabilidade.
