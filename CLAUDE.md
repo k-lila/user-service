@@ -23,7 +23,7 @@ O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o clie
 - [docs/CONFIG.md](docs/CONFIG.md) — variáveis de ambiente
 - [docs/TESTES.md](docs/TESTES.md) — estratégia de testes
 - [docs/LOGS.md](docs/LOGS.md) — estratégia de logs
-- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema
+- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos
 
 ---
 

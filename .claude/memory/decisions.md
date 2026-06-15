@@ -19,6 +19,20 @@
 
 <!-- Novas entradas abaixo -->
 
+## [2026-06-15] ROADMAP item 6 · documentação · ADRs retroativos essenciais
+- **Decisão:** formalizados 6 ADRs retroativos para decisões estruturais já implementadas e em produção no blueprint, que existiam sem registro formal (`docs/adr/` só tinha o TEMPLATE + ADR-001). Os ADRs são a fonte canônica; esta entrada só aponta:
+  - **ADR-002** — `docs/adr/ADR-002-padrao-bff.md` · Padrão BFF (gateway é o cliente OAuth2; SPA usa sessão por cookie e nunca manuseia JWT).
+  - **ADR-003** — `docs/adr/ADR-003-estado-oauth-postgresql.md` · Estado OAuth (client/authorizations/consents) em PostgreSQL via JDBC repositories do SAS (escala horizontal).
+  - **ADR-004** — `docs/adr/ADR-004-resiliencia-feign-circuit-breaker.md` · Resiliência da chamada auth→user via Feign (Resilience4j + `UserClientFallbackFactory`). Referencia o refinamento C20 ([2026-06-12], `instances.*`→`configs.*`) sem reescrevê-lo.
+  - **ADR-005** — `docs/adr/ADR-005-chave-jwk-persistente.md` · Par RSA fixo com `kid` estável carregado de PEM (em vez de gerar por boot).
+  - **ADR-006** — `docs/adr/ADR-006-canal-interno-isolado.md` · Canal exclusivo auth↔user (`/internal/users/email/{email}`) fora do gateway, protegido por `X-Internal-Token`.
+  - **ADR-007** — `docs/adr/ADR-007-sessao-redis-cookies-distintos.md` · Sessão server-side no Redis (Spring Session) com cookies distintos por serviço (`SESSION` vs `AUTHSESSION`).
+- **Escopo (escolha do humano):** além dos 3 mínimos do roadmap (BFF/Postgres/Feign), adicionados 3 estruturais (JWK/canal interno/sessão). Índice de ADRs registrado como linha no `CLAUDE.md` §Mapa de documentos (não criado `docs/adr/README.md`).
+- **ADR:** as próprias entradas em `docs/adr/` (este é um item de documentação; nenhum código, config, contrato ou schema foi tocado).
+- **Verificação:** `docs/adr/` agora tem ADR-001..007 + TEMPLATE; cada ADR segue o cabeçalho do TEMPLATE (Status/Data/Serviço/Tarefa) e as 4 seções; conteúdo conferido contra as fontes de verdade (CLAUDE.md + `OAuth2ClientConfig`/`JWKConfig`/`IUserClient`/`UserClientFallbackFactory`/`GatewayRouter`/`SecurityConfig`/`InternalTokenFilter`/`FeignConfig`).
+- **Tech-debt / observações:** nenhuma decisão técnica pré-existente foi reescrita — C20, hardening [2026-06-13] e tracing [2026-06-13] são apenas referenciados pelos ADRs.
+- **Tipo:** decisão.
+
 ## [2026-06-15] observabilidade · Externalização de sampling + storage do Zipkin
 - **Decisão:** fecha os dois tech-debts de tracing anotados na entrada [2026-06-13] · tracing (itens (b) sampling hardcoded e (c) Zipkin in-memory).
   - **Sampling:** `management.tracing.sampling.probability` deixou de ser `1.0` hardcoded nos 3 YAMLs que tracejam (`gateway.yml`, `user-service.yml`, `authorization-server.yml`) → `${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}`. Dev segue 100%; prod reduz via env (ex.: 0.1).
