@@ -208,7 +208,9 @@ class CacheIntegrationTest extends AbstractIntegrationTest {
         registerService.deactivateUser(registrado.getId());
 
         Cache authCache = cacheManager.getCache("authByEmail");
-        assertNull(authCache.get(EMAIL));
+        // Evict no Redis tem visibilidade eventual (alguns ms); aguarda refletir.
+        await().atMost(Duration.ofSeconds(2))
+                .untilAsserted(() -> assertNull(authCache.get(EMAIL)));
         assertThrows(DomainEntityNotFound.class, () -> authenticationService.getUserByEmail(EMAIL));
     }
 
@@ -222,7 +224,9 @@ class CacheIntegrationTest extends AbstractIntegrationTest {
         registerService.deleteUser(registrado.getId());
 
         Cache authCache = cacheManager.getCache("authByEmail");
-        assertNull(authCache.get(EMAIL));
+        // Evict no Redis tem visibilidade eventual (alguns ms); aguarda refletir.
+        await().atMost(Duration.ofSeconds(2))
+                .untilAsserted(() -> assertNull(authCache.get(EMAIL)));
         assertThrows(DomainEntityNotFound.class, () -> authenticationService.getUserByEmail(EMAIL));
     }
 
@@ -236,7 +240,9 @@ class CacheIntegrationTest extends AbstractIntegrationTest {
         registerService.updateUser(buildDTO(NOVO_NOME, NOVO_EMAIL, null), registrado.getId());
 
         Cache authCache = cacheManager.getCache("authByEmail");
-        assertNull(authCache.get(EMAIL));
+        // Evict no Redis tem visibilidade eventual (alguns ms); aguarda refletir.
+        await().atMost(Duration.ofSeconds(2))
+                .untilAsserted(() -> assertNull(authCache.get(EMAIL)));
     }
 
     @Test
