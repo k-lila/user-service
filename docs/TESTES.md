@@ -6,6 +6,7 @@
 
 - [Diretrizes de testes](#diretrizes-de-testes)
 - [Como executar](#como-executar)
+- [Cobertura (JaCoCo)](#cobertura-jacoco)
 - [Armadilhas e comportamentos não óbvios do stack](#armadilhas-e-comportamentos-não-óbvios-do-stack)
 
 ---
@@ -149,6 +150,46 @@ cd login-interface && npm run coverage
 
 ---
 
+## Cobertura (JaCoCo)
+
+A cobertura do back-end é medida pelo `jacoco-maven-plugin` (versão herdada do
+`spring-boot-starter-parent`, sem pin manual). Como **não há POM agregador**, o plugin é
+declarado **em cada módulo** — o `prepare-agent` injeta o `argLine` que o Surefire consome
+(todos os testes, inclusive os de integração com Testcontainers, rodam no Surefire — não há
+Failsafe), e o `report` gera o HTML em `<módulo>/target/site/jacoco/index.html` na fase `verify`.
+
+**Gate de cobertura.** Os três módulos de domínio (`user-service`, `authorization-server`,
+`gateway`) têm a regra `check` ligada à fase `verify`: o build **falha** se a cobertura de
+**linha** (counter `LINE`, escopo `BUNDLE`) cair abaixo de **70%** — o piso bloqueante do
+projeto. 80% segue como meta a perseguir escrevendo testes, não como gate (evita reprovar o
+build por poucos pontos). Quando um módulo ficar abaixo do piso, escreva os testes faltantes
+(a skill `/suggest-tests <Classe>` ajuda) — não relaxe o limiar nem infle exclusões.
+
+**Exclusões da métrica** (mínimas, para o gate continuar significando algo): `**/*Application.class`
+(só `main`) e `**/dtos/**` (DTOs Lombok, sem lógica). Classes `@Configuration` ficam **dentro**
+da métrica — os testes de integração (`@SpringBootTest`) sobem o contexto e as cobrem.
+
+**`config-server` e `discovery-server` são report-only** — geram o relatório (`prepare-agent` +
+`report`), mas **sem a regra `check`**: são código de framework (Eureka/Config Server puros,
+fora do escopo de teste deliberado), não de domínio, e um gate de 70% ali seria artificial.
+
+O gate é disparado por **`mvn verify`** (não por `mvn test`). A CI (roadmap item 8) invoca
+`mvn verify`, então o gate de cobertura roda automaticamente a cada PR.
+
+```bash
+# roda os testes, gera o relatório e aplica o gate (módulo de domínio)
+mvn -f user-service/pom.xml verify
+
+# só o relatório, sem reprovar (útil para medir antes de ajustar testes)
+mvn -f user-service/pom.xml org.jacoco:jacoco-maven-plugin:prepare-agent test org.jacoco:jacoco-maven-plugin:report
+# leia: user-service/target/site/jacoco/index.html (linha "Total", coluna Lines)
+```
+
+Cobertura de linha medida no fechamento do item (referência, não contrato): user-service ~98%,
+authorization-server ~95%, gateway 100% — todos com folga sobre o piso de 70%.
+
+---
+
 ## Armadilhas e comportamentos não óbvios do stack
 
 ### Visibilidade eventual do `RedisCache`
@@ -179,6 +220,10 @@ O estado do circuit breaker vive no `CircuitBreakerRegistry` do contexto Spring,
 ### Resilience4j com Feign: `configs.*` vale, `instances.*` não
 
 Com Feign + Spring Cloud CircuitBreaker (group por nome do client), a resolução de configuração só enxerga `resilience4j.*.configs.*` — blocos `instances.user-service` apenas pré-criam um circuit breaker avulso que o Feign **não usa** (o id real é derivado do método, ex.: `IUserClientgetUserByEmailString`). Por isso o `application.yml` de teste do auth-server usa `configs.user-service`. O yml de **produção** (`config-server/.../config/authorization-server.yml`) também usa `configs.user-service` (antes usava `instances.*`, inerte; o fix somou `minimumNumberOfCalls: 10` para o circuito abrir na janela de 10, antes barrado pelo default 100).
+
+### `spring.cloud.config.enabled=false` obrigatório em `AbstractIntegrationTest`
+
+Com a stack Docker no ar, o config-server serve a configuração de produção (Redis Sentinel com hostnames internos do Compose) ao JVM de teste. O Lettuce prioriza essa config sobre as propriedades dinâmicas do Testcontainer, causando `UnknownHostException: redis-sentinel-1` e tornando a suíte não-determinística (passa sem a stack, falha com ela). Fix: `@TestPropertySource(properties = {"spring.cloud.config.enabled=false", ...})` em `AbstractIntegrationTest` desabilita o import de configuração centralizada e isola os testes de qualquer estado externo da stack.
 
 ### Gateway em teste: OAuth2 sem rede no boot e `mockJwt` só ligado ao contexto
 

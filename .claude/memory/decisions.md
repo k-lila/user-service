@@ -19,6 +19,18 @@
 
 <!-- Novas entradas abaixo -->
 
+## [2026-06-15] ROADMAP item 7 · esteira · JaCoCo com gate de cobertura
+- **Decisão:** plugado o `jacoco-maven-plugin` (versão herdada do `spring-boot-starter-parent` 4.0.3, sem pin) nos 5 módulos back-end. Sem POM agregador (decisão do humano: manter a estrutura atual, agregador fora do escopo da v1) → bloco replicado por POM.
+  - **Gate (falha o build) nos 3 módulos de domínio** (`user-service`, `authorization-server`, `gateway`): execution `check` na fase `verify`, regra `BUNDLE`/`LINE`/`COVEREDRATIO` mínimo **0.70** (piso bloqueante do projeto; 80% segue como meta perseguida via testes, não como gate, para não reprovar por poucos %).
+  - **Report-only** em `config-server` e `discovery-server` (só `prepare-agent` + `report`, sem `check`) — código de framework fora do escopo de teste deliberado (ver TESTES.md §Fora de escopo); gate de 70% ali seria artificial.
+  - **Exclusões mínimas** (escopo report+check): `**/*Application.class` e `**/dtos/**`. `@Configuration` fica dentro da métrica (coberto pelos `@SpringBootTest` de integração).
+  - Sem Failsafe no projeto → `prepare-agent` injeta `argLine` que o Surefire (que roda unit + integração) consome automaticamente.
+- **Decisão de escopo (escolha do humano):** (1) por módulo, sem agregador; (2) gate no piso 70% (não 80% estrito); (3) config/discovery report-only.
+- **ADR:** não — item de esteira/build, sem mudança de contrato de API ou schema.
+- **Verificação:** `mvn -f <módulo>/pom.xml verify` exit 0 nos 5; jacoco 0.8.15 resolveu pelo parent. "All coverage checks have been met" nos 3 de domínio (testes mantidos: user-service 136, auth-server 51, gateway 38). Cobertura de LINE medida (via jacoco.csv, já com exclusões): user-service 98,3%, auth-server 95,4%, gateway 100% — nenhum teste faltante a escrever. config-server 81,8% / discovery-server 33,3% (sem gate). Docs em `docs/TESTES.md` (nova §Cobertura (JaCoCo)).
+- **Tech-debt / observações:** (a) duplicação do bloco JaCoCo nos POMs é o custo aceito de não ter agregador — se um POM-pai for criado no futuro, mover para `pluginManagement`; (b) a regra `check` não distingue classe nova/alterada (intent do CLAUDE.md) de classe legada — o gate é por bundle do módulo; o discernimento por classe segue manual/senso-critico; (c) prova de que o gate "morde" (forçar <70% reprovar) não foi exercida destrutivamente — a execution `check` rodou e avaliou a regra (não "skipped"), confirmando que está ativa.
+- **Tipo:** decisão.
+
 ## [2026-06-15] ROADMAP item 6 · documentação · ADRs retroativos essenciais
 - **Decisão:** formalizados 6 ADRs retroativos para decisões estruturais já implementadas e em produção no blueprint, que existiam sem registro formal (`docs/adr/` só tinha o TEMPLATE + ADR-001). Os ADRs são a fonte canônica; esta entrada só aponta:
   - **ADR-002** — `docs/adr/ADR-002-padrao-bff.md` · Padrão BFF (gateway é o cliente OAuth2; SPA usa sessão por cookie e nunca manuseia JWT).
