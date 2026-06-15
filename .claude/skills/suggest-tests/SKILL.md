@@ -7,11 +7,11 @@ allowed-tools: Read, Bash, Edit, Write
 
 ## Arquivo fonte do alvo
 
-!`FILE=$(find /home/k-lila/diretorio/user-service/user-service/src/main -name "$target.java" 2>/dev/null | head -1); [ -n "$FILE" ] && cat "$FILE" || echo "AVISO: arquivo fonte não encontrado para '$target'. Verifique o nome da classe."`
+!`FILE=$(find user-service/src/main -name "$target.java" 2>/dev/null | head -1); [ -n "$FILE" ] && cat "$FILE" || echo "AVISO: arquivo fonte não encontrado para '$target'. Verifique o nome da classe."`
 
 ## Arquivo de teste existente (se houver)
 
-!`FILE=$(find /home/k-lila/diretorio/user-service/user-service/src/test -name "${target}Test.java" 2>/dev/null | head -1); [ -n "$FILE" ] && cat "$FILE" || echo "Nenhum arquivo de teste encontrado para '${target}Test'. Será necessário criar."`
+!`FILE=$(find user-service/src/test -name "${target}Test.java" 2>/dev/null | head -1); [ -n "$FILE" ] && cat "$FILE" || echo "Nenhum arquivo de teste encontrado para '${target}Test'. Será necessário criar."`
 
 ---
 
@@ -21,7 +21,7 @@ allowed-tools: Read, Bash, Edit, Write
 
 Quando usar: lógica de negócio pura sem I/O real. **IMPORTANTE:** `@Cacheable`, `@Transactional` e outros proxies Spring são ignorados neste tipo — não teste comportamento de cache aqui.
 
-!`cat /home/k-lila/diretorio/user-service/user-service/src/test/java/com/users/userservice/services/AuthenticationServiceTest.java`
+!`cat user-service/src/test/java/com/users/userservice/services/AuthenticationServiceTest.java`
 
 ---
 
@@ -29,7 +29,7 @@ Quando usar: lógica de negócio pura sem I/O real. **IMPORTANTE:** `@Cacheable`
 
 Quando usar: status HTTP, autorização (ROLE_USER / ROLE_ADMIN / sem token), extração de claims JWT, serialização da resposta.
 
-!`head -100 /home/k-lila/diretorio/user-service/user-service/src/test/java/com/users/userservice/controller/UserControllerTest.java`
+!`head -100 user-service/src/test/java/com/users/userservice/controller/UserControllerTest.java`
 
 Padrões obrigatórios:
 - `@WebMvcTest(XController.class)` + `@Import({SecurityConfig.class, GlobalExceptionHandler.class})`
@@ -45,11 +45,11 @@ Quando usar: fluxos que envolvem MongoDB, comportamento de cache (`@Cacheable`, 
 
 Base obrigatória — todo teste de integração estende esta classe:
 
-!`cat /home/k-lila/diretorio/user-service/user-service/src/test/java/com/users/userservice/integration/AbstractIntegrationTest.java`
+!`cat user-service/src/test/java/com/users/userservice/integration/AbstractIntegrationTest.java`
 
 Exemplo completo — referência para testes de cache:
 
-!`cat /home/k-lila/diretorio/user-service/user-service/src/test/java/com/users/userservice/integration/CacheIntegrationTest.java`
+!`cat user-service/src/test/java/com/users/userservice/integration/CacheIntegrationTest.java`
 
 Padrões obrigatórios para cache:
 - Para verificar **população**: chamar o método duas vezes (1ª = miss + popula cache, 2ª = hit); depois `assertNotNull(cache.get(key))`

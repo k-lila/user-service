@@ -1,7 +1,8 @@
 # Skill (referência): Observabilidade
 
 > Documento de conhecimento lido por `techlead` e `senso-critico`. Reflete a stack de
-> observabilidade real do projeto.
+> observabilidade real da v1. **Toda implementação nova** deve preservar `traceId`/
+> `spanId`/`correlationId` e as métricas/SLOs — é o que mantém a evolução observável.
 
 ## Tracing distribuído
 

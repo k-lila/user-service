@@ -7,22 +7,33 @@
 - Não crie arquivos sem ser pedido explicitamente
 - Pergunte antes de agir se a tarefa tiver mais de 3 arquivos envolvidos
 - Antes de cada alteração no código, apresente um relatório que aponte claramente: 1) razões dos novos códigos e/ou das modificações; 2) arquivos a serem criados, se houver; 3) arquivos a serem modificados, se houver
+- Ao criar uma nova branch, pergunte seu nome
 
 ---
 
 ## Visão Geral do Projeto
 
-Sistema de microsserviços em Java + Spring para gerenciamento de usuários, pronto para produção. O objetivo central é fornecer uma base sólida de autenticação, registro e controle de acesso, sobre a qual outras camadas de domínio serão adicionadas futuramente, ou seja, um blueprint de um sistema de usuários.
+Sistema de microsserviços em Java + Spring para gerenciamento de usuários — a **v1 do blueprint
+de um sistema de usuários**, estável e pronta para produção. Autenticação, registro, perfil e
+controle de acesso funcionam **ponta a ponta**, e essa base é a **fundação sobre a qual novas
+camadas de domínio são construídas**. A evolução é ativa; o cuidado é que **cada nova
+implementação seja segura e compatível** com o que já existe — invariantes de design, contratos
+entre serviços e controles de segurança preservados, com os controles de qualidade (testes, gate
+de cobertura, observabilidade) sempre saudáveis.
 
-O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o cliente OAuth2, o SPA usa sessão por cookie e **não** manuseia JWT.
+O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o cliente OAuth2, o SPA
+usa sessão por cookie e **não** manuseia JWT.
 
 **Mapa de documentos:**
 
 - [README.md](README.md) — pré-requisitos e execução (humano)
 - [docs/SERVICOS.md](docs/SERVICOS.md) — referência da API (endpoints, schema MongoDB, cache)
 - [docs/CONFIG.md](docs/CONFIG.md) — variáveis de ambiente
+- [docs/CONVENCOES.md](docs/CONVENCOES.md) — convenções e invariantes de design
 - [docs/TESTES.md](docs/TESTES.md) — estratégia de testes
 - [docs/LOGS.md](docs/LOGS.md) — estratégia de logs
+- [docs/SECURITY.md](docs/SECURITY.md) — controles ativos e gaps de segurança conhecidos
+- [docs/ORQUESTRACAO.md](docs/ORQUESTRACAO.md) — sistema de orquestração de agentes
 - [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos
 
 ---
@@ -60,82 +71,7 @@ login-interface (React)
 - **Front-end:** React 19 + TypeScript + Vite + TailwindCSS 4
 - **Orquestração:** Docker Compose
 
----
-
-## Serviços
-
-> Referência da API (endpoints, schema, cache) em [docs/SERVICOS.md](docs/SERVICOS.md). Aqui ficam só as responsabilidades não-óbvias e os arquivos críticos.
-
-### config-server (8888)
-
-- **Config centralizada** via `classpath:/config`; os demais serviços importam com `spring.config.import=optional:configserver:${CONFIG_SERVER_URL}`.
-- Arquivos em `config-server/.../config/{servico}.yml`.
-- **HA:** duas instâncias (`config-server-1`, `config-server-2`) atrás de `config-lb` (nginx). `CONFIG_SERVER_URL` aponta para `config-lb:8888`. Stateless — qualquer instância serve a mesma config.
-- **Deve subir primeiro** — todos os demais dependem dele via `config-lb`.
-- **HTTP Basic:** `SecurityConfig` exige autenticação no endpoint (`/actuator/health` aberto p/ healthchecks; CSRF off — cliente é máquina). Os clientes enviam `spring.cloud.config.username/password`; par único `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` (default dev no `application.yml`, sem default no compose → fail-fast).
-
-### discovery-server (9091 / 9092)
-
-- **Netflix Eureka HA** — dois nós em peer replication (`discovery-server-1:9091`, `discovery-server-2:9092`); cada instância se registra na outra via `EUREKA_PEER_URL`.
-- `EUREKA_URI` nos demais serviços lista ambas as instâncias (CSV).
-- Sobe após `config-lb`.
-
-### authorization-server (8082)
-
-- **Tipo:** OAuth2 Authorization Server (Spring Security). Fluxo authorization_code + PKCE + refresh_token; OIDC (`openid`, `profile`).
-- **Estado OAuth em PostgreSQL** (escala horizontal):
-  - `JdbcRegisteredClientRepository` + `JdbcOAuth2AuthorizationService` + `JdbcOAuth2AuthorizationConsentService` (`OAuth2ClientConfig.java`).
-  - `gateway-client` **semeado idempotentemente** na subida (`findByClientId` → `save`), preservando `redirectUri` (inclusive Swagger) e scopes.
-  - Schemas SAS 7.0.3 adaptados (`blob`→`text`, `timestamp`→`timestamptz`, `IF NOT EXISTS`) em `src/main/resources/schema/`, aplicados via `spring.sql.init` (`continue-on-error: true`).
-- **Chave JWT persistente** (`JWKConfig.java`):
-  - Par RSA fixo com `kid` estável (`user-service-key`), carregado de PEM via `RsaKeyConverters` — em vez de gerar por boot.
-  - Defaults de classpath (`src/main/resources/keys/app.{key,pub}`) são **dev** (gap conhecido); override em prod via `JWK_*`.
-- **Sessão HTTP no Redis** via Spring Session:
-  - `@EnableRedisHttpSession` no `SecurityConfig` — exige anotação explícita no Spring Boot 4.0.
-  - Cookie renomeado para **`AUTHSESSION`** (`CookieSerializer`) para não colidir com o `SESSION` do gateway (ver _Convenções_).
-- **Credenciais e token:** busca credenciais via Feign (`GET /internal/users/email/{email}`); customiza o JWT em `TokenCustomizerConfig.java` (**arquivo crítico**) com `userID`, `roles`, `permissions`.
-- **Resiliência Feign:** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com a config nomeada `configs.user-service` (com group habilitado, `instances.*` é inerte — use `configs.*`): janela 10, `minimumNumberOfCalls` 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout. `AuthorizationService.loadUserByUsername` propaga essa exceção sem reembrulhar — o `DaoAuthenticationProvider` a trata como credenciais inválidas e devolve o usuário ao form de login (não escala a 500); só exceções inesperadas são convertidas em `UsernameNotFoundException` genérica sem vazar a causa.
-- **Propagação de trace no Feign (`FeignTracingConfig.java`):** na cadeia Feign + circuit breaker a instrumentação automática (feign-micrometer) registrava o span cliente no trace correto, mas **não emitia os headers B3** — o user-service recebia a request sem `X-B3-*` e abria um trace **órfão**. `FeignTracingConfig` adiciona um `RequestInterceptor` que injeta o contexto de trace corrente no template via o `Propagator` do Micrometer (formato `b3`); assim o user-service (`consume: b3`) continua o trace e seu span vira filho do auth-server. Degrada graciosamente quando não há contexto ativo.
-- **Lockout anti-brute-force:** `LoginAttemptService` mantém contador de falhas no Redis por par **(conta, IP)** — chave `sha256(emailLower|ip)`, janela fixa (TTL 15 min na 1ª falha), lockout após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha (mensagem genérica). Prod exige `server.forward-headers-strategy` + proxy sanitizando `X-Forwarded-For`.
-
-### user-service (8090)
-
-- **Domínio central:** CRUD de usuários. MongoDB (coleção `users`). Cache Redis: `usersById`, `usersByEmail`, `authByEmail`.
-- **Controllers:**
-  - `UserController` — público, via gateway.
-  - `InternalUserController` — `GET /internal/users/email/{email}`, **não exposto pelo gateway**, só para o auth-server via Feign. Protegido por `X-Internal-Token` (`InternalTokenFilter`); acesso sem o header → 403.
-
-### gateway (8081)
-
-- **Base:** Spring Cloud Gateway (WebFlux/reativo, `spring-cloud-starter-gateway-server-webflux`). Único ponto de entrada externo — **nunca chame os serviços diretamente em produção**.
-- **Cliente OAuth2 do BFF:** `oauth2Login` + `oauth2Client` (`gateway-client` confidencial) + resource server JWT. Guarda o token na sessão e o relaya downstream — o SPA nunca vê o JWT.
-- **Rate limiting** via Redis (token bucket): LOW 2 req/s cap 5 (registro/IP), MED 5 req/s cap 10 (OAuth2/IP), HIGH 10 req/s cap 20 (autenticados/user). O IP é lido com `getHostString()` (`RateLimiterConfig`/`RateLimitLogFilter`): com `server.forward-headers-strategy=framework` (borda TLS) o WebFlux consome o `X-Forwarded-For` e o `remoteAddress` vira `InetSocketAddress` *unresolved* — `getAddress()` é null e `getHostAddress()` daria NPE.
-- **Rotas em Java** (`GatewayRouter`, `RouteLocatorBuilder`). **`TokenRelay` é por rota** (na rota `user-service`), **não** via `default-filters` do yaml — a DSL Java não recebe default-filters.
-- **CSRF** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`; `/v1/users/register` isento); o entry point devolve **401** (não 302); **logout RP-initiated**.
-- **Sessão WebFlux no Redis** via Spring Session (`@EnableRedisWebSession` — exige anotação explícita). Guarda `OAuth2AuthorizedClient` (com JWT) + `SecurityContext`. Cookie `SESSION`.
-- **Tracing no edge reativo:** sendo WebFlux, o `traceId`/`spanId` no `logging.pattern.level` (MDC) só é populado com `spring.reactor.context-propagation: auto` (no `gateway.yml`) — sem isso o log do gateway sai com `traceId=` vazio e a correlação log↔Zipkin quebra na borda.
-- **Outros:** filtros `CorrelationIdFilter` (semeia o `X-Correlation-ID` a partir do traceId B3 corrente, com fallback UUID — id único de correlação alinhado ao trace) e `RateLimitLogFilter`; load balancing via Eureka (`lb://`).
-
-### login-interface (5173 dev / 80 Docker)
-
-- **Stack:** React 19 + TypeScript + Vite + TailwindCSS 4.
-- **Estado: BFF implementado e confirmado** — registro/login/perfil/logout funcionando ponta a ponta. Token nunca toca o browser; zero `localStorage`.
-- **Por que BFF (e não SPA-com-PKCE):**
-  - **Token nunca toca o browser** (fica na sessão do gateway; cookie `HttpOnly`+`Secure`+`SameSite`) → XSS não exfiltra JWT/refresh, eliminando de raiz o gap "JWT em `localStorage`".
-  - É a **recomendação do IETF** (BCP OAuth para apps com backend).
-  - **Reaproveita o backend** existente.
-  - **Menos peça móvel no front:** sem PKCE, sem `/callback`, sem refresh manual.
-  - **Alinha com a sessão no Redis.**
-- **Mecânica:**
-  - **Same-origin via proxy** (Vite em dev, nginx no Docker): `/users`, `/oauth2`, `/login/oauth2`, `/logout` → gateway (só `/login/oauth2`, não `/login` puro).
-  - **Sem token no front:** `apiAxios` com `withCredentials`, sem `Authorization: Bearer`; estado de auth derivado de `GET /v1/users/me` (200 vs 401).
-  - **Hostname OAuth em Docker:** `OAUTH_AUTHORIZATION_URI` aponta para `localhost:8082` (front-channel/browser), enquanto `issuer-uri`/token/jwks ficam no hostname interno `authorization-server:8082`.
-  - **CSRF** via `X-XSRF-TOKEN`.
-  - **Logout:** form oculto `POST /logout` → `end_session_endpoint`.
-
----
-
-## Fluxo de Autenticação (OAuth2 / BFF)
+### Fluxo de Autenticação (OAuth2 / BFF)
 
 ```
 1. SPA → "Login" → /oauth2/authorization/gateway-client (gateway inicia o oauth2Login)
@@ -154,29 +90,7 @@ login-interface (React)
 
 ---
 
-## Convenções e Decisões de Design
-
-- **Separação de responsabilidades rígida:** o authorization-server não acessa MongoDB — apenas via Feign para o user-service.
-- **Endpoint interno isolado:** `/internal/users/email/{email}` não está no gateway nem no Swagger — canal exclusivo auth-server ↔ user-service.
-  - Protegido por shared secret `X-Internal-Token` (`InternalTokenFilter` valida; `FeignConfig` injeta); acesso direto à 8090 sem o header → 403.
-- **DELETE com semânticas distintas e intencionais:**
-  - `DELETE /v1/users/{id}` (ADMIN) → soft-delete (`deactivateUser`, `active=false`).
-  - `DELETE /v1/users/del/{id}` (ADMIN) → hard-delete (`deleteUser`).
-  - `DELETE /v1/users/remove/me` (USER) → soft-delete.
-- **BCrypt** custo padrão (10).
-- **Roles fixas:** apenas `USER` e `ADMIN` (strings simples no MongoDB) — sem roles dinâmicas.
-- **Configuração centralizada:** segredos vêm do config-server via env. Segredos hardcoded são gaps conhecidos, não padrão.
-- **Cookies de sessão distintos por serviço:** gateway `SESSION`, auth-server `AUTHSESSION` (`CookieSerializer`).
-  - Em dev/Docker ambos compartilham `localhost` e os cookies **ignoram a porta**; com o mesmo nome, o cookie do auth-server sobrescreveria o do gateway no salto front-channel → o callback lê a sessão errada → `authorization_request_not_found`.
-  - Nomes distintos evitam a colisão (em prod, domínios separados também resolveriam).
-- **Spring Session exige habilitação explícita no Spring Boot 4.0:** `@EnableRedisWebSession` (gateway, reativo) e `@EnableRedisHttpSession` (auth-server, servlet) — a autoconfig não dispara só pela dependência.
-- **Arquivos de configuração mutáveis em containers (Redis Sentinel e MongoDB):** ambos precisam gravar no arquivo de config em runtime, o que impede o mount simples com `:ro`.
-  - **Redis Sentinel** regrava o arquivo para persistir estado (master atual, sentinel IDs). Fix: `command: sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"` — copia o mount `:ro` para `/tmp` gravável antes de iniciar.
-  - **MongoDB keyfile** precisa de `chmod 400` e `chown 999` antes que o mongod o leia. Fix: `entrypoint:` override (não `command:`) que copia para `/tmp/mongo.key`, ajusta permissões e chama `exec docker-entrypoint.sh mongod`. Usar `command:` em vez de `entrypoint:` contornaria o `docker-entrypoint.sh` original e `MONGO_INITDB_ROOT_USERNAME` nunca seria processado.
-
----
-
-## Desenvolvimento Local
+## Desenvolvimento local
 
 ### Subir tudo com Docker
 
@@ -218,81 +132,120 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 
 ---
 
-## Estratégia de Testes
+## Serviços
 
-Ver [docs/TESTES.md](docs/TESTES.md). Resumo: 271 testes — 113 unitários (Mockito/reativos) + 51 controller (`@WebMvcTest` — 46 `UserControllerTest` + 5 `InternalUserControllerTest`) + 68 integração (user-service: Mongo+Redis; auth-server: Postgres+Redis+WireMock, fluxo OAuth2; gateway: Redis+WireMock via `WebTestClient`, roteamento/rate-limit/CSRF + fluxo BFF OAuth2 ponta a ponta; config-server: `MockMvc` p/ HTTP Basic, sem containers) + 39 front-end (Vitest+RTL+MSW — API, hooks, componentes, páginas, rotas; threshold 80%).
+> Referência da API (endpoints, schema, cache) em [docs/SERVICOS.md](docs/SERVICOS.md). Aqui ficam só as responsabilidades não-óbvias e os arquivos críticos a preservar.
+
+### config-server (8888)
+
+- **Config centralizada** via `classpath:/config`; os demais serviços importam com `spring.config.import=optional:configserver:${CONFIG_SERVER_URL}`.
+- Arquivos em `config-server/.../config/{servico}.yml`.
+- **HA:** duas instâncias (`config-server-1`, `config-server-2`) atrás de `config-lb` (nginx). `CONFIG_SERVER_URL` aponta para `config-lb:8888`. Stateless — qualquer instância serve a mesma config.
+- **Deve subir primeiro** — todos os demais dependem dele via `config-lb`.
+- **HTTP Basic:** `SecurityConfig` exige autenticação no endpoint (`/actuator/health` aberto p/ healthchecks; CSRF off — cliente é máquina). Os clientes enviam `spring.cloud.config.username/password`; par único `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` (default dev no `application.yml`, sem default no compose → fail-fast).
+
+### discovery-server (9091 / 9092)
+
+- **Netflix Eureka HA** — dois nós em peer replication (`discovery-server-1:9091`, `discovery-server-2:9092`); cada instância se registra na outra via `EUREKA_PEER_URL`.
+- `EUREKA_URI` nos demais serviços lista ambas as instâncias (CSV).
+- Sobe após `config-lb`.
+
+### authorization-server (8082)
+
+- **Tipo:** OAuth2 Authorization Server (Spring Security). Fluxo authorization_code + PKCE + refresh_token; OIDC (`openid`, `profile`).
+- **Estado OAuth em PostgreSQL** (escala horizontal):
+  - `JdbcRegisteredClientRepository` + `JdbcOAuth2AuthorizationService` + `JdbcOAuth2AuthorizationConsentService` (`OAuth2ClientConfig.java`).
+  - `gateway-client` **semeado idempotentemente** na subida (`findByClientId` → `save`), preservando `redirectUri` (inclusive Swagger) e scopes.
+  - Schemas SAS 7.0.3 adaptados (`blob`→`text`, `timestamp`→`timestamptz`, `IF NOT EXISTS`) em `src/main/resources/schema/`, aplicados via `spring.sql.init` (`continue-on-error: true`).
+- **Chave JWT persistente** (`JWKConfig.java`):
+  - Par RSA fixo com `kid` estável (`user-service-key`), carregado de PEM via `RsaKeyConverters` — em vez de gerar por boot.
+  - Defaults de classpath (`src/main/resources/keys/app.{key,pub}`) são **dev** (gap conhecido); override em prod via `JWK_*`.
+- **Sessão HTTP no Redis** via Spring Session:
+  - `@EnableRedisHttpSession` no `SecurityConfig` — exige anotação explícita no Spring Boot 4.0.
+  - Cookie renomeado para **`AUTHSESSION`** (`CookieSerializer`) para não colidir com o `SESSION` do gateway (ver [docs/CONVENCOES.md](docs/CONVENCOES.md)).
+- **Credenciais e token:** busca credenciais via Feign (`GET /internal/users/email/{email}`); customiza o JWT em `TokenCustomizerConfig.java` (**arquivo crítico**) com `userID`, `roles`, `permissions`.
+- **Resiliência Feign:** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com a config nomeada `configs.user-service` (com group habilitado, `instances.*` é inerte — use `configs.*`): janela 10, `minimumNumberOfCalls` 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout. `AuthorizationService.loadUserByUsername` propaga essa exceção sem reembrulhar — o `DaoAuthenticationProvider` a trata como credenciais inválidas e devolve o usuário ao form de login (não escala a 500); só exceções inesperadas são convertidas em `UsernameNotFoundException` genérica sem vazar a causa.
+- **Propagação de trace no Feign (`FeignTracingConfig.java`):** na cadeia Feign + circuit breaker a instrumentação automática (feign-micrometer) registrava o span cliente no trace correto, mas **não emitia os headers B3** — o user-service recebia a request sem `X-B3-*` e abria um trace **órfão**. `FeignTracingConfig` adiciona um `RequestInterceptor` que injeta o contexto de trace corrente no template via o `Propagator` do Micrometer (formato `b3`); assim o user-service (`consume: b3`) continua o trace e seu span vira filho do auth-server. Degrada graciosamente quando não há contexto ativo.
+- **Lockout anti-brute-force:** `LoginAttemptService` mantém contador de falhas no Redis por par **(conta, IP)** — chave `sha256(emailLower|ip)`, janela fixa (TTL 15 min na 1ª falha), lockout após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha (mensagem genérica). Prod exige `server.forward-headers-strategy` + proxy sanitizando `X-Forwarded-For`.
+
+### user-service (8090)
+
+- **Domínio central:** CRUD de usuários. MongoDB (coleção `users`). Cache Redis: `usersById`, `usersByEmail`, `authByEmail`.
+- **Controllers:**
+  - `UserController` — público, via gateway.
+  - `InternalUserController` — `GET /internal/users/email/{email}`, **não exposto pelo gateway**, só para o auth-server via Feign. Protegido por `X-Internal-Token` (`InternalTokenFilter`); acesso sem o header → 403.
+
+### gateway (8081)
+
+- **Base:** Spring Cloud Gateway (WebFlux/reativo, `spring-cloud-starter-gateway-server-webflux`). Único ponto de entrada externo — **nunca chame os serviços diretamente em produção**.
+- **Cliente OAuth2 do BFF:** `oauth2Login` + `oauth2Client` (`gateway-client` confidencial) + resource server JWT. Guarda o token na sessão e o relaya downstream — o SPA nunca vê o JWT.
+- **Rate limiting** via Redis (token bucket): LOW 2 req/s cap 5 (registro/IP), MED 5 req/s cap 10 (OAuth2/IP), HIGH 10 req/s cap 20 (autenticados/user). O IP é lido com `getHostString()` (`RateLimiterConfig`/`RateLimitLogFilter`): com `server.forward-headers-strategy=framework` (borda TLS) o WebFlux consome o `X-Forwarded-For` e o `remoteAddress` vira `InetSocketAddress` _unresolved_ — `getAddress()` é null e `getHostAddress()` daria NPE.
+- **Rotas em Java** (`GatewayRouter`, `RouteLocatorBuilder`). **`TokenRelay` é por rota** (na rota `user-service`), **não** via `default-filters` do yaml — a DSL Java não recebe default-filters.
+- **CSRF** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`; `/v1/users/register` isento); o entry point devolve **401** (não 302); **logout RP-initiated**.
+- **Sessão WebFlux no Redis** via Spring Session (`@EnableRedisWebSession` — exige anotação explícita). Guarda `OAuth2AuthorizedClient` (com JWT) + `SecurityContext`. Cookie `SESSION`.
+- **Tracing no edge reativo:** sendo WebFlux, o `traceId`/`spanId` no `logging.pattern.level` (MDC) só é populado com `spring.reactor.context-propagation: auto` (no `gateway.yml`) — sem isso o log do gateway sai com `traceId=` vazio e a correlação log↔Zipkin quebra na borda.
+- **Outros:** filtros `CorrelationIdFilter` (semeia o `X-Correlation-ID` a partir do traceId B3 corrente, com fallback UUID — id único de correlação alinhado ao trace) e `RateLimitLogFilter`; load balancing via Eureka (`lb://`).
+
+### login-interface (5173 dev / 80 Docker)
+
+- **Stack:** React 19 + TypeScript + Vite + TailwindCSS 4.
+- **BFF funcionando ponta a ponta** — registro/login/perfil/logout. Token nunca toca o browser; zero `localStorage`.
+- **Por que BFF (e não SPA-com-PKCE):**
+  - **Token nunca toca o browser** (fica na sessão do gateway; cookie `HttpOnly`+`Secure`+`SameSite`) → XSS não exfiltra JWT/refresh, eliminando de raiz o gap "JWT em `localStorage`".
+  - É a **recomendação do IETF** (BCP OAuth para apps com backend).
+  - **Reaproveita o backend** existente.
+  - **Menos peça móvel no front:** sem PKCE, sem `/callback`, sem refresh manual.
+  - **Alinha com a sessão no Redis.**
+- **Mecânica:**
+  - **Same-origin via proxy** (Vite em dev, nginx no Docker): `/users`, `/oauth2`, `/login/oauth2`, `/logout` → gateway (só `/login/oauth2`, não `/login` puro).
+  - **Sem token no front:** `apiAxios` com `withCredentials`, sem `Authorization: Bearer`; estado de auth derivado de `GET /v1/users/me` (200 vs 401).
+  - **Hostname OAuth em Docker:** `OAUTH_AUTHORIZATION_URI` aponta para `localhost:8082` (front-channel/browser), enquanto `issuer-uri`/token/jwks ficam no hostname interno `authorization-server:8082`.
+  - **CSRF** via `X-XSRF-TOKEN`.
+  - **Logout:** form oculto `POST /logout` → `end_session_endpoint`.
 
 ---
 
-## Estratégia de Logs
+## Convenções e Invariantes
 
-Ver [docs/LOGS.md](docs/LOGS.md). Resumo: SLF4J parametrizado (`{}`), formato em pipe (`| [VERBO] | ação | campo: valor`), níveis INFO/WARN/ERROR/DEBUG convencionados, `traceId`/`spanId` via B3, PII mascarada (`LogUtils.maskEmail()`).
+Detalhe e racional em [docs/CONVENCOES.md](docs/CONVENCOES.md); decisões formais em [docs/adr/](docs/adr/). As invariantes a **preservar** (quebrá-las reintroduz bugs já resolvidos):
+
+- **Separação rígida:** o authorization-server não acessa MongoDB — só via Feign para o user-service.
+- **Canal interno isolado:** `/internal/users/email/{email}` fora do gateway e do Swagger, protegido por `X-Internal-Token` (ADR-006).
+- **DELETE com 3 semânticas intencionais:** soft-delete ADMIN (`/{id}`), hard-delete ADMIN (`/del/{id}`), soft-delete USER (`/remove/me`) (ADR-001).
+- **BCrypt** custo 10; **roles fixas** `USER`/`ADMIN` (sem roles dinâmicas).
+- **Cookies de sessão distintos:** gateway `SESSION`, auth-server `AUTHSESSION` — evita colisão no salto front-channel (ADR-007).
+- **Spring Session explícito no Boot 4.0:** `@EnableRedisWebSession` (gateway) / `@EnableRedisHttpSession` (auth-server) — a autoconfig não dispara só pela dependência.
+- **Config mutável em containers:** Redis Sentinel e MongoDB keyfile usam o padrão copy-to-`/tmp` + override de `entrypoint` (Mongo); não troque por mount `:ro` simples.
+
+---
+
+## Qualidade e Verificação
+
+A garantia de que o sistema continua saudável vem de testes + gate de cobertura + CI. Estratégia completa em [docs/TESTES.md](docs/TESTES.md) e [docs/LOGS.md](docs/LOGS.md).
+
+- **Testes (271):** 113 unitários (Mockito/reativos) + 51 controller (`@WebMvcTest` — 46 `UserControllerTest` + 5 `InternalUserControllerTest`) + 68 integração (user-service: Mongo+Redis; auth-server: Postgres+Redis+WireMock, fluxo OAuth2; gateway: Redis+WireMock via `WebTestClient`, roteamento/rate-limit/CSRF + BFF ponta a ponta; config-server: `MockMvc` p/ HTTP Basic) + 39 front-end (Vitest+RTL+MSW, threshold 80%).
+- **Gate de cobertura JaCoCo:** roda na fase `verify` (regra `check`, piso **70%** LINE/BUNDLE nos 3 módulos de domínio — user-service/auth-server/gateway; config-server/discovery-server são report-only). Classes novas/alteradas: alvo **80%**. Ver [docs/TESTES.md § Cobertura (JaCoCo)](docs/TESTES.md).
+- **CI** (`.github/workflows/ci.yml`): a cada push/PR roda `mvn verify` por módulo (matrix `backend`, que dispara o gate) + `npm run coverage` no front (job `frontend`) + validação da topologia base (`compose-validate`). A `main` exige todos os checks verdes para merge (branch protection) — detalhes na seção _Integração Contínua (CI)_ do [README.md](README.md).
+- **Logs:** SLF4J parametrizado (`{}`), formato em pipe (`| [VERBO] | ação | campo: valor`), níveis INFO/WARN/ERROR/DEBUG convencionados, `traceId`/`spanId` via B3, PII mascarada (`LogUtils.maskEmail()`).
 
 ---
 
 ## Gaps de Segurança Conhecidos
 
-**Ativos:** sem TLS em prod (curativo: overlay `docker-compose.tls.yml` para dev; falta cert ACME/domínios reais em prod), chave JWK dev no classpath (aceito; override em prod via `JWK_*`), Grafana `admin/admin` (curativo, externalizado para `.env`; trocar em prod), keyfile MongoDB de dev no repo (aceito, análogo à chave JWK), Redis/Sentinel sem autenticação (aberto; mitigado por portas nunca publicadas).
+Controles ativos e dívida aceita detalhados em [docs/SECURITY.md](docs/SECURITY.md). Gaps **ativos** (dívida consciente, não regredir os controles existentes): sem TLS em prod (curativo `docker-compose.tls.yml` em dev), chave JWK dev no classpath (override em prod via `JWK_*`), Grafana `admin/admin` (externalizado para `.env`), keyfile MongoDB de dev no repo, Redis/Sentinel sem autenticação (mitigado por portas nunca publicadas). Ao fechar um gap ou introduzir dívida, atualize `docs/SECURITY.md` e `.claude/memory/decisions.md`.
 
 ---
 
-## Sistema de Orquestração de Agentes
+## Orquestração de Agentes
 
-Quando atuo como **orquestrador**, conduzo um time de subagentes especializados
-(`.claude/agents/`) sobre este ecossistema de microsserviços. A delegação acontece pelo
-thread principal: invoco cada subagente, recebo seu relatório estruturado e relaio o que
-importa ao próximo — **não há barramento de mensagens vivo** (subagentes do Claude Code
-rodam em contexto isolado e efêmero). O estado que persiste entre tarefas vive em
-`.claude/memory/`.
-
-### Agentes
-
-| Agente | Modelo | Responsabilidade | Quando invocar |
-|--------|--------|------------------|----------------|
-| `pm` | sonnet-4-6 | Spec, impacto no ecossistema, critérios de aceite (AC-NN), DoD | Sempre primeiro |
-| `techlead` | sonnet-4-6 (opus-4-8 p/ arquitetura) | Implementa features e fecha gaps de segurança; cria ADRs | Após spec aprovada |
-| `qa-tester` | sonnet-4-6 | Testes (unit/controller/integração), regressão, bugs P0–P3 | Após implementação |
-| `senso-critico` | opus-4-8 | Revisão adversarial: consistência entre agentes **+** diagnóstico de bugs latentes | Após o `pm` e após o `qa-tester` |
-| `doc-keeper` | sonnet-4-6 | Sincroniza `CLAUDE.md` e `docs/` com o código | Fase final, após `APPROVED` |
-
-> Histórico: `techlead` funde os antigos `backlog-driver` + `security-auditor`;
-> `senso-critico` absorve o antigo `error-analyst`. A skill invocável `/suggest-tests`
-> alimenta o `qa-tester`.
-
-### Workflows (`.claude/workflows/`)
-
-`feature.md`, `bugfix.md`, `hotfix.md`, `new-service.md`. Cada um define a sequência
-`pm → senso-critico → techlead → qa-tester → senso-critico → doc-keeper` com os pontos
-de retry e escalonamento. Protocolo geral:
-
-```
-1. Carregar .claude/memory/context.json → identificar serviço(s) alvo e workflow
-2. pm           → especificação (AC-NN)
-3. senso-critico → revisa a spec   (REJECTED 2x → escala ao humano, PARA)
-4. techlead     → implementa + ADR se mudar contrato/schema
-5. qa-tester    → testa            (bug P0 → devolve ao techlead, máx. 2x)
-6. senso-critico → revisão final   (REJECTED → agente responsável, máx. 1x → humano)
-7. APPROVED     → doc-keeper sincroniza docs/ e registra em decisions.md
-```
-
-### Memória (`.claude/memory/`)
-
-- `context.json` — mapa de serviços + tarefa corrente
-- `decisions.md` — log de decisões/tech-debt (ADRs formais ficam em `docs/adr/`)
-- `blockers.md` — impedimentos ativos
-
-### Regras invioláveis
-
-- **Nunca** pule o `senso-critico` em tarefas que afetam contrato de API
-- **Nunca** permita que o `techlead` altere contrato de API sem ADR (`docs/adr/`)
-- Mudança de contrato ou de schema **exige ADR**; cobertura mínima **80%** nas classes
-  novas/alteradas (70% é o piso bloqueante)
-- Sempre registre decisões em `decisions.md` e bloqueadores em `blockers.md`
-- Após no máximo 2 rodadas de revisão sem aprovação, escale ao humano e pare
-
-### Uso direto (fora do pipeline)
-
-Os agentes também podem ser chamados isoladamente via Claude Code: `techlead` para
-"implemente C\<n\>" ou "feche o gap G\<n\>"; `senso-critico` para auditoria preventiva
-ou "qual gap fechar agora?"; `doc-keeper` após mudanças que afetem `docs/`;
-`/suggest-tests <Classe>` para gerar testes.
+Mudanças de domínio (feature/bugfix/hotfix/novo serviço/atualização de dependências) passam por
+um time de **7 subagentes** (`.claude/agents/`) conduzido pelo thread principal — protocolo,
+papéis e regras invioláveis em [docs/ORQUESTRACAO.md](docs/ORQUESTRACAO.md). Resumo do pipeline:
+`product-manager → senso-critico → techlead → qa-tester → [security-reviewer] → senso-critico →
+doc-keeper` (o `security-reviewer` é condicional à superfície de segurança; o `dependency-steward`
+conduz o workflow `dependency-update`). Estado persistente em `.claude/memory/` (`context.json`,
+`decisions.md`, `blockers.md`); workflows em `.claude/workflows/`. **Regras-chave:** nunca pule o
+`senso-critico` em mudança de contrato de API, nem o `security-reviewer` quando a segurança é
+tocada; mudança de contrato/schema **exige ADR**; após 2 rodadas de revisão sem aprovação, escale
+ao humano. Skills invocáveis: `/suggest-tests`, `/check-compat`, `/security-scan`, `/new-adr`. Os
+agentes também podem ser chamados isoladamente.

@@ -5,9 +5,9 @@ Bug reportado em `{service_target}`. PM simplificado; sequência mais curta que 
 
 ## Sequência
 
-### FASE 1 — Análise (`pm` simplificado)
+### FASE 1 — Análise (`product-manager` simplificado)
 Identifica o **AC quebrado**, o impacto e os serviços afetados. Spec simplificada —
-**não** exige DoD completo.
+**não** exige DoD completo. Marca `security_surface_touched` se o bug é de segurança.
 
 ### FASE 2 — Correção (`techlead`)
 Relatório pré-implementação + aguarda confirmação. **Constraint:** a correção não deve
@@ -20,8 +20,9 @@ mínimo — não refatora código adjacente.
 - Bug P0 remanescente → devolve ao `techlead` (máx. 2x) → escala ao humano.
 
 ### FASE 4 — Revisão (`senso-critico`, reviewing: full, express)
-Foco: a correção não introduz novo problema (Dimensão 3 — bugs latentes) e a regressão
-está coberta.
+Foco: a correção não introduz novo problema (Dimensão 3 — bugs latentes), não quebra
+contrato (`/check-compat`) e a regressão está coberta. Se o bug era de segurança, aciona
+o `security-reviewer` (`/security-scan`) antes de aprovar.
 - `REJECTED` → agente responsável (máx. 1x) → humano se persistir.
 - `APPROVED` → registra em `.claude/memory/decisions.md`.
 

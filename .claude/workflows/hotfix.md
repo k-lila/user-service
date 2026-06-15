@@ -9,7 +9,7 @@ segurança explorável). Severidade típica: P0/P1.
 
 ## Sequência
 
-### FASE 1 — Triagem (`pm` mínimo)
+### FASE 1 — Triagem (`product-manager` mínimo)
 Uma frase: qual AC/contrato está quebrado, qual o blast radius (serviços afetados via
 `context.json`), e o critério de "resolvido". Registra o incidente em
 `.claude/memory/blockers.md`.
@@ -25,6 +25,7 @@ hotfix segue sem regressão verde, mesmo sob urgência.
 
 ### FASE 4 — Revisão express (`senso-critico`, reviewing: full)
 Foco em Dimensão 3 (bugs latentes) e Dimensão 4 (adversarial: "o fix abre outro buraco?").
+Se o incidente é de segurança, o `security-reviewer` revisa em paralelo (`/security-scan`).
 - `REJECTED` com BLOQUEADOR → para e escala ao humano imediatamente.
 - `APPROVED` → registra a decisão e move o incidente de `blockers.md` para `decisions.md`.
 
