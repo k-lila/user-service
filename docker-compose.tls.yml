@@ -54,15 +54,17 @@ services:
       # termina TLS, sslInfo é null, então a flag é explicitamente gated por env).
       APP_COOKIE_SECURE: "true"
 
-  # Front-channel do auth-server atrás da borda. Honrar X-Forwarded-Proto faz o
-  # AUTHSESSION sair com Secure (request.isSecure()=true) e dá o IP real ao lockout
-  # C19 (X-Forwarded-For via ClientIpResolver).
+  # Front-channel do auth-server atrás da borda. Honrar X-Forwarded-Proto dá o IP real
+  # ao lockout C19 (X-Forwarded-For via ClientIpResolver).
   # CORS em CSV: SPA (app.localhost) + Swagger-UI (localhost:8081, fetch cross-origin
   # do /oauth2/token — a porta 8081 do gateway segue publicada no modo TLS).
   authorization-server:
     environment:
       CORS_ALLOWED_ORIGINS_AUTH: https://app.localhost,http://localhost:8081
       SERVER_FORWARD_HEADERS_STRATEGY: framework
+      # Liga a flag Secure no cookie AUTHSESSION (simétrico ao gateway: atrás de proxy
+      # que termina TLS a flag é gated por env, não inferida do request.isSecure()).
+      APP_COOKIE_SECURE: "true"
 
   # Swagger-UI (servido pelo gateway em http://localhost:8081): sem o override de dev a
   # porta 8082 não é publicada, então o fluxo OAuth2 do Swagger passa pela borda TLS.

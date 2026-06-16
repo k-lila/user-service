@@ -21,11 +21,19 @@ import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 @EnableWebSecurity
 // Sessão HTTP (login/consent) no Redis — escala horizontal.
 // Habilitação explícita: no Spring Boot 4.0 a autoconfig de Spring Session não dispara só pela dep.
-@EnableRedisHttpSession
+// redisNamespace dedicado ("authserver:session"): isola as sessões do auth-server das do gateway
+// ("gateway:session") no mesmo Redis, em vez de depender só da unicidade dos session ids.
+@EnableRedisHttpSession(redisNamespace = "authserver:session")
 public class SecurityConfig {
 
 	@Value("${auth.issuer}")
 	private String issuer;
+
+	// Flag Secure do cookie AUTHSESSION. Default false p/ dev HTTP puro; o overlay TLS
+	// (docker-compose.tls.yml) liga via APP_COOKIE_SECURE=true. Simétrico ao gateway:
+	// atrás de proxy que termina TLS a flag é explícita (não inferida do request).
+	@Value("${app.cookie.secure:false}")
+	private boolean cookieSecure;
 
 	// Cookie de sessão com nome próprio (AUTHSESSION) para NÃO colidir com o cookie
 	// SESSION do gateway: gateway e auth-server compartilham o host "localhost" em dev
@@ -37,6 +45,7 @@ public class SecurityConfig {
 		serializer.setCookieName("AUTHSESSION");
 		serializer.setCookiePath("/");
 		serializer.setUseHttpOnlyCookie(true);
+		serializer.setUseSecureCookie(cookieSecure);
 		serializer.setSameSite("Lax");
 		return serializer;
 	}

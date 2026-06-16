@@ -34,11 +34,25 @@ serviço**:
   parametrizável (`cookieSecure`, default false p/ dev HTTP).
 - **Auth-server** (servlet): `@EnableRedisHttpSession` em
   `authorization-server/.../config/SecurityConfig.java`; cookie renomeado para
-  **`AUTHSESSION`** via `DefaultCookieSerializer.setCookieName("AUTHSESSION")`.
+  **`AUTHSESSION`** via `DefaultCookieSerializer.setCookieName("AUTHSESSION")`, `HttpOnly`,
+  flag `Secure` parametrizável (`app.cookie.secure` via `setUseSecureCookie`, default false p/
+  dev HTTP) — **simétrico ao gateway**: o overlay TLS liga ambos via `APP_COOKIE_SECURE=true`.
 
 Os nomes distintos (`SESSION` vs `AUTHSESSION`) evitam a colisão no salto front-channel. Em
 produção, domínios separados por serviço também resolveriam, mas os nomes distintos garantem
 a correção também no cenário dev/Docker de host único.
+
+Além dos cookies distintos, cada serviço usa um **`redisNamespace` próprio** no Spring Session,
+para que o isolamento das sessões no Redis não dependa apenas da unicidade dos session ids:
+
+- **Gateway:** `@EnableRedisWebSession(redisNamespace = "gateway:session")` → chaves sob
+  `gateway:session:*`.
+- **Auth-server:** `@EnableRedisHttpSession(redisNamespace = "authserver:session")` → chaves
+  sob `authserver:session:*`.
+
+O default do Spring Session (`spring:session`) misturaria os dois conjuntos de sessões no mesmo
+prefixo; o namespace dedicado torna a separação explícita e facilita operar/segregar cada
+conjunto.
 
 Sem mudança de contrato de API.
 
@@ -57,8 +71,13 @@ Sem mudança de contrato de API.
 - A anotação explícita (`@EnableRedis*Session`) é um **requisito não-óbvio** do Spring Boot
   4.0: omiti-la faz a sessão cair silenciosamente para o default — armadilha a documentar
   (feito em `CLAUDE.md` §Convenções).
-- A flag `Secure` do cookie é default `false` para dev HTTP puro; em prod **deve** ser
-  ligada (`cookieSecure`/borda TLS).
+- A flag `Secure` dos cookies (`SESSION` no gateway e `AUTHSESSION` no auth-server) é default
+  `false` para dev HTTP puro; em prod **deve** ser ligada (`app.cookie.secure`/borda TLS). Os
+  dois serviços honram a mesma env (`APP_COOKIE_SECURE`), sem assimetria.
+- **Troca de `redisNamespace` invalida as sessões existentes** no deploy que a introduz: as
+  sessões gravadas sob o prefixo antigo (`spring:session:*`) deixam de ser encontradas e todos
+  os usuários deslogam **uma vez**. Aceitável para um ajuste de manutenção; comunicar na nota
+  de release.
 
 **Testes de regressão:** o fluxo BFF OAuth2 ponta a ponta (que exercita as duas sessões e o
 salto front-channel) é coberto por `GatewayOAuth2FlowIntegrationTest`; a sessão do

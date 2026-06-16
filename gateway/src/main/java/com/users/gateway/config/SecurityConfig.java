@@ -38,7 +38,9 @@ import reactor.core.publisher.Mono;
 @EnableWebFluxSecurity
 // Sessão WebFlux (OAuth2AuthorizedClient/JWT) no Redis — escala horizontal.
 // Habilitação explícita: no Spring Boot 4.0 a autoconfig de Spring Session não dispara só pela dep.
-@EnableRedisWebSession
+// redisNamespace dedicado ("gateway:session"): isola as sessões do gateway das do auth-server
+// ("authserver:session") no mesmo Redis, em vez de depender só da unicidade dos session ids.
+@EnableRedisWebSession(redisNamespace = "gateway:session")
 public class SecurityConfig {
 
     // Flag Secure dos cookies (SESSION/XSRF-TOKEN). Default false p/ dev HTTP puro;

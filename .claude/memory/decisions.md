@@ -19,6 +19,19 @@
 
 <!-- Novas entradas abaixo -->
 
+## [2026-06-15] gateway + authorization-server · namespace Redis separado por serviço para sessões
+- **Decisão:** cada serviço passou a gravar as sessões Spring Session sob um `redisNamespace` próprio — gateway `@EnableRedisWebSession(redisNamespace = "gateway:session")` e auth-server `@EnableRedisHttpSession(redisNamespace = "authserver:session")` — em vez do default comum `spring:session`. Antes, o isolamento dos dois conjuntos de sessões no mesmo Redis dependia só da unicidade dos session ids; agora é explícito por prefixo (`gateway:session:*` / `authserver:session:*`), facilitando operar/segregar cada conjunto. Não é bug ativo — é fechamento de dívida consciente.
+- **ADR:** amend do ADR-007 (não criou novo) — registrado o namespace dedicado por serviço e a nota de invalidação de sessões no deploy. Sem mudança de contrato de API.
+- **Atenção (nota de release):** trocar o namespace invalida as sessões existentes (gravadas sob `spring:session:*`) — todos os usuários deslogam **uma vez** no deploy que introduz a mudança.
+- **Verificação:** `RedisSessionIntegrationTest` ajustado ao novo prefixo no helper `chaveDaSessao` (`authserver:session:sessions:`) — único consumidor do prefixo antigo em código (confirmado por grep). Fluxo BFF ponta a ponta (`GatewayOAuth2FlowIntegrationTest`) e testes de sessão verdes.
+- **Tipo:** decisão.
+
+## [2026-06-15] authorization-server · flag Secure parametrizável no cookie AUTHSESSION
+- **Decisão:** o `DefaultCookieSerializer` do cookie `AUTHSESSION` passou a honrar `app.cookie.secure` via `setUseSecureCookie` (campo `@Value("${app.cookie.secure:false}")`), espelhando o padrão já existente no gateway (`SESSION`/`XSRF-TOKEN`). Default `false` (dev HTTP puro inalterado); o overlay `docker-compose.tls.yml` liga via `APP_COOKIE_SECURE=true` no bloco `authorization-server`. Fecha a assimetria silenciosa em que, sob TLS, o `SESSION` saía com `Secure` mas o `AUTHSESSION` não.
+- **ADR:** amend do ADR-007 (não criou novo) — registrado o `Secure` parametrizável no auth-server, simétrico ao gateway. Sem mudança de contrato de API.
+- **Verificação:** novo `AuthsessionSecureCookieIntegrationTest` (contexto com `app.cookie.secure=true`) afirma `Set-Cookie: AUTHSESSION; Secure`; `RedisSessionIntegrationTest`/`OAuth2AuthorizationCodeFlowIntegrationTest` seguem verdes com o default false (dev inalterado). `mvn -f authorization-server/pom.xml test` → 6/6 verdes nesse subconjunto.
+- **Tipo:** decisão.
+
 ## [2026-06-15] esteira · JaCoCo com gate de cobertura
 - **Decisão:** plugado o `jacoco-maven-plugin` (versão herdada do `spring-boot-starter-parent` 4.0.3, sem pin) nos 5 módulos back-end. Sem POM agregador (decisão do humano: manter a estrutura atual, agregador fora do escopo da v1) → bloco replicado por POM.
   - **Gate (falha o build) nos 3 módulos de domínio** (`user-service`, `authorization-server`, `gateway`): execution `check` na fase `verify`, regra `BUNDLE`/`LINE`/`COVEREDRATIO` mínimo **0.70** (piso bloqueante do projeto; 80% segue como meta perseguida via testes, não como gate, para não reprovar por poucos %).
@@ -128,3 +141,21 @@
 - **ADR:** não — esteira/documentação, sem mudança de contrato de API ou schema (logo, sem pipeline de agentes).
 - **Arquivos:** novo `.github/workflows/ci.yml`; `README.md` (badge + seção "Integração Contínua (CI)"); este registro.
 - **Tipo:** decisão.
+
+## [2026-06-16] TASK-P4-REDIS-AUTH · infra Redis · Autenticação Redis/Sentinel com senha uniforme (ADR-008)
+- **Decisão:** senha uniforme (`REDIS_PASSWORD`) nos 6 nós Redis — 3 data nodes com `--requirepass`/`--masterauth` e 3 sentinels com `requirepass`/`sentinel auth-pass mymaster` (injetados em runtime em `/tmp/sentinel.conf`, sem segredo no `sentinel.conf` versionado). Clientes Spring autenticam com `spring.data.redis.password` (data nodes) e `spring.data.redis.sentinel.password` (sentinels). `redis-exporter` usa `REDIS_PASSWORD` nos 6 alvos multi-target. `REDIS_PASSWORD` fail-fast no compose (`${REDIS_PASSWORD:?...}`), sem default; `.env.example` documenta com `openssl rand -hex 32`.
+- **Alternativas rejeitadas:** senha por tier (data ≠ sentinel) — exporter multi-target suporta apenas uma senha global, múltiplos exporters sem ganho proporcional; ACLs por usuário — dívida identificada como próximo passo para prod (aumenta superfície de configuração, exige refatoração dos clientes Spring).
+- **Gaps residuais (dívida aceita):** TLS de transporte Redis ausente (senha trafega em claro no handshake AUTH na rede interna; portas nunca publicadas no compose base); ACLs por usuário ausentes (todos os clientes compartilham a mesma senha).
+- **ADR:** docs/adr/ADR-008-autenticacao-redis-sentinel.md
+- **Tipo:** decisão arquitetural.
+
+## [2026-06-16] security-reviewer · TASK-P4-REDIS-AUTH · autenticação Redis/Sentinel (APPROVED_WITH_OBSERVATIONS)
+- **Veredito:** APPROVED_WITH_OBSERVATIONS. Revisão de segurança da introdução de senha nos 6 nós Redis (3 data + 3 sentinel) + clientes Spring + exporter. Sem bloqueadores nem críticos.
+- **Escopo revisado:** `docker-compose.yml` (data nodes/sentinels/exporter/3 serviços Spring), 3 YAMLs do config-server (`spring.data.redis.password` + `.sentinel.password`), `.env.example`, `infra/redis/sentinel.conf` (inalterado, sem segredo), ADR-008. Diffs reais na branch `redis-auth` (uncommitted).
+- **Gestão do segredo (OK):** `.env` gitignored e não rastreado; `.env.example` só com placeholder `changeme` + instrução `openssl rand -hex 32`; `sentinel.conf` versionado sem segredo (injeção runtime via `echo >> /tmp/sentinel.conf`, coerente com o padrão copy-to-/tmp já invariante). Healthchecks usam `$$REDIS_PASSWORD` (env do container, resolvido em runtime — não literal no compose, não aparece no `ps` como argumento de comando do healthcheck).
+- **Fail-fast (OK):** `${REDIS_PASSWORD:?...}` em todos os 6 nós Redis, nos 3 serviços Spring e no exporter — coerente com o padrão `CONFIG_SERVER_PASSWORD`. Nenhum caminho permite subir Redis sem senha; YAMLs usam `${REDIS_PASSWORD}` sem default e o compose garante presença da var.
+- **Não-regressão (OK):** sessão (namespace/cookies distintos), lockout, rate limiting, canal interno X-Internal-Token preservados — a senha é transparente aos controles. Risco operacional: deploy NÃO-atômico (data nodes com senha, clientes sem) causa NOAUTH e derruba sessão/cache/rate-limit; ADR-008 documenta a exigência de janela atômica.
+- **Defesa em profundidade:** ADR-008 declara honestamente os gaps residuais — TLS de transporte Redis ausente (senha trafega em claro no handshake AUTH na rede interna; mitigado por portas nunca publicadas, confirmado: override de dev NÃO publica 6379/26379) e ACLs por usuário ausentes (próximo passo). Gaps residuais registrados como dívida consciente.
+- **Observações ao doc-keeper:** (1) migrar o gap "Redis/Sentinel sem autenticação" de `docs/SECURITY.md` para controles ativos, anotando os dois gaps residuais (TLS Redis, ACLs); (2) corrigir ADR-008 linha 93: cita `REDIS_EXPORTER_PASSWORD` mas a var nativa usada (e correta no resto do ADR/compose) é `REDIS_PASSWORD` — inconsistência só documental.
+- **Observações fora do escopo da task (não bloqueiam, registrar origem):** SESSION_TIMEOUT/`spring.session.timeout` em gateway.yml+auth-server.yml e o `APP_COOKIE_SECURE=true` do auth-server no `docker-compose.tls.yml` vieram junto no diff mas pertencem ao trabalho de sessão/ADR-007, não ao Redis-auth.
+- **Tipo:** decisão (revisão de segurança).

@@ -29,7 +29,8 @@ import jakarta.servlet.http.Cookie;
  * Sessão HTTP do auth-server no Redis (Spring Session, {@code @EnableRedisHttpSession}):
  * o fluxo de login emite o cookie {@code AUTHSESSION} (CookieSerializer custom — valor é
  * o session id em Base64) e a sessão correspondente fica persistida em
- * {@code spring:session:sessions:&lt;id&gt;} no Redis do Testcontainers.
+ * {@code authserver:session:sessions:&lt;id&gt;} no Redis do Testcontainers (redisNamespace
+ * dedicado do auth-server).
  */
 class RedisSessionIntegrationTest extends AbstractAuthIntegrationTest {
 
@@ -55,7 +56,7 @@ class RedisSessionIntegrationTest extends AbstractAuthIntegrationTest {
         // ASSERT — cookie emitido e sessão correspondente gravada no Redis
         assertNotNull(sessao, "iniciar o fluxo de login deve emitir o cookie AUTHSESSION");
         assertTrue(redisTemplate.hasKey(chaveDaSessao(sessao)),
-                "a sessão do cookie AUTHSESSION deve estar persistida no Redis (spring:session)");
+                "a sessão do cookie AUTHSESSION deve estar persistida no Redis (authserver:session)");
     }
 
     @Test
@@ -89,10 +90,11 @@ class RedisSessionIntegrationTest extends AbstractAuthIntegrationTest {
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
-    /** Chave Spring Session no Redis: o valor do cookie é o session id em Base64. */
+    /** Chave Spring Session no Redis: o valor do cookie é o session id em Base64.
+     *  Prefixo = redisNamespace dedicado do auth-server (authserver:session). */
     private String chaveDaSessao(Cookie cookie) {
         String sessionId = new String(Base64.getDecoder().decode(cookie.getValue()), StandardCharsets.UTF_8);
-        return "spring:session:sessions:" + sessionId;
+        return "authserver:session:sessions:" + sessionId;
     }
 
     private void stubUsuarioAtivo(String email) {

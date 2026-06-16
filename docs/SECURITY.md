@@ -27,7 +27,16 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 - **CSRF no gateway** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`;
   `/v1/users/register` isento); entry point devolve **401** (não 302).
 - **BCrypt** (custo 10) para hash de senha.
-- **Cookies de sessão distintos** por serviço (ADR-007) — evita colisão de sessão.
+- **Cookies de sessão distintos** por serviço (ADR-007) — evita colisão de sessão. Ambos
+  honram a flag `Secure` parametrizável (`app.cookie.secure`/`APP_COOKIE_SECURE`): gateway
+  (`SESSION`) e auth-server (`AUTHSESSION`), ligada sob TLS pelo `docker-compose.tls.yml` —
+  sem assimetria entre os dois.
+- **Autenticação no Redis/Sentinel** (ADR-008): os 3 data nodes recebem `--requirepass` e
+  `--masterauth`; os 3 sentinels recebem `requirepass` e `sentinel auth-pass mymaster` —
+  todos com a mesma `REDIS_PASSWORD` (fail-fast no compose). Os clientes Spring (gateway,
+  auth-server, user-service) autenticam via `spring.data.redis.password` (data nodes) e
+  `spring.data.redis.sentinel.password` (sentinels). O `redis-exporter` autentica com
+  `REDIS_PASSWORD` nos 6 alvos do modo multi-target.
 
 ## Gaps de segurança conhecidos (dívida aceita)
 
@@ -37,7 +46,8 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 | **Chave JWK dev no classpath** | Aceito. Par RSA dev em `src/main/resources/keys/app.{key,pub}` (ADR-005) | Override via `JWK_*` com chave gerada/gerida fora do repo |
 | **Grafana `admin/admin`** | Curativo: externalizado para `.env` | Trocar a credencial em prod |
 | **Keyfile MongoDB de dev no repo** | Aceito (análogo à chave JWK) | Keyfile gerado/gerido fora do repo em prod |
-| **Redis/Sentinel sem autenticação** | Aberto; mitigado por **portas nunca publicadas** no compose base (prod-safe) | `requirepass`/ACL + rede isolada em prod |
+| **TLS de transporte Redis ausente** | Aceito. A senha (`REDIS_PASSWORD`) protege o protocolo de comando mas trafega em claro no handshake `AUTH` na rede interna Docker. Mitigado por portas Redis/Sentinel nunca publicadas no compose base (prod-safe). | TLS no Redis (Redis 6+ `tls-port`) + rede Docker isolada em prod |
+| **ACLs por usuário Redis ausentes** | Aceito. Todos os clientes (gateway, auth-server, user-service, exporter) compartilham a mesma `REDIS_PASSWORD` sem segregação de permissões por serviço. | Criar usuários ACL dedicados por serviço com permissões mínimas (Redis 6+) |
 
 ## Como manter este documento
 

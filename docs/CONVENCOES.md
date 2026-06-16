@@ -53,6 +53,11 @@ evoluir o sistema, **preserve estas invariantes**: quebrá-las reintroduz bugs j
   front-channel → o callback leria a sessão errada → `authorization_request_not_found`.
 - Nomes distintos evitam a colisão (em prod, domínios separados também resolveriam).
 - **Invariante:** mantenha nomes de cookie de sessão distintos entre gateway e auth-server.
+- **Namespace Redis distinto:** cada serviço também grava as sessões sob um `redisNamespace`
+  próprio — gateway `gateway:session` (`@EnableRedisWebSession(redisNamespace = ...)`) e
+  auth-server `authserver:session` (`@EnableRedisHttpSession(redisNamespace = ...)`) — em vez
+  do default comum `spring:session`. O isolamento deixa de depender só da unicidade dos session
+  ids. **Atenção:** trocar o namespace invalida as sessões existentes (todos deslogam uma vez).
 
 ## Spring Session exige habilitação explícita no Spring Boot 4.0
 
