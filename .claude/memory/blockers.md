@@ -20,3 +20,11 @@
 ---
 
 > _Nenhum impedimento ativo._
+
+## [2026-06-15] BLOCK-001 · TASK-P4-REDIS-AUTH · infra-redis
+- **Origem:** senso-critico (revisão da spec, rodada 1)
+- **Severidade:** BLOQUEADOR (P0)
+- **Agente responsável:** product-manager (spec)
+- **Referência:** docker-compose.yml:276 (B1); sentinel.conf + 3 YAMLs (B2)
+- **Descrição:** B1 — `masterauth` deve estar nos 3 data nodes (inclusive redis-1), senão o ex-master não reintegra como réplica pós-failover (PSYNC NOAUTH silencioso). B2 — decisão sobre `requirepass`/`sentinel.password` nos sentinels deve ser fechada na spec; senão `spring.data.redis.sentinel.password` ausente causa NOAUTH lazy em produção (CI não pega, pois testes usam Redis standalone sem auth).
+- **Status:** resolvido (spec revisada na rodada 2; decisão: senha uniforme nos 6 nós + sentinel.password nos 3 clientes)

@@ -18,9 +18,13 @@ spring:
       uri: ${MONGODB_URI}
       database: ${MONGODB_DATABASE:user-db}
     redis:
+      # Autenticação nos data nodes (spring.data.redis.password) e nos sentinels
+      # (spring.data.redis.sentinel.password) — propriedades distintas no Spring Boot 4.0.
+      password: ${REDIS_PASSWORD}
       sentinel:
         master: ${REDIS_SENTINEL_MASTER:mymaster}
         nodes: ${REDIS_SENTINEL_NODES:redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379}
+        password: ${REDIS_PASSWORD}
 
 internal:
   api:

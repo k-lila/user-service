@@ -34,7 +34,7 @@ usa sessão por cookie e **não** manuseia JWT.
 - [docs/LOGS.md](docs/LOGS.md) — estratégia de logs
 - [docs/SECURITY.md](docs/SECURITY.md) — controles ativos e gaps de segurança conhecidos
 - [docs/ORQUESTRACAO.md](docs/ORQUESTRACAO.md) — sistema de orquestração de agentes
-- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos
+- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos · **ADR-008** autenticação no Redis/Sentinel
 
 ---
 
@@ -162,7 +162,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
   - Defaults de classpath (`src/main/resources/keys/app.{key,pub}`) são **dev** (gap conhecido); override em prod via `JWK_*`.
 - **Sessão HTTP no Redis** via Spring Session:
   - `@EnableRedisHttpSession` no `SecurityConfig` — exige anotação explícita no Spring Boot 4.0.
-  - Cookie renomeado para **`AUTHSESSION`** (`CookieSerializer`) para não colidir com o `SESSION` do gateway (ver [docs/CONVENCOES.md](docs/CONVENCOES.md)).
+  - Cookie renomeado para **`AUTHSESSION`** (`CookieSerializer`) para não colidir com o `SESSION` do gateway (ver [docs/CONVENCOES.md](docs/CONVENCOES.md)); flag `Secure` parametrizável via `app.cookie.secure` (`setUseSecureCookie`, default false p/ dev HTTP), simétrica ao gateway — o overlay TLS liga ambos via `APP_COOKIE_SECURE=true`.
 - **Credenciais e token:** busca credenciais via Feign (`GET /internal/users/email/{email}`); customiza o JWT em `TokenCustomizerConfig.java` (**arquivo crítico**) com `userID`, `roles`, `permissions`.
 - **Resiliência Feign:** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com a config nomeada `configs.user-service` (com group habilitado, `instances.*` é inerte — use `configs.*`): janela 10, `minimumNumberOfCalls` 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout. `AuthorizationService.loadUserByUsername` propaga essa exceção sem reembrulhar — o `DaoAuthenticationProvider` a trata como credenciais inválidas e devolve o usuário ao form de login (não escala a 500); só exceções inesperadas são convertidas em `UsernameNotFoundException` genérica sem vazar a causa.
 - **Propagação de trace no Feign (`FeignTracingConfig.java`):** na cadeia Feign + circuit breaker a instrumentação automática (feign-micrometer) registrava o span cliente no trace correto, mas **não emitia os headers B3** — o user-service recebia a request sem `X-B3-*` e abria um trace **órfão**. `FeignTracingConfig` adiciona um `RequestInterceptor` que injeta o contexto de trace corrente no template via o `Propagator` do Micrometer (formato `b3`); assim o user-service (`consume: b3`) continua o trace e seu span vira filho do auth-server. Degrada graciosamente quando não há contexto ativo.
@@ -213,9 +213,10 @@ Detalhe e racional em [docs/CONVENCOES.md](docs/CONVENCOES.md); decisões formai
 - **Canal interno isolado:** `/internal/users/email/{email}` fora do gateway e do Swagger, protegido por `X-Internal-Token` (ADR-006).
 - **DELETE com 3 semânticas intencionais:** soft-delete ADMIN (`/{id}`), hard-delete ADMIN (`/del/{id}`), soft-delete USER (`/remove/me`) (ADR-001).
 - **BCrypt** custo 10; **roles fixas** `USER`/`ADMIN` (sem roles dinâmicas).
-- **Cookies de sessão distintos:** gateway `SESSION`, auth-server `AUTHSESSION` — evita colisão no salto front-channel (ADR-007).
+- **Cookies de sessão distintos:** gateway `SESSION`, auth-server `AUTHSESSION` — evita colisão no salto front-channel; cada serviço também usa `redisNamespace` próprio (`gateway:session` / `authserver:session`) isolando as sessões no Redis (ADR-007).
 - **Spring Session explícito no Boot 4.0:** `@EnableRedisWebSession` (gateway) / `@EnableRedisHttpSession` (auth-server) — a autoconfig não dispara só pela dependência.
 - **Config mutável em containers:** Redis Sentinel e MongoDB keyfile usam o padrão copy-to-`/tmp` + override de `entrypoint` (Mongo); não troque por mount `:ro` simples.
+- **Autenticação no Redis (ADR-008):** senha única `REDIS_PASSWORD` (fail-fast, sem default no compose) nos 6 nós. `requirepass` **e** `masterauth` nos **três** data nodes — sem `masterauth` no master atual, o ex-master não reintegra como réplica pós-failover (PSYNC NOAUTH). Sentinels com `requirepass` + `sentinel auth-pass mymaster` (injetados em runtime, fora do `sentinel.conf` versionado). Clientes Spring precisam das **duas** propriedades: `spring.data.redis.password` (data nodes) **e** `spring.data.redis.sentinel.password` (sentinels) — omitir a segunda causa NOAUTH lazy só em runtime (o CI, com Redis standalone sem senha, não pega).
 
 ---
 
@@ -232,7 +233,7 @@ A garantia de que o sistema continua saudável vem de testes + gate de cobertura
 
 ## Gaps de Segurança Conhecidos
 
-Controles ativos e dívida aceita detalhados em [docs/SECURITY.md](docs/SECURITY.md). Gaps **ativos** (dívida consciente, não regredir os controles existentes): sem TLS em prod (curativo `docker-compose.tls.yml` em dev), chave JWK dev no classpath (override em prod via `JWK_*`), Grafana `admin/admin` (externalizado para `.env`), keyfile MongoDB de dev no repo, Redis/Sentinel sem autenticação (mitigado por portas nunca publicadas). Ao fechar um gap ou introduzir dívida, atualize `docs/SECURITY.md` e `.claude/memory/decisions.md`.
+Controles ativos e dívida aceita detalhados em [docs/SECURITY.md](docs/SECURITY.md). Gaps **ativos** (dívida consciente, não regredir os controles existentes): sem TLS em prod (curativo `docker-compose.tls.yml` em dev), chave JWK dev no classpath (override em prod via `JWK_*`), Grafana `admin/admin` (externalizado para `.env`), keyfile MongoDB de dev no repo, TLS de transporte Redis ausente (senha trafega em claro na rede interna Docker; portas Redis/Sentinel nunca publicadas no compose base), ACLs Redis por usuário ausentes (todos os clientes compartilham `REDIS_PASSWORD`). Ao fechar um gap ou introduzir dívida, atualize `docs/SECURITY.md` e `.claude/memory/decisions.md`.
 
 ---
 
