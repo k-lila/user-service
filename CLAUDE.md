@@ -8,6 +8,7 @@
 - Pergunte antes de agir se a tarefa tiver mais de 3 arquivos envolvidos
 - Antes de cada alteração no código, apresente um relatório que aponte claramente: 1) razões dos novos códigos e/ou das modificações; 2) arquivos a serem criados, se houver; 3) arquivos a serem modificados, se houver
 - Ao criar uma nova branch, pergunte seu nome
+- Sempre que elaborar perguntas e fornecer as opções de resposta, sempre dê um panorama simples e resumido sobre a opção em si, com seus prós e contras.
 
 ---
 
