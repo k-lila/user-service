@@ -486,6 +486,11 @@ services:
       CORS_ALLOWED_ORIGINS_AUTH: ${CORS_ALLOWED_ORIGINS_AUTH:-http://localhost:8081}
       AUTH_ISSUER: http://authorization-server:8082
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
+      # redirectUri/postLogoutRedirectUri semeados no gateway-client (OAuth2ClientConfig).
+      # Em prod, aponte para o domínio público real (CSV). Trocar exige re-seed do
+      # gateway-client no Postgres — o seed é idempotente, não reconcilia cliente existente.
+      OAUTH_CLIENT_REDIRECT_URIS: ${OAUTH_CLIENT_REDIRECT_URIS:-http://localhost:8081/login/oauth2/code/gateway-client,http://localhost:5173/login/oauth2/code/gateway-client,https://app.localhost/login/oauth2/code/gateway-client,http://localhost:8081/swagger-ui/oauth2-redirect.html,https://oauth.pstmn.io/v1/callback}
+      OAUTH_CLIENT_POST_LOGOUT_URIS: ${OAUTH_CLIENT_POST_LOGOUT_URIS:-http://localhost:5173/,https://app.localhost/}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
       AUTH_DB_URL: jdbc:postgresql://auth-postgres:5432/authdb
       AUTH_DB_USER: ${POSTGRES_USER}
@@ -596,6 +601,10 @@ services:
       OAUTH_CLIENT_ID: gateway-client
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-http://localhost:5173/login/oauth2/code/gateway-client}
+      # RP-Initiated Logout (lidos em gateway SecurityConfig via @Value). Em prod, hostnames
+      # públicos reais — sem isto, o logout front-channel volta a localhost.
+      OAUTH_END_SESSION_URI: ${OAUTH_END_SESSION_URI:-http://localhost:8082/connect/logout}
+      POST_LOGOUT_REDIRECT_URI: ${POST_LOGOUT_REDIRECT_URI:-http://localhost:5173/}
       AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
       AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}

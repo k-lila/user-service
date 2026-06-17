@@ -68,6 +68,8 @@
 | `OAUTH_AUTHORIZATION_URI`  | gateway               | `http://localhost:8082/oauth2/authorize`             | Endpoint de autorização **front-channel** (browser). Só este endpoint usa hostname externo. |
 | `OAUTH_END_SESSION_URI`    | gateway               | `http://localhost:8082/connect/logout`               | Endpoint de logout OIDC do IdP (browser). Lido em `gateway/.../SecurityConfig.java`.        |
 | `POST_LOGOUT_REDIRECT_URI` | gateway               | `http://localhost:5173/`                             | Para onde o IdP devolve o browser após o logout. Deve bater com a `postLogoutRedirectUri` registrada no `RegisteredClient`. |
+| `OAUTH_CLIENT_REDIRECT_URIS` | authorization-server | `http://localhost:8081/login/oauth2/code/gateway-client,http://localhost:5173/login/oauth2/code/gateway-client,https://app.localhost/login/oauth2/code/gateway-client,http://localhost:8081/swagger-ui/oauth2-redirect.html,https://oauth.pstmn.io/v1/callback` | CSV dos `redirectUri` do `gateway-client` semeado em `OAuth2ClientConfig` (`oauth.gateway-client.redirect-uris`). **Mudar em prod exige re-seed:** o seed do `RegisteredClient` é idempotente só no `findByClientId` inicial — não há reconciliação; alterar a env sem recriar/atualizar o client no Postgres não atualiza os redirect URIs já persistidos. |
+| `OAUTH_CLIENT_POST_LOGOUT_URIS` | authorization-server | `http://localhost:5173/,https://app.localhost/` | CSV dos `postLogoutRedirectUri` do `gateway-client` (`oauth.gateway-client.post-logout-uris`). Mesma ressalva de re-seed acima. |
 
 > ² O `RegisteredClient` no authorization-server já permite a URI de `:5173`, para o callback aterrissar no SPA.
 

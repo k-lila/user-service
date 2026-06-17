@@ -1,5 +1,6 @@
 package authorizationserver.config;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +27,23 @@ public class OAuth2ClientConfig {
 
     @Value("${oauth.client.secret}")
     private String clientSecret;
+
+    // Externalizados (config-server → authorization-server.yml) para que trocar o domínio
+    // público (ex.: futuro named tunnel/Cloudflare) seja mudança de config, não de código.
+    // Defaults inline preservam o comportamento de dev/TLS mesmo se a propriedade não chegar
+    // a ser resolvida pelo config-server (ex.: testes que instanciam esta classe via `new`).
+    @Value("${oauth.gateway-client.redirect-uris:"
+            + "http://localhost:8081/login/oauth2/code/gateway-client,"
+            + "http://localhost:5173/login/oauth2/code/gateway-client,"
+            + "https://app.localhost/login/oauth2/code/gateway-client,"
+            + "http://localhost:8081/swagger-ui/oauth2-redirect.html,"
+            + "https://oauth.pstmn.io/v1/callback}")
+    private List<String> gatewayClientRedirectUris;
+
+    @Value("${oauth.gateway-client.post-logout-uris:"
+            + "http://localhost:5173/,"
+            + "https://app.localhost/}")
+    private List<String> gatewayClientPostLogoutUris;
 
     @Bean
 	PasswordEncoder passwordEncoder() {
@@ -62,21 +80,20 @@ public class OAuth2ClientConfig {
     }
 
     private RegisteredClient gatewayClient() {
-        return RegisteredClient.withId(UUID.randomUUID().toString())
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId("gateway-client")
                 .clientSecret(passwordEncoder().encode(clientSecret))
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
-                .redirectUri("http://localhost:8081/login/oauth2/code/gateway-client")
-                .redirectUri("http://localhost:5173/login/oauth2/code/gateway-client") // SPA (BFF): callback via proxy do front (Vite :5173 dev / nginx :5173 Docker)
-                .redirectUri("https://app.localhost/login/oauth2/code/gateway-client") // borda TLS de dev (mkcert): callback via tls-proxy (docker-compose.tls.yml)
-                .redirectUri("http://localhost:8081/swagger-ui/oauth2-redirect.html")
-                .redirectUri("https://oauth.pstmn.io/v1/callback")
-                // RP-Initiated Logout: para onde o auth-server devolve o browser após encerrar a sessão
-                .postLogoutRedirectUri("http://localhost:5173/")
-                .postLogoutRedirectUri("https://app.localhost/") // borda TLS de dev
+                .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN);
+        // redirectUri/postLogoutRedirectUri vêm de oauth.gateway-client.* (config-server).
+        // ATENÇÃO: o seed é idempotente (findByClientId → save só se ausente, ver
+        // registeredClientRepository()) — alterar estas URIs em produção exige zerar/re-seedar
+        // o gateway-client (drop + restart), não há reconciliação automática de cliente existente.
+        gatewayClientRedirectUris.forEach(builder::redirectUri);
+        gatewayClientPostLogoutUris.forEach(builder::postLogoutRedirectUri);
+        return builder
                 .scope(OidcScopes.OPENID)
                 .scope(OidcScopes.PROFILE)
                 .scope("users.read")
