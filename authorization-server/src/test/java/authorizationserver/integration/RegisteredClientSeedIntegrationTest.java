@@ -68,7 +68,6 @@ class RegisteredClientSeedIntegrationTest extends AbstractAuthIntegrationTest {
         assertEquals(Set.of(
                 "http://localhost:8081/login/oauth2/code/gateway-client",
                 "http://localhost:5173/login/oauth2/code/gateway-client",
-                "https://app.localhost/login/oauth2/code/gateway-client",
                 "http://localhost:8081/swagger-ui/oauth2-redirect.html",
                 "https://oauth.pstmn.io/v1/callback"), cliente.getRedirectUris());
         assertEquals(Set.of("openid", "profile", "users.read", "users.write"), cliente.getScopes());

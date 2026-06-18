@@ -30,19 +30,17 @@ public class OAuth2ClientConfig {
 
     // Externalizados (config-server → authorization-server.yml) para que trocar o domínio
     // público (ex.: futuro named tunnel/Cloudflare) seja mudança de config, não de código.
-    // Defaults inline preservam o comportamento de dev/TLS mesmo se a propriedade não chegar
+    // Defaults inline preservam o comportamento de dev mesmo se a propriedade não chegar
     // a ser resolvida pelo config-server (ex.: testes que instanciam esta classe via `new`).
     @Value("${oauth.gateway-client.redirect-uris:"
             + "http://localhost:8081/login/oauth2/code/gateway-client,"
             + "http://localhost:5173/login/oauth2/code/gateway-client,"
-            + "https://app.localhost/login/oauth2/code/gateway-client,"
             + "http://localhost:8081/swagger-ui/oauth2-redirect.html,"
             + "https://oauth.pstmn.io/v1/callback}")
     private List<String> gatewayClientRedirectUris;
 
     @Value("${oauth.gateway-client.post-logout-uris:"
-            + "http://localhost:5173/,"
-            + "https://app.localhost/}")
+            + "http://localhost:5173/}")
     private List<String> gatewayClientPostLogoutUris;
 
     @Bean

@@ -29,9 +29,9 @@ public class SecurityConfig {
 	@Value("${auth.issuer}")
 	private String issuer;
 
-	// Flag Secure do cookie AUTHSESSION. Default false p/ dev HTTP puro; o overlay TLS
-	// (docker-compose.tls.yml) liga via APP_COOKIE_SECURE=true. Simétrico ao gateway:
-	// atrás de proxy que termina TLS a flag é explícita (não inferida do request).
+	// Flag Secure do cookie AUTHSESSION. Default false p/ dev HTTP puro; o overlay de deploy
+	// (docker-compose.deploy.yml, Cloudflare) liga via APP_COOKIE_SECURE=true. Simétrico ao
+	// gateway: atrás de proxy que termina TLS a flag é explícita (não inferida do request).
 	@Value("${app.cookie.secure:false}")
 	private boolean cookieSecure;
 

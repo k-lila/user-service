@@ -4,7 +4,6 @@
 # (TLS da Cloudflare, cookies Secure, forward-headers, roteamento). NÃO cruza a barra de
 # "deploy legítimo para usuário real": a URL muda a cada boot, então o fluxo OAuth2 ponta a
 # ponta (redirect URIs semeados no Postgres) não fecha — isso só com named tunnel + domínio.
-# Ver docs/RELATORIOA.md § "Aplicação à decisão: máquina própria + Cloudflare Tunnel".
 #
 #   Subir (a URL do quick tunnel é efêmera: a Cloudflare atribui um hostname NOVO a cada
 #   (re)start do processo cloudflared. Logo, o 2º up NÃO pode recriar o cloudflared — senão
@@ -22,11 +21,11 @@
 #        docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --no-deps \
 #          gateway authorization-server user-service
 #
-# Cobertura Tier 0 desta onda:
-#   0.2 TLS de borda — a Cloudflare termina TLS; cloudflared fala HTTP interno com o gateway.
-#       APP_COOKIE_SECURE + SERVER_FORWARD_HEADERS_STRATEGY ligados (cookies Secure + IP real).
-#   0.4 CORS/URLs OAuth (front-channel) apontando para a origem pública do túnel.
-# (0.1 JWK já tratado fora do compose; 0.3 secrets é tratado à parte — ver docs/RELATORIOA.md.)
+# O que esta onda cobre (estado de deploy/segurança consolidado em docs/SECURITY.md):
+#   - TLS de borda: a Cloudflare termina TLS; cloudflared fala HTTP interno com o gateway.
+#     APP_COOKIE_SECURE + SERVER_FORWARD_HEADERS_STRATEGY ligados (cookies Secure + IP real).
+#   - CORS/URLs OAuth (front-channel) apontando para a origem pública do túnel.
+# (JWK já tratado fora do compose; segredos via Docker secrets — ver docs/SECURITY.md.)
 
 services:
   # Quick tunnel efêmero: conecta à Cloudflare e roteia a borda pública → gateway:8081,
@@ -35,8 +34,6 @@ services:
     image: cloudflare/cloudflared:latest
     cpus: 0.25
     mem_limit: 128m
-    networks:
-      - user-service-net
     command: tunnel --no-autoupdate --url http://gateway:8081
     depends_on:
       gateway:
@@ -45,7 +42,8 @@ services:
 
   # Borda do BFF. O browser enxerga HTTPS (Cloudflare) mesmo com HTTP interno, então os
   # cookies SESSION/XSRF-TOKEN precisam do flag Secure, e o IP real do cliente chega via
-  # X-Forwarded-For do cloudflared (forward-headers=framework → rate-limit/lockout por IP real).
+  # CF-Connecting-IP (Cloudflare) — fonte confiável do rate-limit/lockout por IP (ADR-010);
+  # forward-headers=framework é o fallback.
   gateway:
     environment:
       APP_COOKIE_SECURE: "true"
@@ -68,7 +66,7 @@ services:
       CORS_ALLOWED_ORIGINS_AUTH: ${TUNNEL_ORIGIN}
       # redirect/post-logout do gateway-client semeados no Postgres. Com quick tunnel a URL é
       # efêmera e o seed é idempotente (não reconcilia) → o LOGIN COMPLETO não fecha nesta onda;
-      # validamos a mecânica do túnel, não o fluxo OAuth2 ponta a ponta (ver RELATORIOA).
+      # validamos a mecânica do túnel, não o fluxo OAuth2 ponta a ponta (ver docs/SECURITY.md).
       OAUTH_CLIENT_REDIRECT_URIS: ${TUNNEL_ORIGIN}/login/oauth2/code/gateway-client
       OAUTH_CLIENT_POST_LOGOUT_URIS: ${TUNNEL_ORIGIN}/
       OAUTH_GATEWAY_CLIENT: ${TUNNEL_ORIGIN}/login/oauth2/code/gateway-client
