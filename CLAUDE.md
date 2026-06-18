@@ -35,7 +35,7 @@ usa sessão por cookie e **não** manuseia JWT.
 - [docs/LOGS.md](docs/LOGS.md) — estratégia de logs
 - [docs/SECURITY.md](docs/SECURITY.md) — controles ativos e gaps de segurança conhecidos
 - [docs/ORQUESTRACAO.md](docs/ORQUESTRACAO.md) — sistema de orquestração de agentes
-- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos · **ADR-008** autenticação no Redis/Sentinel
+- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos · **ADR-008** autenticação no Redis/Sentinel · **ADR-009** base secrets-native (Docker secrets)
 
 ---
 
@@ -95,13 +95,20 @@ login-interface (React)
 
 ### Subir tudo com Docker
 
+**Pré-requisito obrigatório (uma vez):** a base é **secrets-native** ([ADR-009](docs/adr/ADR-009-base-secrets-native-docker-secrets.md)) — sem `./secrets/` o `up` **falha**. Gere os segredos + o par JWK antes do primeiro `up`:
+
 ```bash
+infra/secrets/gen-secrets.sh   # defaults de DEV; em prod exporte cada segredo com valor forte
 docker compose up -d --build
 ```
 
 O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`. Todos os 26 serviços declaram `cpus` / `mem_limit` / `mem_reservation` (chaves de nível de serviço, não `deploy.resources`) — perfis e racional em [docs/CONFIG.md § Limites de recursos](docs/CONFIG.md#limites-de-recursos-cpu--memória).
 
+**Segredos (base secrets-native, gap 0.3 RELATORIOA):** os segredos saem do `.env` plano para **Docker secrets** em `./secrets/` (gitignorado, gerados por `infra/secrets/gen-secrets.sh`), montados em `/run/secrets/`. Consumo: Spring via `spring.config.import=configtree:/run/secrets/` (nome do arquivo = placeholder); postgres/mongo via `*_FILE`; redis/sentinel via `$(cat ...)`; redis-exporter via `--redis.password-file` (JSON); grafana via `__FILE`; prometheus via `password_file`. O par JWK também é secret (`jwk_private`/`jwk_public`). Mecanismos e tabela em [docs/CONFIG.md § Docker secrets](docs/CONFIG.md#docker-secrets-base-secrets-native).
+
 **TLS/HTTPS na borda em dev (opcional):** overlay opt-in `docker-compose.tls.yml` sobe um reverse-proxy nginx (`infra/tls-proxy`) que termina TLS com cert do **mkcert** e fala HTTPS com o browser (`app.localhost`/`auth.localhost`), mantendo o interno em HTTP. `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`. O Swagger-UI segue funcional nesse modo: o fluxo OAuth2 passa pela borda (`AUTH_URL`/`AUTH_TOKEN` → `https://auth.localhost`; CORS do auth-server inclui `http://localhost:8081`) — a porta 8082 não é publicada sem o override de dev.
+
+**Deploy via Cloudflare Tunnel (opcional):** overlay `docker-compose.deploy.yml` sobe o `cloudflared` (quick tunnel → `gateway:8081`) com `APP_COOKIE_SECURE=true`, `SERVER_FORWARD_HEADERS_STRATEGY=framework` e CORS/URLs front-channel via `${TUNNEL_ORIGIN}`. Quick tunnel **valida** a mecânica de borda; a URL é efêmera (não cruza a barra de deploy real — exige named tunnel + domínio). Roteiro de subida (boot com placeholder → ler URL → re-up `--no-deps` sem recriar o cloudflared) no cabeçalho do próprio arquivo e em [README § 2c](README.md). O doc OpenAPI do Swagger requer `API_BASE_URL`/`AUTH_URL` no **user-service** apontando ao túnel, senão o "Try it out" dispara para `localhost` (mixed content).
 
 ### Ordem manual (sem Docker)
 
@@ -234,7 +241,7 @@ A garantia de que o sistema continua saudável vem de testes + gate de cobertura
 
 ## Gaps de Segurança Conhecidos
 
-Controles ativos e dívida aceita detalhados em [docs/SECURITY.md](docs/SECURITY.md). Gaps **ativos** (dívida consciente, não regredir os controles existentes): sem TLS em prod (curativo `docker-compose.tls.yml` em dev), chave JWK dev no classpath (override em prod via `JWK_*`), Grafana `admin/admin` (externalizado para `.env`), keyfile MongoDB de dev no repo, TLS de transporte Redis ausente (senha trafega em claro na rede interna Docker; portas Redis/Sentinel nunca publicadas no compose base), ACLs Redis por usuário ausentes (todos os clientes compartilham `REDIS_PASSWORD`). Ao fechar um gap ou introduzir dívida, atualize `docs/SECURITY.md` e `.claude/memory/decisions.md`.
+Controles ativos e dívida aceita detalhados em [docs/SECURITY.md](docs/SECURITY.md). Gaps **ativos** (dívida consciente, não regredir os controles existentes): sem TLS em prod (curativos `docker-compose.tls.yml` em dev e `docker-compose.deploy.yml`/Cloudflare quick tunnel — este último valida a mecânica mas a URL efêmera **não** cruza a barra; exige named tunnel + domínio), segredos em **Docker secrets** mas ainda arquivos no host (gap 0.3 fechado **parcialmente** — sem secret manager/rotação) com resíduo do `mongodb-exporter` (distroless) lendo `MONGO_*` do `.env`, keyfile MongoDB de dev no repo, TLS de transporte Redis ausente (senha trafega em claro na rede interna Docker; portas Redis/Sentinel nunca publicadas no compose base), ACLs Redis por usuário ausentes (todos os clientes compartilham `REDIS_PASSWORD`). **Fechado:** chave JWK fora do repositório (gap 0.1 — gerada por `infra/jwk/gen-keys.sh`, secret no compose; [ADR-005](docs/adr/ADR-005-chave-jwk-persistente.md)) e Grafana via secret (`__FILE`). Ao fechar um gap ou introduzir dívida, atualize `docs/SECURITY.md` e `.claude/memory/decisions.md`.
 
 ---
 

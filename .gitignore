@@ -78,3 +78,9 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+
+# Chaves de assinatura JWT (gap 0.1 RELATORIOA): geradas fora do repo via
+# infra/jwk/gen-keys.sh. Nunca versionar a chave de assinatura.
+authorization-server/src/main/resources/keys/
+# Secrets de deploy (Docker secrets montados em runtime).
+/secrets/

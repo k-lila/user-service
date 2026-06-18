@@ -1,0 +1,85 @@
+# docker-compose.deploy.yml — overlay de DEPLOY na própria máquina via Cloudflare Tunnel.
+#
+# Onda atual: QUICK TUNNEL efêmero (*.trycloudflare.com) — VALIDA a mecânica de borda
+# (TLS da Cloudflare, cookies Secure, forward-headers, roteamento). NÃO cruza a barra de
+# "deploy legítimo para usuário real": a URL muda a cada boot, então o fluxo OAuth2 ponta a
+# ponta (redirect URIs semeados no Postgres) não fecha — isso só com named tunnel + domínio.
+# Ver docs/RELATORIOA.md § "Aplicação à decisão: máquina própria + Cloudflare Tunnel".
+#
+#   Subir (a URL do quick tunnel é efêmera: a Cloudflare atribui um hostname NOVO a cada
+#   (re)start do processo cloudflared. Logo, o 2º up NÃO pode recriar o cloudflared — senão
+#   a URL muda e invalida o TUNNEL_ORIGIN que você acabou de ler. Como o cloudflared tem
+#   depends_on: gateway, um `up` que recria o gateway arrastaria o cloudflared junto):
+#     1) Boot inicial com placeholder (só p/ satisfazer o fail-fast das envs ${TUNNEL_ORIGIN:?};
+#        o cloudflared registra a URL real independentemente do valor do placeholder):
+#        export TUNNEL_ORIGIN=https://placeholder.trycloudflare.com
+#        docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
+#     2) Ler a URL pública REAL nos logs do cloudflared:
+#        docker compose -f docker-compose.yml -f docker-compose.deploy.yml logs cloudflared
+#     3) Re-subir SÓ os serviços que consomem a origem, com --no-deps (deixa o cloudflared
+#        intocado → a URL permanece estável durante a sessão):
+#        export TUNNEL_ORIGIN=https://<sub>.trycloudflare.com
+#        docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --no-deps \
+#          gateway authorization-server user-service
+#
+# Cobertura Tier 0 desta onda:
+#   0.2 TLS de borda — a Cloudflare termina TLS; cloudflared fala HTTP interno com o gateway.
+#       APP_COOKIE_SECURE + SERVER_FORWARD_HEADERS_STRATEGY ligados (cookies Secure + IP real).
+#   0.4 CORS/URLs OAuth (front-channel) apontando para a origem pública do túnel.
+# (0.1 JWK já tratado fora do compose; 0.3 secrets é tratado à parte — ver docs/RELATORIOA.md.)
+
+services:
+  # Quick tunnel efêmero: conecta à Cloudflare e roteia a borda pública → gateway:8081,
+  # sem abrir porta no roteador. Imprime a URL (*.trycloudflare.com) nos próprios logs.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    cpus: 0.25
+    mem_limit: 128m
+    networks:
+      - user-service-net
+    command: tunnel --no-autoupdate --url http://gateway:8081
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Borda do BFF. O browser enxerga HTTPS (Cloudflare) mesmo com HTTP interno, então os
+  # cookies SESSION/XSRF-TOKEN precisam do flag Secure, e o IP real do cliente chega via
+  # X-Forwarded-For do cloudflared (forward-headers=framework → rate-limit/lockout por IP real).
+  gateway:
+    environment:
+      APP_COOKIE_SECURE: "true"
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      # Origem pública do túnel (ex.: https://abc-def.trycloudflare.com). Front-channel OAuth
+      # passa pelo gateway, que faz proxy de /oauth2/** e /login → authorization-server.
+      CORS_ALLOWED_ORIGINS: ${TUNNEL_ORIGIN:?defina TUNNEL_ORIGIN com a URL do quick tunnel (ver cabeçalho)}
+      OAUTH_AUTHORIZATION_URI: ${TUNNEL_ORIGIN}/oauth2/authorize
+      OAUTH_REDIRECT_URI: ${TUNNEL_ORIGIN}/login/oauth2/code/gateway-client
+      OAUTH_END_SESSION_URI: ${TUNNEL_ORIGIN}/connect/logout
+      POST_LOGOUT_REDIRECT_URI: ${TUNNEL_ORIGIN}/
+      API_BASE_URL: ${TUNNEL_ORIGIN}
+      # AUTH_TOKEN/issuer-uri permanecem internos (back-channel do BFF) — não vão para o túnel.
+
+  # Front-channel do auth-server atrás da borda (cookie AUTHSESSION Secure + IP real no lockout).
+  authorization-server:
+    environment:
+      APP_COOKIE_SECURE: "true"
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      CORS_ALLOWED_ORIGINS_AUTH: ${TUNNEL_ORIGIN}
+      # redirect/post-logout do gateway-client semeados no Postgres. Com quick tunnel a URL é
+      # efêmera e o seed é idempotente (não reconcilia) → o LOGIN COMPLETO não fecha nesta onda;
+      # validamos a mecânica do túnel, não o fluxo OAuth2 ponta a ponta (ver RELATORIOA).
+      OAUTH_CLIENT_REDIRECT_URIS: ${TUNNEL_ORIGIN}/login/oauth2/code/gateway-client
+      OAUTH_CLIENT_POST_LOGOUT_URIS: ${TUNNEL_ORIGIN}/
+      OAUTH_GATEWAY_CLIENT: ${TUNNEL_ORIGIN}/login/oauth2/code/gateway-client
+
+  # O doc OpenAPI exibido pelo Swagger-UI (servido pelo gateway, mas agregando /v3/api-docs/user)
+  # é gerado pelo user-service. Sem API_BASE_URL apontando para o túnel, o campo servers[] cai no
+  # default http://localhost:8081 e o "Try it out" dispara para localhost → mixed content (página
+  # HTTPS → request HTTP) e "Failed to fetch". Apontar para a origem pública torna a chamada
+  # same-origin com a página do Swagger.
+  user-service:
+    environment:
+      API_BASE_URL: ${TUNNEL_ORIGIN}
+      # authorizationUrl do securityScheme OAuth2 do doc → front-channel (browser) pela borda.
+      AUTH_URL: ${TUNNEL_ORIGIN}/oauth2/authorize

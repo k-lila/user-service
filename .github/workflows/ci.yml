@@ -39,6 +39,13 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # A chave de assinatura JWT não é versionada (gap 0.1 RELATORIOA). O
+      # authorization-server precisa de um par no classpath para os testes de
+      # integração; geramos um par efêmero por run.
+      - name: Gerar chave JWK efêmera (authorization-server)
+        if: matrix.module == 'authorization-server'
+        run: bash infra/jwk/gen-keys.sh authorization-server/src/main/resources/keys
+
       - name: mvn verify (${{ matrix.module }})
         working-directory: ${{ matrix.module }}
         run: mvn -B verify

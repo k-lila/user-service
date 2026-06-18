@@ -42,9 +42,9 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 
 | Gap | Estado / mitigação atual | O que falta para prod |
 | --- | --- | --- |
-| **Sem TLS em prod** | Curativo: overlay `docker-compose.tls.yml` termina TLS na borda em **dev** (mkcert, `app.localhost`/`auth.localhost`) | Cert ACME + domínios reais; HTTPS ponta a ponta na borda |
-| **Chave JWK dev no classpath** | Aceito. Par RSA dev em `src/main/resources/keys/app.{key,pub}` (ADR-005) | Override via `JWK_*` com chave gerada/gerida fora do repo |
-| **Grafana `admin/admin`** | Curativo: externalizado para `.env` | Trocar a credencial em prod |
+| **Sem TLS em prod** | Curativo: overlay `docker-compose.tls.yml` termina TLS na borda em **dev** (mkcert, `app.localhost`/`auth.localhost`). Deploy: overlay `docker-compose.deploy.yml` (Cloudflare quick tunnel — **valida** a mecânica de borda; URL efêmera **não** cruza a barra) | Named tunnel + domínio (URL estável) ou cert ACME + domínio real |
+| **Resíduo 0.3: credencial Mongo do `mongodb-exporter` em env** | Aceito. A imagem `percona/mongodb_exporter` é distroless (sem shell) e não tem flag/`_FILE` para a URI → `MONGO_USER`/`MONGO_PASSWORD` continuam no `.env` (deve casar com `./secrets/MONGO_PASSWORD`). Único segredo fora do Docker secrets. | Imagem wrapper (multi-stage com shell) lendo a URI do secret, ou usuário Mongo de monitoramento de baixo privilégio |
+| **Grafana `admin/admin`** | Curativo: senha via Docker secret (`GF_SECURITY_ADMIN_PASSWORD__FILE`) | Trocar a credencial em prod |
 | **Keyfile MongoDB de dev no repo** | Aceito (análogo à chave JWK) | Keyfile gerado/gerido fora do repo em prod |
 | **TLS de transporte Redis ausente** | Aceito. A senha (`REDIS_PASSWORD`) protege o protocolo de comando mas trafega em claro no handshake `AUTH` na rede interna Docker. Mitigado por portas Redis/Sentinel nunca publicadas no compose base (prod-safe). | TLS no Redis (Redis 6+ `tls-port`) + rede Docker isolada em prod |
 | **ACLs por usuário Redis ausentes** | Aceito. Todos os clientes (gateway, auth-server, user-service, exporter) compartilham a mesma `REDIS_PASSWORD` sem segregação de permissões por serviço. | Criar usuários ACL dedicados por serviço com permissões mínimas (Redis 6+) |

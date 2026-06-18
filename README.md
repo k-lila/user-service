@@ -70,13 +70,32 @@ login-interface (React)
 
 ## Execução
 
+### 0. Gerar os secrets e a chave JWK (obrigatório, uma vez)
+
+A base é **secrets-native** (gap 0.3 do [RELATORIOA](docs/RELATORIOA.md), [ADR-009](docs/adr/ADR-009-base-secrets-native-docker-secrets.md)): os segredos **não** ficam no `.env`, e sim em arquivos sob `./secrets/` (gitignorado), montados em `/run/secrets/`. **Sem `./secrets/` o `docker compose up` falha.** O script gera tudo — inclusive o par de chaves JWT (gap 0.1; a chave **não** vive mais no repositório):
+
+```bash
+infra/secrets/gen-secrets.sh        # defaults de DEV (rode uma vez antes do up)
+```
+
+Em produção, exporte cada segredo com valor forte antes de gerar (ou edite os arquivos à mão):
+
+```bash
+REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen-secrets.sh
+```
+
+> Em dev **manual** (sem Docker), gere só o par JWK no classpath do auth-server:
+> `infra/jwk/gen-keys.sh authorization-server/src/main/resources/keys`.
+
 ### 1. Criar o `.env` (obrigatório)
 
-O compose não tem defaults de segredo — sem `.env` a subida falha de propósito (fail-fast):
+O `.env` guarda apenas as **identidades não-segredo** (usuários, hostnames públicos) interpoladas no compose — os segredos vêm do passo 0. Sem `.env` a subida falha de propósito (fail-fast):
 
 ```bash
 cp .env.example .env   # e preencha os valores (em dev, qualquer valor consistente serve)
 ```
+
+> **Resíduo 0.3:** o `mongodb-exporter` (imagem distroless) ainda lê `MONGO_PASSWORD` do `.env` — mantenha-o **igual** ao secret `./secrets/MONGO_PASSWORD` (ver [docs/SECURITY.md](docs/SECURITY.md)).
 
 ### 2a. Sem TLS (HTTP, modo padrão de desenvolvimento)
 
@@ -121,6 +140,26 @@ docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
 
 Acesso: **https://app.localhost** (SPA + API) · **https://auth.localhost** (front-channel OAuth2). Os cookies de sessão saem com a flag `Secure`. Ir para produção real = trocar o cert do mkcert por ACME/corporativo e os hostnames `*.localhost` por domínios reais — topologia e código não mudam.
 
+### 2c. Deploy na própria máquina via Cloudflare Tunnel
+
+Overlay `docker-compose.deploy.yml`: o `cloudflared` expõe a borda à internet sem abrir porta no roteador, e a Cloudflare termina o TLS. A onda atual usa **quick tunnel** (`*.trycloudflare.com`) — **valida** a mecânica de borda (TLS, cookies `Secure`, forward-headers, CORS), mas a URL é **efêmera** e o OAuth2 ponta a ponta não fecha (redirect URIs semeadas no Postgres não reconciliam). Cruzar a barra para usuário real exige **named tunnel + domínio fixo** (ver [docs/RELATORIOA.md](docs/RELATORIOA.md)).
+
+Como a URL só é conhecida após o `cloudflared` subir, e um novo `up` que recrie o `cloudflared` gera **outra** URL, o roteiro evita recriá-lo no 2º passo (`--no-deps`):
+
+```bash
+# 1. Boot com placeholder (satisfaz o fail-fast das envs ${TUNNEL_ORIGIN:?})
+export TUNNEL_ORIGIN=https://placeholder.trycloudflare.com
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
+
+# 2. Ler a URL pública REAL nos logs do cloudflared
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml logs cloudflared
+
+# 3. Re-subir SÓ os serviços de app com --no-deps (não recria o cloudflared → URL estável)
+export TUNNEL_ORIGIN=https://<sub>.trycloudflare.com
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --no-deps \
+  gateway authorization-server user-service
+```
+
 ---
 
 ## URLs de acesso (dev)
@@ -133,7 +172,7 @@ Acesso: **https://app.localhost** (SPA + API) · **https://auth.localhost** (fro
 | Eureka        | http://localhost:9091 · http://localhost:9092 |
 | Zipkin        | http://localhost:9411                         |
 | Prometheus    | http://localhost:9090                         |
-| Grafana       | http://localhost:3000 (credenciais do `.env`) |
+| Grafana       | http://localhost:3000 (user do `.env`, senha do secret `GRAFANA_ADMIN_PASSWORD`) |
 
 ---
 

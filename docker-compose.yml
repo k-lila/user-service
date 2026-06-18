@@ -10,6 +10,41 @@ volumes:
   mongo_3_data:
   auth_db_data:
 
+# Docker secrets (0.3 RELATORIOA): segredos fora do .env plano, montados em /run/secrets/<NOME>.
+# Gere os arquivos uma vez com `infra/secrets/gen-secrets.sh` antes do `docker compose up`
+# (./secrets/ é gitignorado). Consumo por serviço:
+#   - Spring (config/discovery/auth/user/gateway): spring.config.import=configtree:/run/secrets/
+#     (o nome do arquivo é exatamente o placeholder ${...} resolvido na config servida)
+#   - postgres / mongo: convenção nativa *_FILE da imagem oficial
+#   - redis / sentinel: command/healthcheck leem o arquivo via $(cat ...)
+#   - grafana: GF_SECURITY_ADMIN_PASSWORD__FILE ; prometheus: basic_auth.password_file
+# Resíduo consciente: o mongodb-exporter (distroless, sem shell/flag de arquivo) segue lendo
+# MONGO_USER/MONGO_PASSWORD do .env — ver docs/SECURITY.md.
+secrets:
+  CONFIG_SERVER_PASSWORD:
+    file: ./secrets/CONFIG_SERVER_PASSWORD
+  REDIS_PASSWORD:
+    file: ./secrets/REDIS_PASSWORD
+  OAUTH_CLIENT_SECRET:
+    file: ./secrets/OAUTH_CLIENT_SECRET
+  INTERNAL_API_TOKEN:
+    file: ./secrets/INTERNAL_API_TOKEN
+  POSTGRES_PASSWORD:
+    file: ./secrets/POSTGRES_PASSWORD
+  MONGO_PASSWORD:
+    file: ./secrets/MONGO_PASSWORD
+  MONGODB_URI:
+    file: ./secrets/MONGODB_URI
+  GRAFANA_ADMIN_PASSWORD:
+    file: ./secrets/GRAFANA_ADMIN_PASSWORD
+  jwk_private:
+    file: ./secrets/jwk_private
+  jwk_public:
+    file: ./secrets/jwk_public
+  # JSON {target: senha} exigido pela flag --redis.password-file do redis_exporter (multi-target).
+  redis_exporter_json:
+    file: ./secrets/redis_exporter_json
+
 services:
 
   # ──────────────────────────────────────────────
@@ -54,7 +89,10 @@ services:
     environment:
       SERVER_PORT: 8888
       CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
-      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      # CONFIG_SERVER_PASSWORD via Docker secret (configtree:/run/secrets/) — fora do .env (0.3).
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/
+    secrets:
+      - CONFIG_SERVER_PASSWORD
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
       interval: 5s
@@ -73,7 +111,9 @@ services:
     environment:
       SERVER_PORT: 8888
       CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
-      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/
+    secrets:
+      - CONFIG_SERVER_PASSWORD
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
       interval: 5s
@@ -122,9 +162,11 @@ services:
       SERVER_PORT: 9091
       CONFIG_SERVER_URL: http://config-lb:8888
       CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
-      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/,optional:configserver:http://config-lb:8888
       EUREKA_HOSTNAME: discovery-server-1
       EUREKA_PEER_URL: http://discovery-server-2:9092/eureka
+    secrets:
+      - CONFIG_SERVER_PASSWORD
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/actuator/health"]
       interval: 5s
@@ -148,9 +190,11 @@ services:
       SERVER_PORT: 9092
       CONFIG_SERVER_URL: http://config-lb:8888
       CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
-      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/,optional:configserver:http://config-lb:8888
       EUREKA_HOSTNAME: discovery-server-2
       EUREKA_PEER_URL: http://discovery-server-1:9091/eureka
+    secrets:
+      - CONFIG_SERVER_PASSWORD
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9092/actuator/health"]
       interval: 5s
@@ -179,7 +223,10 @@ services:
       - mongo_1_data:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      # Senha via Docker secret (convenção *_FILE nativa da imagem mongo) — fora do .env (0.3).
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/MONGO_PASSWORD
+    secrets:
+      - MONGO_PASSWORD
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
       interval: 5s
@@ -242,24 +289,21 @@ services:
         condition: service_healthy
       mongo-3:
         condition: service_healthy
-    command: >
-      mongosh --host mongo-1:27017
-              -u ${MONGO_USER} -p ${MONGO_PASSWORD}
-              --authenticationDatabase admin
-              --eval "try {
-                rs.initiate({
-                  _id: 'rs0',
-                  members: [
-                    {_id: 0, host: 'mongo-1:27017'},
-                    {_id: 1, host: 'mongo-2:27017'},
-                    {_id: 2, host: 'mongo-3:27017'}
-                  ]
-                });
-                print('Replica set iniciado');
-              } catch(e) {
-                if (e.codeName === 'AlreadyInitialized') print('Replica set ja iniciado');
-                else throw e;
-              }"
+    secrets:
+      - MONGO_PASSWORD
+    # Senha lida do secret em runtime ($$ → $ no container). Usuário (não-segredo) vem do .env.
+    entrypoint:
+      - bash
+      - -c
+    # Folded scalar (>): TODAS as linhas com a MESMA indentação que `mongosh` — assim o YAML
+    # dobra as quebras em espaços e o bash -c recebe UM comando só (linha mais indentada vira
+    # newline literal e quebraria a invocação em comandos soltos).
+    command:
+      - >
+        mongosh --host mongo-1:27017
+        -u ${MONGO_USER} -p "$$(cat /run/secrets/MONGO_PASSWORD)"
+        --authenticationDatabase admin
+        --eval "try { rs.initiate({ _id: 'rs0', members: [ {_id: 0, host: 'mongo-1:27017'}, {_id: 1, host: 'mongo-2:27017'}, {_id: 2, host: 'mongo-3:27017'} ] }); print('Replica set iniciado'); } catch(e) { if (e.codeName === 'AlreadyInitialized') print('Replica set ja iniciado'); else throw e; }"
     restart: on-failure
 
   # ──────────────────────────────────────────────
@@ -276,14 +320,15 @@ services:
     # requirepass: autenticação de clientes (Spring, redis-cli, exporter).
     # masterauth: autenticação de réplicas → master (e do master pós-failover ao reintegrar como réplica).
     # Ambas obrigatórias em TODOS os nós: sem masterauth no master atual, após um failover ele não
-    # consegue reintegrar como réplica (PSYNC NOAUTH silencioso).
-    command: redis-server --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
-    environment:
-      # REDIS_PASSWORD disponível no env do container para o healthcheck (REDISCLI_AUTH).
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+    # consegue reintegrar como réplica (PSYNC NOAUTH silencioso). Senha lida do secret ($$ → $).
+    entrypoint: ["sh", "-c"]
+    command:
+      - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)"
+    secrets:
+      - REDIS_PASSWORD
     healthcheck:
       # REDISCLI_AUTH é honrado pelo redis-cli 7 (data node e sentinel), evitando NOAUTH no ping.
-      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$(cat /run/secrets/REDIS_PASSWORD) redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 25
@@ -296,14 +341,16 @@ services:
     mem_reservation: 64m
     networks:
       - user-service-net
-    command: redis-server --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD} --replicaof redis-1 6379
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+    entrypoint: ["sh", "-c"]
+    command:
+      - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)" --replicaof redis-1 6379
+    secrets:
+      - REDIS_PASSWORD
     depends_on:
       redis-1:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$(cat /run/secrets/REDIS_PASSWORD) redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 25
@@ -316,14 +363,16 @@ services:
     mem_reservation: 64m
     networks:
       - user-service-net
-    command: redis-server --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD} --replicaof redis-1 6379
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+    entrypoint: ["sh", "-c"]
+    command:
+      - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)" --replicaof redis-1 6379
+    secrets:
+      - REDIS_PASSWORD
     depends_on:
       redis-1:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$(cat /run/secrets/REDIS_PASSWORD) redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 25
@@ -338,15 +387,16 @@ services:
     # Padrão copy-to-/tmp (invariante — sentinel regrava o arquivo em runtime):
     # 1. Copia o conf :ro para /tmp/sentinel.conf (gravável pelo sentinel).
     # 2. Injeta requirepass (autenticação de clientes ao sentinel) e sentinel auth-pass
-    #    (autenticação do sentinel ao data node monitorado) via echo — segredos nunca
-    #    ficam no arquivo versionado.
-    command: >
-      sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf &&
-             echo 'requirepass '$$REDIS_PASSWORD >> /tmp/sentinel.conf &&
-             echo 'sentinel auth-pass mymaster '$$REDIS_PASSWORD >> /tmp/sentinel.conf &&
-             exec redis-sentinel /tmp/sentinel.conf"
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+    #    (autenticação do sentinel ao data node monitorado), lidos do Docker secret ($$ → $).
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        cp /etc/redis/sentinel.conf /tmp/sentinel.conf &&
+        echo "requirepass $$(cat /run/secrets/REDIS_PASSWORD)" >> /tmp/sentinel.conf &&
+        echo "sentinel auth-pass mymaster $$(cat /run/secrets/REDIS_PASSWORD)" >> /tmp/sentinel.conf &&
+        exec redis-sentinel /tmp/sentinel.conf
+    secrets:
+      - REDIS_PASSWORD
     volumes:
       - ./infra/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
     depends_on:
@@ -357,7 +407,7 @@ services:
       redis-3:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli -p 26379 ping | grep -q PONG"]
+      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$(cat /run/secrets/REDIS_PASSWORD) redis-cli -p 26379 ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 25
@@ -369,13 +419,15 @@ services:
     mem_limit: 128m
     networks:
       - user-service-net
-    command: >
-      sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf &&
-             echo 'requirepass '$$REDIS_PASSWORD >> /tmp/sentinel.conf &&
-             echo 'sentinel auth-pass mymaster '$$REDIS_PASSWORD >> /tmp/sentinel.conf &&
-             exec redis-sentinel /tmp/sentinel.conf"
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        cp /etc/redis/sentinel.conf /tmp/sentinel.conf &&
+        echo "requirepass $$(cat /run/secrets/REDIS_PASSWORD)" >> /tmp/sentinel.conf &&
+        echo "sentinel auth-pass mymaster $$(cat /run/secrets/REDIS_PASSWORD)" >> /tmp/sentinel.conf &&
+        exec redis-sentinel /tmp/sentinel.conf
+    secrets:
+      - REDIS_PASSWORD
     volumes:
       - ./infra/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
     depends_on:
@@ -386,7 +438,7 @@ services:
       redis-3:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli -p 26379 ping | grep -q PONG"]
+      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$(cat /run/secrets/REDIS_PASSWORD) redis-cli -p 26379 ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 25
@@ -398,13 +450,15 @@ services:
     mem_limit: 128m
     networks:
       - user-service-net
-    command: >
-      sh -c "cp /etc/redis/sentinel.conf /tmp/sentinel.conf &&
-             echo 'requirepass '$$REDIS_PASSWORD >> /tmp/sentinel.conf &&
-             echo 'sentinel auth-pass mymaster '$$REDIS_PASSWORD >> /tmp/sentinel.conf &&
-             exec redis-sentinel /tmp/sentinel.conf"
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        cp /etc/redis/sentinel.conf /tmp/sentinel.conf &&
+        echo "requirepass $$(cat /run/secrets/REDIS_PASSWORD)" >> /tmp/sentinel.conf &&
+        echo "sentinel auth-pass mymaster $$(cat /run/secrets/REDIS_PASSWORD)" >> /tmp/sentinel.conf &&
+        exec redis-sentinel /tmp/sentinel.conf
+    secrets:
+      - REDIS_PASSWORD
     volumes:
       - ./infra/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
     depends_on:
@@ -415,7 +469,7 @@ services:
       redis-3:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli -p 26379 ping | grep -q PONG"]
+      test: ["CMD", "sh", "-c", "REDISCLI_AUTH=$$(cat /run/secrets/REDIS_PASSWORD) redis-cli -p 26379 ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 25
@@ -437,7 +491,10 @@ services:
     environment:
       POSTGRES_DB: authdb
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Senha via Docker secret (convenção *_FILE nativa da imagem postgres) — fora do .env (0.3).
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
+    secrets:
+      - POSTGRES_PASSWORD
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d authdb"]
       interval: 5s
@@ -478,26 +535,37 @@ services:
       SERVER_PORT: 8082
       CONFIG_SERVER_URL: http://config-lb:8888
       CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
-      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      # configtree:/run/secrets/ injeta os segredos (CONFIG_SERVER_PASSWORD, OAUTH_CLIENT_SECRET,
+      # INTERNAL_API_TOKEN, REDIS_PASSWORD, AUTH_DB_PASSWORD) na config servida — fora do .env (0.3).
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/,optional:configserver:http://config-lb:8888
       EUREKA_URI: http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka
       MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       OAUTH_GATEWAY_CLIENT: ${OAUTH_GATEWAY_CLIENT:-http://localhost:8081/login/oauth2/code/gateway-client}
       OAUTH_SWAGGER_REDIRECT_URL: ${OAUTH_SWAGGER_REDIRECT_URL:-http://localhost:8081/swagger-ui/oauth2-redirect.html}
       CORS_ALLOWED_ORIGINS_AUTH: ${CORS_ALLOWED_ORIGINS_AUTH:-http://localhost:8081}
       AUTH_ISSUER: http://authorization-server:8082
-      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       # redirectUri/postLogoutRedirectUri semeados no gateway-client (OAuth2ClientConfig).
       # Em prod, aponte para o domínio público real (CSV). Trocar exige re-seed do
       # gateway-client no Postgres — o seed é idempotente, não reconcilia cliente existente.
       OAUTH_CLIENT_REDIRECT_URIS: ${OAUTH_CLIENT_REDIRECT_URIS:-http://localhost:8081/login/oauth2/code/gateway-client,http://localhost:5173/login/oauth2/code/gateway-client,https://app.localhost/login/oauth2/code/gateway-client,http://localhost:8081/swagger-ui/oauth2-redirect.html,https://oauth.pstmn.io/v1/callback}
       OAUTH_CLIENT_POST_LOGOUT_URIS: ${OAUTH_CLIENT_POST_LOGOUT_URIS:-http://localhost:5173/,https://app.localhost/}
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
       AUTH_DB_URL: jdbc:postgresql://auth-postgres:5432/authdb
       AUTH_DB_USER: ${POSTGRES_USER}
-      AUTH_DB_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_SENTINEL_MASTER: mymaster
       REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+      # Chave de assinatura JWT via Docker secret (0.1) — fora do repo e do .env.
+      JWK_PRIVATE_KEY: file:/run/secrets/jwk_private
+      JWK_PUBLIC_KEY: file:/run/secrets/jwk_public
+    secrets:
+      - CONFIG_SERVER_PASSWORD
+      - OAUTH_CLIENT_SECRET
+      - INTERNAL_API_TOKEN
+      - REDIS_PASSWORD
+      # A senha do Postgres entra com o nome do placeholder do auth-server (AUTH_DB_PASSWORD).
+      - source: POSTGRES_PASSWORD
+        target: AUTH_DB_PASSWORD
+      - jwk_private
+      - jwk_public
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
       interval: 5s
@@ -540,10 +608,11 @@ services:
       SERVER_PORT: 8090
       CONFIG_SERVER_URL: http://config-lb:8888
       CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
-      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      # configtree:/run/secrets/ injeta CONFIG_SERVER_PASSWORD, REDIS_PASSWORD, INTERNAL_API_TOKEN
+      # e MONGODB_URI (URI completa com credencial) na config servida — fora do .env (0.3).
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/,optional:configserver:http://config-lb:8888
       EUREKA_URI: http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka
       MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
-      MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin
       MONGODB_DATABASE: user-db
       AUTH_ISSUER_URI: http://authorization-server:8082
       AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
@@ -551,8 +620,11 @@ services:
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
       REDIS_SENTINEL_MASTER: mymaster
       REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+    secrets:
+      - CONFIG_SERVER_PASSWORD
+      - REDIS_PASSWORD
+      - INTERNAL_API_TOKEN
+      - MONGODB_URI
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
       interval: 5s
@@ -591,7 +663,9 @@ services:
       SERVER_PORT: 8081
       CONFIG_SERVER_URL: http://config-lb:8888
       CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
-      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      # configtree:/run/secrets/ injeta CONFIG_SERVER_PASSWORD, OAUTH_CLIENT_SECRET e REDIS_PASSWORD
+      # na config servida — fora do .env (0.3).
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/,optional:configserver:http://config-lb:8888
       EUREKA_URI: http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka
       MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       AUTH_ISSUER_URI: http://authorization-server:8082
@@ -599,7 +673,6 @@ services:
       OAUTH2SWAGGER_REDIRECT_URL: ${OAUTH2SWAGGER_REDIRECT_URL:-http://localhost:8081/swagger-ui/oauth2-redirect.html}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       OAUTH_CLIENT_ID: gateway-client
-      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-http://localhost:5173/login/oauth2/code/gateway-client}
       # RP-Initiated Logout (lidos em gateway SecurityConfig via @Value). Em prod, hostnames
       # públicos reais — sem isto, o logout front-channel volta a localhost.
@@ -610,7 +683,10 @@ services:
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
       REDIS_SENTINEL_MASTER: mymaster
       REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+    secrets:
+      - CONFIG_SERVER_PASSWORD
+      - OAUTH_CLIENT_SECRET
+      - REDIS_PASSWORD
     healthcheck:
       # Actuator do gateway vive na porta de management interna (8181), não na 8081 pública.
       test: ["CMD", "curl", "-f", "http://localhost:8181/actuator/health"]
@@ -646,6 +722,8 @@ services:
     networks:
       - user-service-net
     # Sem ports: em prod — exporters só na rede interna. Republicado em dev no override se necessário.
+    # RESÍDUO 0.3: imagem distroless (sem shell) e sem flag de arquivo para a URI → a credencial
+    # do Mongo continua vindo do ambiente (MONGO_USER/MONGO_PASSWORD do .env). Dívida em SECURITY.md.
     environment:
       MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo-1:27017/?replicaSet=rs0&authSource=admin
     command:
@@ -669,8 +747,13 @@ services:
     networks:
       - user-service-net
     # Sem ports: em prod — exporters só na rede interna.
-    environment:
-      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@auth-postgres:5432/authdb?sslmode=disable
+    # A imagem tem shell: monta o DATA_SOURCE_NAME lendo a senha do Docker secret ($$ → $) e
+    # exec o binário — credencial fora do .env (0.3). Usuário (não-segredo) vem do .env.
+    entrypoint: ["sh", "-c"]
+    command:
+      - export DATA_SOURCE_NAME="postgresql://${POSTGRES_USER}:$$(cat /run/secrets/POSTGRES_PASSWORD)@auth-postgres:5432/authdb?sslmode=disable" && exec /bin/postgres_exporter
+    secrets:
+      - POSTGRES_PASSWORD
     depends_on:
       auth-postgres:
         condition: service_healthy
@@ -684,11 +767,13 @@ services:
       - user-service-net
     # Sem ports: em prod — exporters só na rede interna.
     # Modo multi-target: REDIS_ADDR não definido; o alvo concreto vem do Prometheus via ?target=.
-    # REDIS_PASSWORD: env var nativa da imagem oliver006/redis_exporter v1.62.0 para autenticação
-    # global (verificado empiricamente contra v1.62.0 — não segue o prefixo REDIS_EXPORTER_).
-    # Autentica nos 6 alvos (3 data nodes + 3 sentinels) com a senha uniforme.
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD obrigatório — defina no .env}
+    # --redis.password-file espera um JSON {target: senha}, não a senha crua — por isso o secret
+    # dedicado redis_exporter_json (gen-secrets.sh) mapeia os 6 alvos à REDIS_PASSWORD uniforme,
+    # mantendo a credencial fora do .env (0.3).
+    command:
+      - --redis.password-file=/run/secrets/redis_exporter_json
+    secrets:
+      - redis_exporter_json
     depends_on:
       redis-1:
         condition: service_healthy
@@ -709,6 +794,9 @@ services:
     # Sem ports: em prod — métricas só na rede interna (G2/G6). Republicado em dev no override.
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
+    # basic_auth do scrape do config-server lê a senha do Docker secret (password_file) — 0.3.
+    secrets:
+      - CONFIG_SERVER_PASSWORD
     depends_on:
       - gateway
       - user-service
@@ -732,7 +820,10 @@ services:
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
+    # Senha do admin via Docker secret (convenção __FILE nativa do Grafana) — fora do .env (0.3).
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/GRAFANA_ADMIN_PASSWORD
+    secrets:
+      - GRAFANA_ADMIN_PASSWORD
     restart: unless-stopped

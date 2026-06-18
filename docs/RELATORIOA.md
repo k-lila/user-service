@@ -65,10 +65,10 @@ entram na barra porque nascem com o dado.
 ## Definição de "deploy legítimo" (checklist de corte)
 
 ```
-[ ] 0.1  JWK fora do repo (+ chave atual rotacionada/tratada como comprometida)
-[ ] 0.2  TLS de borda real (ACME) + cookies Secure
-[ ] 0.3  Segredos em secret manager (fora de arquivo plano)
-[ ] 0.4  CORS/origens reais, zero localhost
+[x] 0.1  JWK fora do repo (+ chave atual rotacionada/tratada como comprometida)   ← FECHADO (2026-06-17)
+[~] 0.2  TLS de borda real (ACME) + cookies Secure                                ← PARCIAL (quick tunnel valida; falta named tunnel + domínio)
+[~] 0.3  Segredos em secret manager (fora de arquivo plano)                       ← PARCIAL (Docker secrets; ainda arquivo no host)
+[~] 0.4  CORS/origens reais, zero localhost                                       ← PARCIAL (via env; efêmero no quick tunnel)
 [ ] 1.1  Backup Mongo+Postgres com restore testado
 [ ] 1.2  forward-headers + XFF sanitizado (lockout/rate-limit reais)
 [ ] 1.3  Reset de senha (RELATORIOB.md)
@@ -139,3 +139,28 @@ Named tunnel + domínio no Cloudflare — DESTRAVA a barra (0.2 + 0.4 reais):
 
 A leitura prática: **comece pelo quick tunnel para provar o túnel**, mas só declare a barra
 de legitimidade cumprida (itens 0.2/0.4) **com o named tunnel + domínio**.
+
+### Estado atual da execução (2026-06-17)
+
+O que a branch `deploy-a` efetivamente entregou contra o Tier 0 (o detalhamento técnico está em
+`.claude/memory/decisions.md` e nos ADRs citados):
+
+- **0.1 JWK — ✅ FECHADO.** A chave de assinatura saiu do versionamento: gerada fora do repo por
+  `infra/jwk/gen-keys.sh` (PKCS#8 + X.509), `keys/` no `.gitignore`, o CI gera um par efêmero por
+  run, e a chave dev antiga foi rotacionada (tratada como comprometida/inerte). Na base
+  secrets-native vira Docker secret (`jwk_private`/`jwk_public`). Formalizado em [ADR-005](adr/ADR-005-chave-jwk-persistente.md).
+- **0.3 Segredos — 🟡 PARCIAL (por design).** A base `docker-compose.yml` é agora **secrets-native**
+  (Docker secrets via `gen-secrets.sh`, [ADR-009](adr/ADR-009-base-secrets-native-docker-secrets.md)):
+  tira o segredo do `.env` plano, mas em Compose sem Swarm continuam **arquivos no host** (sem
+  secret manager gerenciado nem rotação). Resíduo: o `mongodb-exporter` (distroless) ainda lê
+  `MONGO_*` do `.env`. Cruzar a barra real = Vault / Secret Manager gerenciado.
+- **0.2 / 0.4 Borda — 🟡 PARCIAL.** O overlay `docker-compose.deploy.yml` (Cloudflare **quick
+  tunnel**) **valida a mecânica** de borda (TLS da Cloudflare, `APP_COOKIE_SECURE=true`,
+  `SERVER_FORWARD_HEADERS_STRATEGY=framework`, CORS/URLs via `${TUNNEL_ORIGIN}`). Validado
+  manualmente: registro de usuário e Swagger funcionam pela URL pública; o botão **Authorize**
+  redireciona mas o **OAuth2 ponta a ponta não fecha** (URL efêmera + redirect URIs idempotentes no
+  Postgres). **Não cruza a barra** — exige **named tunnel + domínio fixo**.
+
+**Resumo:** o único item *perigoso agora* (0.1) está resolvido. O que resta do Tier 0 —
+0.2/0.4 (named tunnel + domínio) e o fechamento pleno do 0.3 (secret manager) — é a barra para
+"deploy legítimo para usuário real".

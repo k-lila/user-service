@@ -7,6 +7,14 @@
 > ADR retroativo: a decisão já está implementada e em produção no blueprint; este
 > registro a formaliza para dar rastreabilidade.
 
+> **Atualização (2026-06-17, gap 0.1 RELATORIOA fechado):** a chave de assinatura **não vive
+> mais no repositório**. É gerada fora do versionamento por `infra/jwk/gen-keys.sh` (PKCS#8 +
+> X.509); `authorization-server/src/main/resources/keys/` está no `.gitignore`; o CI gera um par
+> efêmero por run; a chave dev antiga foi rotacionada e é tratada como comprometida/inerte. Na
+> base secrets-native ([[ADR-009]]) o par é Docker secret (`jwk_private`/`jwk_public`, via
+> `JWK_PRIVATE_KEY=file:/run/secrets/jwk_private`). A decisão de **par fixo com `kid` estável**
+> abaixo permanece inalterada — só mudou a **origem** das chaves (fora do repo, não no classpath).
+
 ## Contexto
 
 O authorization-server assina os JWTs (access tokens / OIDC id tokens) com uma chave RSA e
@@ -48,9 +56,10 @@ Sem mudança de contrato de API (o formato do JWT e do JWKS é o padrão OIDC).
 - O `kid` estável permite cache de JWKS eficiente nos resource servers.
 
 **Negativas / atenção:**
-- A **chave de dev vive no repositório** (`keys/app.{key,pub}`) — gap aceito, nomeado em
-  `CLAUDE.md` §"Gaps de Segurança Conhecidos". **Nunca** usar em produção; o blueprint
-  apenas garante que seja parametrizável (`JWK_*`), não resolvido.
+- ~~A **chave de dev vive no repositório** (`keys/app.{key,pub}`)~~ — **resolvido (2026-06-17,
+  gap 0.1):** a chave não é mais versionada; é gerada fora do repo por `infra/jwk/gen-keys.sh` e
+  o diretório `keys/` está no `.gitignore` (ver nota de atualização no topo e [[ADR-009]]). Em
+  produção, montar via `JWK_*` (PEM como Docker secret).
 - Sem rotação automática: trocar a chave exige operação manual e convivência temporária com
   o `kid` antigo no JWKS se houver tokens em voo (não implementado — rotação é exercício do
   consumidor).
