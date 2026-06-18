@@ -45,6 +45,13 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   auth-server, user-service) autenticam via `spring.data.redis.password` (data nodes) e
   `spring.data.redis.sentinel.password` (sentinels). O `redis-exporter` autentica com
   `REDIS_PASSWORD` nos 6 alvos do modo multi-target.
+- **Gate de e-mail verificado no login (dormente):** `AuthorizationService.loadUserByUsername`
+  mapeia `AuthDTO.emailVerified` para o flag `enabled` do `UserDetails` — `emailVerified=false`
+  bloquearia o login via `DisabledException`, antes mesmo da checagem de senha. Hoje é
+  **inerte na prática**: sem fluxo de verificação de e-mail implementado, `registerUser`
+  sempre seta `emailVerified=true` e `null` (legado) também é tratado como verificado. O
+  mecanismo de bloqueio já existe e está testado — falta só o fluxo que produz `false` (envio
+  de e-mail + endpoint de confirmação) para ativá-lo de fato.
 - **Trilha de auditoria de dado pessoal (ADR-011, LGPD):** coleção Mongo
   `auditLogs` (user-service) registra *quem acessou/alterou/apagou qual dado de qual titular,
   quando* — **distinta** do log operacional SLF4J. Cobre mutações (register/update/soft+hard

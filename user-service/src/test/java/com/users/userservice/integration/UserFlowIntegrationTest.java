@@ -64,6 +64,8 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         // Consentimento LGPD persistido no cadastro (aceite versionado com timestamp).
         assertNotNull(encontrado.getConsentAcceptedAt());
         assertEquals("v1", encontrado.getTermsVersion());
+        assertTrue(encontrado.getEmailVerified());
+        assertNotNull(encontrado.getEmailVerifiedAt());
     }
 
     @Test

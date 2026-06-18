@@ -1,5 +1,7 @@
 package com.users.userservice.dtos;
 
+import java.util.List;
+
 import com.users.userservice.domain.User;
 
 import lombok.Getter;
@@ -15,6 +17,9 @@ public class UserResponseDTO {
     Boolean active;
     String consentAcceptedAt;
     String termsVersion;
+    List<String> tenantIds;
+    Boolean emailVerified;
+    String emailVerifiedAt;
 
     public static UserResponseDTO toResponseDTO(User user) {
         UserResponseDTO userResponseDTO = new UserResponseDTO();
@@ -28,6 +33,12 @@ public class UserResponseDTO {
             userResponseDTO.setConsentAcceptedAt(user.getConsentAcceptedAt().toString());
         }
         userResponseDTO.setTermsVersion(user.getTermsVersion());
+        userResponseDTO.setTenantIds(user.getTenantIds());
+        // emailVerified nulo (legado, anterior ao campo) é tratado como verificado.
+        userResponseDTO.setEmailVerified(!Boolean.FALSE.equals(user.getEmailVerified()));
+        if (user.getEmailVerifiedAt() != null) {
+            userResponseDTO.setEmailVerifiedAt(user.getEmailVerifiedAt().toString());
+        }
         return userResponseDTO;
     }
 

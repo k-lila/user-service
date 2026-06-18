@@ -60,6 +60,10 @@ public class RegisterService {
         // Consentimento LGPD registrado no cadastro (aceite versionado com timestamp).
         user.setConsentAcceptedAt(Instant.now());
         user.setTermsVersion(termsVersion);
+        // Sem fluxo de verificação de e-mail ainda — default true não bloqueia o cadastro.
+        user.setEmailVerified(true);
+        user.setEmailVerifiedAt(Instant.now());
+        // tenantIds fica null — atribuição de tenant é feature futura.
         User registered;
         try {
             registered = userRepository.insert(user);

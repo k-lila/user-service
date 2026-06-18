@@ -137,4 +137,38 @@ class AuthorizationServiceTest {
 
         assertTrue(result.isAccountNonLocked());
     }
+
+    @Test
+    void deveDesabilitarConta_quandoEmailNaoVerificado() {
+        AuthDTO dto = buildAuthDTO("fulano@email.com", true, Set.of("USER"));
+        dto.setEmailVerified(false);
+        when(userClient.getUserByEmail("fulano@email.com")).thenReturn(dto);
+
+        UserDetails result = service.loadUserByUsername("fulano@email.com");
+
+        // enabled=false → DaoAuthenticationProvider lança DisabledException antes da senha.
+        assertFalse(result.isEnabled());
+    }
+
+    @Test
+    void deveManterContaHabilitada_quandoEmailVerificado() {
+        AuthDTO dto = buildAuthDTO("fulano@email.com", true, Set.of("USER"));
+        dto.setEmailVerified(true);
+        when(userClient.getUserByEmail("fulano@email.com")).thenReturn(dto);
+
+        UserDetails result = service.loadUserByUsername("fulano@email.com");
+
+        assertTrue(result.isEnabled());
+    }
+
+    @Test
+    void deveManterContaHabilitada_quandoEmailVerifiedNuloLegado() {
+        AuthDTO dto = buildAuthDTO("fulano@email.com", true, Set.of("USER"));
+        dto.setEmailVerified(null);
+        when(userClient.getUserByEmail("fulano@email.com")).thenReturn(dto);
+
+        UserDetails result = service.loadUserByUsername("fulano@email.com");
+
+        assertTrue(result.isEnabled());
+    }
 }

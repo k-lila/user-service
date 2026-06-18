@@ -48,6 +48,7 @@ class InternalUserControllerTest {
         dto.setPasswordHash("$2a$10$hashed");
         dto.setActive(true);
         dto.setRoles(Set.of("USER"));
+        dto.setEmailVerified(true);
         return dto;
     }
 
@@ -60,9 +61,22 @@ class InternalUserControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("fulano@email.com"))
                 .andExpect(jsonPath("$.passwordHash").value("$2a$10$hashed"))
-                .andExpect(jsonPath("$.active").value(true));
+                .andExpect(jsonPath("$.active").value(true))
+                .andExpect(jsonPath("$.emailVerified").value(true));
 
         verify(auditService).recordSystem(AuditAction.READ_INTERNAL_CREDENTIAL, "user-id-123", "fulano@email.com");
+    }
+
+    @Test
+    void findByEmail_deveRetornarEmailVerifiedFalse_quandoUsuarioComEmailNaoVerificado() throws Exception {
+        AuthDTO dto = buildAuthDTO();
+        dto.setEmailVerified(false);
+        when(authenticationService.getUserByEmail("fulano@email.com")).thenReturn(dto);
+
+        mockMvc.perform(get("/internal/users/email/{email}", "fulano@email.com")
+                        .header("X-Internal-Token", INTERNAL_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.emailVerified").value(false));
     }
 
     @Test

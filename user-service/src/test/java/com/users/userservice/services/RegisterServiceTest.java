@@ -305,4 +305,42 @@ class RegisterServiceTest {
 
         verify(cacheService).evictByEmailAuth("fulano@email.com");
     }
+
+    @Test
+    void deveMarcarEmailVerificado_quandoRegistro() {
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Fulano");
+        dto.setEmail("fulano@email.com");
+        dto.setPassword("senha123");
+
+        when(userRepository.findByEmail("fulano@email.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("senha123")).thenReturn("$2a$10$hashed");
+        when(userRepository.insert(any(User.class))).thenReturn(buildUser("id-1", "fulano@email.com", true));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        service.registerUser(dto);
+
+        verify(userRepository).insert(captor.capture());
+        User inserido = captor.getValue();
+        assertTrue(inserido.getEmailVerified());
+        assertNotNull(inserido.getEmailVerifiedAt());
+    }
+
+    @Test
+    void deveDeixarTenantIdsNulo_quandoRegistro() {
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Fulano");
+        dto.setEmail("fulano@email.com");
+        dto.setPassword("senha123");
+
+        when(userRepository.findByEmail("fulano@email.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("senha123")).thenReturn("$2a$10$hashed");
+        when(userRepository.insert(any(User.class))).thenReturn(buildUser("id-1", "fulano@email.com", true));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        service.registerUser(dto);
+
+        verify(userRepository).insert(captor.capture());
+        assertNull(captor.getValue().getTenantIds());
+    }
 }

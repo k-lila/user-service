@@ -65,9 +65,17 @@ soft-deleted (`active=false`):
   "registrationDate": "2026-06-08T14:32:10.123",
   "active": true,
   "consentAcceptedAt": "2026-06-08T14:32:10.123",
-  "termsVersion": "v1"
+  "termsVersion": "v1",
+  "tenantIds": null,
+  "emailVerified": true,
+  "emailVerifiedAt": "2026-06-08T14:32:10.123"
 }
 ```
+
+`tenantIds` é reservado para uma feature futura de multi-tenant (sempre `null` hoje —
+`registerUser` não atribui tenant). `emailVerified`/`emailVerifiedAt` também são scaffold:
+sem fluxo de verificação de e-mail implementado, `registerUser` sempre seta
+`emailVerified=true`; `null` (registros legados) é tratado como verificado em toda leitura.
 
 ## Claims do JWT
 
@@ -102,7 +110,11 @@ O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims
   roles: [String],       // ex: ["USER"], ["USER", "ADMIN"]
   active: Boolean,
   consentAcceptedAt: ISODate, // consentimento LGPD no cadastro (ADR-012); nullable p/ legados
-  termsVersion: String        // versão dos termos aceita (ex: "v1"); nullable p/ legados
+  termsVersion: String,       // versão dos termos aceita (ex: "v1"); nullable p/ legados
+  tenantIds: [String],        // reservado p/ multi-tenant futuro; sempre null hoje (sem atribuição)
+  emailVerified: Boolean,     // scaffold sem fluxo de verificação; registerUser sempre seta true;
+                               //   null (legado) tratado como true em toda leitura
+  emailVerifiedAt: ISODate    // nullable; sem fluxo de verificação implementado
 }
 ```
 

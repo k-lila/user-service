@@ -238,7 +238,7 @@ Dois pontos não óbvios na integração do `gateway`:
 
 **Stack:** Vitest 4 + React Testing Library + @testing-library/user-event + @testing-library/jest-dom + MSW (modo node). Ambiente jsdom. `vitest.config.ts` separado do `vite.config.ts` — o React Compiler/babel do build de produção não é carregado nos testes.
 
-**39 testes em 14 arquivos**, cobertura 100% nas classes cobertas, threshold 80% configurado (lines/functions/branches/statements).
+**40 testes em 14 arquivos**, cobertura 100% nas classes cobertas, threshold 80% configurado (lines/functions/branches/statements).
 
 **Infra de teste** em `src/test/`: `setup.ts` (ciclo de vida MSW server + limpeza de cookie/mocks entre testes), `server.ts`, `handlers.ts` (handlers default `GET /v1/users/me` e `POST /v1/users/register`), `utils.tsx` (`renderWithProviders` com QueryClient isolado por teste + MemoryRouter).
 

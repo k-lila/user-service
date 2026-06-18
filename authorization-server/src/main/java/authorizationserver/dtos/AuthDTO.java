@@ -13,4 +13,5 @@ public class AuthDTO {
     String passwordHash;
     Boolean active;
     Set<String> roles;
+    Boolean emailVerified;
 }

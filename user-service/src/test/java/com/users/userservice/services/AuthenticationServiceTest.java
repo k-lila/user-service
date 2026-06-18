@@ -67,4 +67,40 @@ class AuthenticationServiceTest {
 
         assertThrows(DomainEntityNotFound.class, () -> service.getUserByEmail("inativo@email.com"));
     }
+
+    @Test
+    void deveRetornarEmailVerifiedTrue_quandoUsuarioComEmailVerificado() {
+        User user = buildUser("id-1", "fulano@email.com", true);
+        user.setEmailVerified(true);
+
+        when(userRepository.findByEmail("fulano@email.com")).thenReturn(Optional.of(user));
+
+        AuthDTO result = service.getUserByEmail("fulano@email.com");
+
+        assertTrue(result.getEmailVerified());
+    }
+
+    @Test
+    void deveRetornarEmailVerifiedTrue_quandoUsuarioLegadoComEmailVerifiedNulo() {
+        User user = buildUser("id-1", "fulano@email.com", true);
+        user.setEmailVerified(null);
+
+        when(userRepository.findByEmail("fulano@email.com")).thenReturn(Optional.of(user));
+
+        AuthDTO result = service.getUserByEmail("fulano@email.com");
+
+        assertTrue(result.getEmailVerified());
+    }
+
+    @Test
+    void deveRetornarEmailVerifiedFalse_quandoUsuarioComEmailNaoVerificado() {
+        User user = buildUser("id-1", "fulano@email.com", true);
+        user.setEmailVerified(false);
+
+        when(userRepository.findByEmail("fulano@email.com")).thenReturn(Optional.of(user));
+
+        AuthDTO result = service.getUserByEmail("fulano@email.com");
+
+        assertFalse(result.getEmailVerified());
+    }
 }
