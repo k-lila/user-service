@@ -142,8 +142,8 @@ Isto é **mudança de schema + contrato de auth + (talvez) novo serviço** → n
 ## Aplicação à decisão: máquina própria + Cloudflare Tunnel
 
 > Decisão tomada: deploy na **própria máquina** via **Cloudflare Tunnel** (quick tunnel
-> efêmero como ponto de partida). O Relatório B é **pós-barra** — vem depois do Tier 0/1 do
-> [RELATORIOA.md](RELATORIOA.md). Esta seção registra só o que a decisão de host impõe ao
+> efêmero como ponto de partida). O Relatório B é **pós-barra** — vem depois do Tier 0/1 de
+> hardening de borda/segredos (ver [SECURITY.md](SECURITY.md)). Esta seção registra só o que a decisão de host impõe ao
 > ciclo de vida da conta; o modelo de dados e os fluxos acima **não mudam** por causa dela.
 
 1. **SMTP exige relay autenticado (não envio direto).** IP residencial é bloqueado pelos

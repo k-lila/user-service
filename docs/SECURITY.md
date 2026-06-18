@@ -21,7 +21,7 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve
   `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha
   (mensagem genérica).
-- **IP do cliente não-falsificável (ADR-010, item 1.2 RELATORIOA):** lockout e rate limiting
+- **IP do cliente não-falsificável (ADR-010):** lockout e rate limiting
   resolvem o IP via header confiável `security.trusted-client-ip-header` (default `CF-Connecting-IP`,
   que a Cloudflare **sempre sobrescreve**), com fallback em `getRemoteAddr()`/`getHostString()` sob
   `server.forward-headers-strategy=framework` — agora na **base** do config-server (gateway +
@@ -37,33 +37,78 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 - **BCrypt** (custo 10) para hash de senha.
 - **Cookies de sessão distintos** por serviço (ADR-007) — evita colisão de sessão. Ambos
   honram a flag `Secure` parametrizável (`app.cookie.secure`/`APP_COOKIE_SECURE`): gateway
-  (`SESSION`) e auth-server (`AUTHSESSION`), ligada sob TLS pelo `docker-compose.tls.yml` —
-  sem assimetria entre os dois.
+  (`SESSION`) e auth-server (`AUTHSESSION`), ligada sob TLS pelos overlays `docker-compose.tls.yml`
+  (dev) e `docker-compose.deploy.yml` (Cloudflare) — sem assimetria entre os dois.
 - **Autenticação no Redis/Sentinel** (ADR-008): os 3 data nodes recebem `--requirepass` e
   `--masterauth`; os 3 sentinels recebem `requirepass` e `sentinel auth-pass mymaster` —
   todos com a mesma `REDIS_PASSWORD` (fail-fast no compose). Os clientes Spring (gateway,
   auth-server, user-service) autenticam via `spring.data.redis.password` (data nodes) e
   `spring.data.redis.sentinel.password` (sentinels). O `redis-exporter` autentica com
   `REDIS_PASSWORD` nos 6 alvos do modo multi-target.
-- **Trilha de auditoria de dado pessoal (ADR-011, LGPD, item 1.4 RELATORIOA):** coleção Mongo
+- **Trilha de auditoria de dado pessoal (ADR-011, LGPD):** coleção Mongo
   `auditLogs` (user-service) registra *quem acessou/alterou/apagou qual dado de qual titular,
   quando* — **distinta** do log operacional SLF4J. Cobre mutações (register/update/soft+hard
   delete), leitura de credencial interna (ator SYSTEM) e leitura cross-subject (titular ≠
   solicitante); o `/me`/leitura do próprio dado não é auditado. `targetEmail` mascarado;
   `correlationId` = traceId B3 (o IP do cliente vive no log de borda do gateway, ADR-010). Escrita
-  assíncrona e isolada de falha. Dívida (em "gaps"): async = risco de perda em crash; listagem não
-  auditada; sem endpoint de consulta nem retenção/TTL.
+  assíncrona e isolada de falha (dívida consciente detalhada na seção **LGPD**).
 
 ## Gaps de segurança conhecidos (dívida aceita)
 
 | Gap | Estado / mitigação atual | O que falta para prod |
 | --- | --- | --- |
-| **Sem TLS em prod** | Curativo: overlay `docker-compose.tls.yml` termina TLS na borda em **dev** (mkcert, `app.localhost`/`auth.localhost`). Deploy: overlay `docker-compose.deploy.yml` (Cloudflare quick tunnel — **valida** a mecânica de borda; URL efêmera **não** cruza a barra) | Named tunnel + domínio (URL estável) ou cert ACME + domínio real |
+| **Sem TLS em prod** | Curativo: overlay `docker-compose.tls.yml` termina TLS na borda em **dev** (mkcert, `app.localhost`/`auth.localhost`). Deploy: overlay `docker-compose.deploy.yml` (Cloudflare quick tunnel — **valida** a mecânica de borda; URL efêmera **não** cruza a barra) | Named tunnel + domínio (URL estável) ou cert ACME + domínio real — ver _Estado atual do deploy_ |
 | **Resíduo 0.3: credencial Mongo do `mongodb-exporter` em env** | Aceito. A imagem `percona/mongodb_exporter` é distroless (sem shell) e não tem flag/`_FILE` para a URI → `MONGO_USER`/`MONGO_PASSWORD` continuam no `.env` (deve casar com `./secrets/MONGO_PASSWORD`). Único segredo fora do Docker secrets. | Imagem wrapper (multi-stage com shell) lendo a URI do secret, ou usuário Mongo de monitoramento de baixo privilégio |
 | **Grafana `admin/admin`** | Curativo: senha via Docker secret (`GF_SECURITY_ADMIN_PASSWORD__FILE`) | Trocar a credencial em prod |
 | **Keyfile MongoDB de dev no repo** | Aceito (análogo à chave JWK) | Keyfile gerado/gerido fora do repo em prod |
 | **TLS de transporte Redis ausente** | Aceito. A senha (`REDIS_PASSWORD`) protege o protocolo de comando mas trafega em claro no handshake `AUTH` na rede interna Docker. Mitigado por portas Redis/Sentinel nunca publicadas no compose base (prod-safe). | TLS no Redis (Redis 6+ `tls-port`) + rede Docker isolada em prod |
 | **ACLs por usuário Redis ausentes** | Aceito. Todos os clientes (gateway, auth-server, user-service, exporter) compartilham a mesma `REDIS_PASSWORD` sem segregação de permissões por serviço. | Criar usuários ACL dedicados por serviço com permissões mínimas (Redis 6+) |
+
+## Estado atual do deploy (borda Cloudflare)
+
+O deploy é na **própria máquina**, exposto via **Cloudflare Tunnel**. Hoje o estado aceito é o
+**quick tunnel efêmero** (`*.trycloudflare.com`, overlay `docker-compose.deploy.yml`):
+
+- **O que isso já entrega:** a Cloudflare termina TLS na borda e o `cloudflared` fala HTTP interno
+  com o gateway (nenhuma porta interna publicada). Os controles de borda ficam **reais e validados**:
+  cookies `Secure` (`APP_COOKIE_SECURE=true`), `SERVER_FORWARD_HEADERS_STRATEGY=framework` e o IP
+  confiável `CF-Connecting-IP` (ADR-010) alimentando lockout/rate-limit. Registro de usuário e Swagger
+  funcionam pela URL pública.
+- **A limitação aceita por enquanto — URL efêmera.** A URL do quick tunnel **muda a cada reinício**
+  do `cloudflared`. Como o OAuth2/BFF depende de URLs de front-channel coerentes (redirect/post-logout
+  semeados no Postgres, `issuer-uri`, origens de CORS), o **fluxo OAuth2 ponta a ponta não fecha de
+  forma estável** sob URL efêmera. O quick tunnel **valida a mecânica de borda**, mas **não cruza a
+  barra** de "deploy legítimo para usuário real".
+- **O que será sanado com named tunnel + domínio.** Migrar para **named tunnel + domínio próprio no
+  Cloudflare** dá URL pública **estável** e destrava os gaps que hoje ficam parciais por causa da
+  efemeridade:
+  - **TLS de borda real e estável** (fecha o gap "Sem TLS em prod" para uso real).
+  - **CORS/origens fixas** (zero `localhost`, zero URL efêmera) — redirect URIs do OAuth2 estáveis no
+    Postgres → **OAuth2 ponta a ponta fecha**.
+  - **base-URL estável** para links de e-mail (reset de senha etc., pós-barra).
+
+  **Invariante de confiança (não regredir):** `CF-Connecting-IP` e o HTTP interno só são seguros
+  porque **apenas o `cloudflared` alcança** o gateway/auth na topologia base. Expor um serviço direto
+  reintroduz spoofing de IP e exige TLS interno.
+
+## LGPD — proteção de dados pessoais
+
+Guardar nome, e-mail e hash de senha de pessoas reais torna o operador **controlador de dados
+pessoais** sob a LGPD. Esta seção rastreia a postura do sistema frente aos deveres da lei — os
+controles já implementados e o que ainda falta.
+
+| Direito / dever LGPD | Estado | Onde / o que falta |
+| --- | --- | --- |
+| **Base legal / consentimento** | ✅ Implementado | `termsAccepted` obrigatório (`true`) no cadastro → `consentAcceptedAt` + `termsVersion` na coleção `users` (ADR-012). Aceite versionado permite reconsentimento quando os termos mudarem. |
+| **Trilha de auditoria de acesso** | ✅ Implementado | Coleção `auditLogs` registra *quem acessou/alterou/apagou qual dado de qual titular, quando* (ADR-011) — distinta do log SLF4J operacional. Ver "Controles ativos". |
+| **Eliminação / direito ao esquecimento** | ✅ Implementado | Soft-delete (ADMIN e USER) + hard-delete ADMIN (ADR-001). |
+| **Minimização** | ✅ Implementado | Coleta enxuta (nome, e-mail, senha); PII mascarada em log (`LogUtils.maskEmail`) e em `auditLogs` (`targetEmail` mascarado). |
+| **Portabilidade (exportar meus dados)** | ❌ Gap | Falta endpoint para o titular exportar os próprios dados. Pode ser pós-lançamento, mas planejar. |
+| **Notificação de incidente** | ⚠️ Parcial | A auditoria (`auditLogs`) e a observabilidade sustentam a investigação; falta **plano** formal de resposta/notificação e alertas (Alertmanager) sobre os SLOs. |
+
+**Dívida da trilha de auditoria (consciente):** escrita assíncrona → risco de perda em crash antes do
+flush; a listagem (`GET /v1/users`) não é auditada; sem endpoint de consulta nem retenção/TTL
+definidos. Detalhe e racional em [ADR-011](adr/ADR-011-trilha-auditoria-dado-pessoal.md).
 
 ## Como manter este documento
 
