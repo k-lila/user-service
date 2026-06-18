@@ -44,12 +44,12 @@ scrape_configs:
   - job_name: "config-server"
     metrics_path: "/actuator/prometheus"
     # /actuator/prometheus do config-server fica atrás de HTTP Basic (SecurityConfig:
-    # anyRequest().authenticated()), então o scrape precisa autenticar. Default dev
-    # (idem config-server/application.yml e .env). Em prod, migrar para
-    # basic_auth.password_file em vez de senha literal no arquivo.
+    # anyRequest().authenticated()), então o scrape precisa autenticar. A senha vem do
+    # Docker secret montado em /run/secrets/CONFIG_SERVER_PASSWORD (0.3) — sem senha literal
+    # no arquivo. O usuário (não-segredo) segue default dev; alinhe ao CONFIG_SERVER_USERNAME.
     basic_auth:
       username: config-client
-      password: config-dev-secret
+      password_file: /run/secrets/CONFIG_SERVER_PASSWORD
     static_configs:
       - targets:
           - config-server-1:8888

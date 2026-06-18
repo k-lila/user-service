@@ -44,8 +44,9 @@ login-interface (React)
 ├── user-service/                 # Domínio de usuários (CRUD, MongoDB, cache Redis)
 ├── login-interface/              # SPA React (Vite + TailwindCSS)
 ├── infra/                        # Configs de infraestrutura:
+│   ├── secrets/                  #   gen-secrets.sh (gera os Docker secrets)
+│   ├── jwk/                      #   gen-keys.sh (par de chaves JWT)
 │   ├── config-lb/                #   nginx LB dos config-servers
-│   ├── tls-proxy/                #   nginx de borda TLS (overlay opcional)
 │   ├── mongo/                    #   keyfile do replica set
 │   ├── redis/                    #   sentinel.conf
 │   ├── grafana/                  #   dashboards e datasources provisionados
@@ -53,7 +54,7 @@ login-interface (React)
 ├── docs/                         # Documentação técnica detalhada
 ├── docker-compose.yml            # Base prod-safe (publica só a borda)
 ├── docker-compose.override.yml   # Deltas de dev (republica portas internas; auto-carregado)
-├── docker-compose.tls.yml        # Overlay opcional de TLS na borda
+├── docker-compose.deploy.yml     # Overlay opcional — Cloudflare Tunnel
 └── .env.example                  # Template do .env (contrato de variáveis, comentado)
 ```
 
@@ -64,21 +65,29 @@ login-interface (React)
 | Ferramenta              | Versão mínima | Necessário para            |
 | ----------------------- | ------------- | -------------------------- |
 | Docker + Docker Compose | 24+           | Execução (única suportada) |
-| mkcert                  | —             | Apenas para o modo TLS     |
 
 ---
 
 ## Execução
 
+### 0. Gerar os secrets e a chave JWK (obrigatório, uma vez)
+
+```bash
+infra/secrets/gen-secrets.sh        # defaults de DEV (rode uma vez antes do up)
+```
+
+> Em dev **manual** (sem Docker), gere só o par JWK no classpath do auth-server:
+> `infra/jwk/gen-keys.sh authorization-server/src/main/resources/keys`.
+
 ### 1. Criar o `.env` (obrigatório)
 
-O compose não tem defaults de segredo — sem `.env` a subida falha de propósito (fail-fast):
+O `.env` guarda apenas as **identidades não-segredo** (usuários, hostnames públicos) interpoladas no compose — os segredos vêm do passo 0. Sem `.env` a subida falha de propósito (fail-fast):
 
 ```bash
 cp .env.example .env   # e preencha os valores (em dev, qualquer valor consistente serve)
 ```
 
-### 2a. Sem TLS (HTTP, modo padrão de desenvolvimento)
+### 2a. Desenvolvimento local (HTTP, modo padrão)
 
 ```bash
 docker compose up -d --build      # base + docker-compose.override.yml (auto-carregado)
@@ -96,44 +105,35 @@ docker compose -f docker-compose.yml up -d --build   # ignora o override
 # URLs públicas via .env — ver o bloco comentado no .env.example
 ```
 
-### 2b. Com TLS (HTTPS na borda, mesma topologia da produção)
-
-Um reverse-proxy nginx termina TLS com certificado do mkcert e mantém o tráfego interno em HTTP. Setup único do certificado:
+### 2b. Deploy na própria máquina via Cloudflare Tunnel
 
 ```bash
-# 1. Instalar o mkcert (Debian/Ubuntu; binários em github.com/FiloSottile/mkcert/releases)
-sudo apt install libnss3-tools
+# 1. Boot com placeholder (satisfaz o fail-fast das envs ${TUNNEL_ORIGIN:?})
+export TUNNEL_ORIGIN=https://placeholder.trycloudflare.com
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
 
-# 2. Instalar a CA local no trust store do SO/navegador
-mkcert -install
+# 2. Ler a URL pública REAL nos logs do cloudflared
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml logs cloudflared
 
-# 3. Emitir o cert da borda, na raiz do repositório
-mkcert -cert-file infra/tls-proxy/certs/edge.crt \
-       -key-file  infra/tls-proxy/certs/edge.key \
-       app.localhost auth.localhost localhost 127.0.0.1
+# 3. Re-subir SÓ os serviços de app com --no-deps (não recria o cloudflared → URL estável)
+export TUNNEL_ORIGIN=https://<sub>.trycloudflare.com
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --no-deps \
+  gateway authorization-server user-service
 ```
-
-Subida com o overlay:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
-```
-
-Acesso: **https://app.localhost** (SPA + API) · **https://auth.localhost** (front-channel OAuth2). Os cookies de sessão saem com a flag `Secure`. Ir para produção real = trocar o cert do mkcert por ACME/corporativo e os hostnames `*.localhost` por domínios reais — topologia e código não mudam.
 
 ---
 
 ## URLs de acesso (dev)
 
-| Serviço       | URL                                           |
-| ------------- | --------------------------------------------- |
-| API (gateway) | http://localhost:8081                         |
-| Swagger UI    | http://localhost:8081/swagger-ui/index.html   |
-| Front-end     | http://localhost:5173                         |
-| Eureka        | http://localhost:9091 · http://localhost:9092 |
-| Zipkin        | http://localhost:9411                         |
-| Prometheus    | http://localhost:9090                         |
-| Grafana       | http://localhost:3000 (credenciais do `.env`) |
+| Serviço       | URL                                                                              |
+| ------------- | -------------------------------------------------------------------------------- |
+| API (gateway) | http://localhost:8081                                                            |
+| Swagger UI    | http://localhost:8081/swagger-ui/index.html                                      |
+| Front-end     | http://localhost:5173                                                            |
+| Eureka        | http://localhost:9091 · http://localhost:9092                                    |
+| Zipkin        | http://localhost:9411                                                            |
+| Prometheus    | http://localhost:9090                                                            |
+| Grafana       | http://localhost:3000 (user do `.env`, senha do secret `GRAFANA_ADMIN_PASSWORD`) |
 
 ---
 
@@ -142,11 +142,11 @@ Acesso: **https://app.localhost** (SPA + API) · **https://auth.localhost** (fro
 A cada `push` na `main` e a cada `pull_request`, o workflow [`ci.yml`](.github/workflows/ci.yml)
 roda no GitHub Actions três frentes em paralelo:
 
-| Job                | O que roda                                                                 |
-| ------------------ | -------------------------------------------------------------------------- |
+| Job                | O que roda                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `backend` (matrix) | `mvn -B verify` por módulo (5 serviços) — dispara o gate de cobertura JaCoCo; integração via Testcontainers no Docker do runner |
-| `frontend`         | `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold de 80% |
-| `compose-validate` | `docker compose -f docker-compose.yml config -q` — valida a topologia base |
+| `frontend`         | `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold de 80%                                                |
+| `compose-validate` | `docker compose -f docker-compose.yml config -q` — valida a topologia base                                                      |
 
 Não há POM-pai agregador, por isso o back-end roda como **matrix** (um job por módulo).
 Os relatórios (Surefire/Failsafe, JaCoCo, cobertura do Vitest) são publicados como artefatos do run.

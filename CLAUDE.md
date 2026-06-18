@@ -8,6 +8,7 @@
 - Pergunte antes de agir se a tarefa tiver mais de 3 arquivos envolvidos
 - Antes de cada alteração no código, apresente um relatório que aponte claramente: 1) razões dos novos códigos e/ou das modificações; 2) arquivos a serem criados, se houver; 3) arquivos a serem modificados, se houver
 - Ao criar uma nova branch, pergunte seu nome
+- Sempre que elaborar perguntas e fornecer as opções de resposta, sempre dê um panorama simples e resumido sobre a opção em si, com seus prós e contras.
 
 ---
 
@@ -34,7 +35,7 @@ usa sessão por cookie e **não** manuseia JWT.
 - [docs/LOGS.md](docs/LOGS.md) — estratégia de logs
 - [docs/SECURITY.md](docs/SECURITY.md) — controles ativos e gaps de segurança conhecidos
 - [docs/ORQUESTRACAO.md](docs/ORQUESTRACAO.md) — sistema de orquestração de agentes
-- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos · **ADR-008** autenticação no Redis/Sentinel
+- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos · **ADR-008** autenticação no Redis/Sentinel · **ADR-009** base secrets-native (Docker secrets) · **ADR-010** resolução de IP do cliente confiável (CF-Connecting-IP + forward-headers) · **ADR-011** trilha de auditoria de dado pessoal (LGPD) · **ADR-012** consentimento LGPD no cadastro (aceite versionado)
 
 ---
 
@@ -94,13 +95,20 @@ login-interface (React)
 
 ### Subir tudo com Docker
 
+**Pré-requisito obrigatório (uma vez):** a base é **secrets-native** ([ADR-009](docs/adr/ADR-009-base-secrets-native-docker-secrets.md)) — sem `./secrets/` o `up` **falha**. Gere os segredos + o par JWK antes do primeiro `up`:
+
 ```bash
+infra/secrets/gen-secrets.sh   # defaults de DEV; em prod exporte cada segredo com valor forte
 docker compose up -d --build
 ```
 
 O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`. Todos os 26 serviços declaram `cpus` / `mem_limit` / `mem_reservation` (chaves de nível de serviço, não `deploy.resources`) — perfis e racional em [docs/CONFIG.md § Limites de recursos](docs/CONFIG.md#limites-de-recursos-cpu--memória).
 
+**Segredos (base secrets-native, gap 0.3 RELATORIOA):** os segredos saem do `.env` plano para **Docker secrets** em `./secrets/` (gitignorado, gerados por `infra/secrets/gen-secrets.sh`), montados em `/run/secrets/`. Consumo: Spring via `spring.config.import=configtree:/run/secrets/` (nome do arquivo = placeholder); postgres/mongo via `*_FILE`; redis/sentinel via `$(cat ...)`; redis-exporter via `--redis.password-file` (JSON); grafana via `__FILE`; prometheus via `password_file`. O par JWK também é secret (`jwk_private`/`jwk_public`). Mecanismos e tabela em [docs/CONFIG.md § Docker secrets](docs/CONFIG.md#docker-secrets-base-secrets-native).
+
 **TLS/HTTPS na borda em dev (opcional):** overlay opt-in `docker-compose.tls.yml` sobe um reverse-proxy nginx (`infra/tls-proxy`) que termina TLS com cert do **mkcert** e fala HTTPS com o browser (`app.localhost`/`auth.localhost`), mantendo o interno em HTTP. `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`. O Swagger-UI segue funcional nesse modo: o fluxo OAuth2 passa pela borda (`AUTH_URL`/`AUTH_TOKEN` → `https://auth.localhost`; CORS do auth-server inclui `http://localhost:8081`) — a porta 8082 não é publicada sem o override de dev.
+
+**Deploy via Cloudflare Tunnel (opcional):** overlay `docker-compose.deploy.yml` sobe o `cloudflared` (quick tunnel → `gateway:8081`) com `APP_COOKIE_SECURE=true`, `SERVER_FORWARD_HEADERS_STRATEGY=framework` e CORS/URLs front-channel via `${TUNNEL_ORIGIN}`. Quick tunnel **valida** a mecânica de borda; a URL é efêmera (não cruza a barra de deploy real — exige named tunnel + domínio). Roteiro de subida (boot com placeholder → ler URL → re-up `--no-deps` sem recriar o cloudflared) no cabeçalho do próprio arquivo e em [README § 2c](README.md). O doc OpenAPI do Swagger requer `API_BASE_URL`/`AUTH_URL` no **user-service** apontando ao túnel, senão o "Try it out" dispara para `localhost` (mixed content).
 
 ### Ordem manual (sem Docker)
 
@@ -155,7 +163,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 - **Tipo:** OAuth2 Authorization Server (Spring Security). Fluxo authorization_code + PKCE + refresh_token; OIDC (`openid`, `profile`).
 - **Estado OAuth em PostgreSQL** (escala horizontal):
   - `JdbcRegisteredClientRepository` + `JdbcOAuth2AuthorizationService` + `JdbcOAuth2AuthorizationConsentService` (`OAuth2ClientConfig.java`).
-  - `gateway-client` **semeado idempotentemente** na subida (`findByClientId` → `save`), preservando `redirectUri` (inclusive Swagger) e scopes.
+  - `gateway-client` **semeado idempotentemente** na subida (`findByClientId` → `save`), preservando `redirectUri` (inclusive Swagger) e scopes; `redirectUri`/`postLogoutRedirectUri` externalizáveis via `OAUTH_CLIENT_REDIRECT_URIS`/`OAUTH_CLIENT_POST_LOGOUT_URIS` (ver `docs/CONFIG.md`), sem reconciliação pós-seed.
   - Schemas SAS 7.0.3 adaptados (`blob`→`text`, `timestamp`→`timestamptz`, `IF NOT EXISTS`) em `src/main/resources/schema/`, aplicados via `spring.sql.init` (`continue-on-error: true`).
 - **Chave JWT persistente** (`JWKConfig.java`):
   - Par RSA fixo com `kid` estável (`user-service-key`), carregado de PEM via `RsaKeyConverters` — em vez de gerar por boot.
@@ -166,7 +174,7 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 - **Credenciais e token:** busca credenciais via Feign (`GET /internal/users/email/{email}`); customiza o JWT em `TokenCustomizerConfig.java` (**arquivo crítico**) com `userID`, `roles`, `permissions`.
 - **Resiliência Feign:** `IUserClient` tem `fallbackFactory = UserClientFallbackFactory.class`. Circuit breaker Resilience4j (`spring.cloud.openfeign.circuitbreaker.enabled=true`, group por nome do client) com a config nomeada `configs.user-service` (com group habilitado, `instances.*` é inerte — use `configs.*`): janela 10, `minimumNumberOfCalls` 10, threshold 50%, open 10s, timeout 3s. Indisponibilidade do user-service retorna `UsernameNotFoundException` imediatamente em vez de travar em timeout. `AuthorizationService.loadUserByUsername` propaga essa exceção sem reembrulhar — o `DaoAuthenticationProvider` a trata como credenciais inválidas e devolve o usuário ao form de login (não escala a 500); só exceções inesperadas são convertidas em `UsernameNotFoundException` genérica sem vazar a causa.
 - **Propagação de trace no Feign (`FeignTracingConfig.java`):** na cadeia Feign + circuit breaker a instrumentação automática (feign-micrometer) registrava o span cliente no trace correto, mas **não emitia os headers B3** — o user-service recebia a request sem `X-B3-*` e abria um trace **órfão**. `FeignTracingConfig` adiciona um `RequestInterceptor` que injeta o contexto de trace corrente no template via o `Propagator` do Micrometer (formato `b3`); assim o user-service (`consume: b3`) continua o trace e seu span vira filho do auth-server. Degrada graciosamente quando não há contexto ativo.
-- **Lockout anti-brute-force:** `LoginAttemptService` mantém contador de falhas no Redis por par **(conta, IP)** — chave `sha256(emailLower|ip)`, janela fixa (TTL 15 min na 1ª falha), lockout após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha (mensagem genérica). Prod exige `server.forward-headers-strategy` + proxy sanitizando `X-Forwarded-For`.
+- **Lockout anti-brute-force:** `LoginAttemptService` mantém contador de falhas no Redis por par **(conta, IP)** — chave `sha256(emailLower|ip)`, janela fixa (TTL 15 min na 1ª falha), lockout após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha (mensagem genérica). **IP não-falsificável (ADR-010):** a fonte de IP é o header confiável `security.trusted-client-ip-header` (default `CF-Connecting-IP`, que a Cloudflare sobrescreve), com fallback em `getRemoteAddr()` sob `server.forward-headers-strategy=framework` (agora na **base** do config-server, não só nos overlays); o `X-Forwarded-For` bruto não é mais lido (`cloudflared` faz append → leftmost spoofável). `ClientIpResolver.currentIp(header)` continua a fonte ÚNICA do lockout.
 
 ### user-service (8090)
 
@@ -174,12 +182,14 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 - **Controllers:**
   - `UserController` — público, via gateway.
   - `InternalUserController` — `GET /internal/users/email/{email}`, **não exposto pelo gateway**, só para o auth-server via Feign. Protegido por `X-Internal-Token` (`InternalTokenFilter`); acesso sem o header → 403.
+- **Consentimento LGPD no cadastro (ADR-012):** `UserRequestDTO.termsAccepted` (`@NotNull` + `@AssertTrue`, grupo `OnCreate` — obrigatório e `true` só no cadastro, ignorado no update); `RegisterService` grava `consentAcceptedAt` (timestamp) + `termsVersion` (`app.terms.version`/`TERMS_VERSION`, default `v1`) na coleção `users`. Campos nullable no entity (compat. com legados). Front: checkbox de aceite (links `/terms`/`/privacy`) que desabilita "Criar conta" até marcar.
+- **Trilha de auditoria LGPD (ADR-011):** coleção `auditLogs` alimentada por `AuditService` registra *quem (ator) acessou/alterou/apagou (ação) qual dado de qual titular, quando* — **distinta** do log SLF4J operacional. Captura nos controllers (ator/alvo/ação inequívocos): mutações (REGISTER/UPDATE/SOFT_DELETE_ADMIN/HARD_DELETE_ADMIN/SOFT_DELETE_SELF), leitura de credencial interna (`READ_INTERNAL_CREDENTIAL`, ator SYSTEM) e leitura cross-subject (`READ_CROSS_SUBJECT`, titular ≠ solicitante); `/me` e leitura do próprio dado **não** são auditados. `targetEmail` mascarado; `correlationId` = traceId B3 (o IP do cliente vive no log de borda do gateway). Escrita **assíncrona** (`AuditAsyncConfig`/`auditExecutor`, MDC propagado via `TaskDecorator`) e **isolada de falha** (erro de auditoria nunca derruba a operação). Dívida: async = risco de perda em crash; listagem não auditada; sem endpoint de consulta nem TTL.
 
 ### gateway (8081)
 
 - **Base:** Spring Cloud Gateway (WebFlux/reativo, `spring-cloud-starter-gateway-server-webflux`). Único ponto de entrada externo — **nunca chame os serviços diretamente em produção**.
 - **Cliente OAuth2 do BFF:** `oauth2Login` + `oauth2Client` (`gateway-client` confidencial) + resource server JWT. Guarda o token na sessão e o relaya downstream — o SPA nunca vê o JWT.
-- **Rate limiting** via Redis (token bucket): LOW 2 req/s cap 5 (registro/IP), MED 5 req/s cap 10 (OAuth2/IP), HIGH 10 req/s cap 20 (autenticados/user). O IP é lido com `getHostString()` (`RateLimiterConfig`/`RateLimitLogFilter`): com `server.forward-headers-strategy=framework` (borda TLS) o WebFlux consome o `X-Forwarded-For` e o `remoteAddress` vira `InetSocketAddress` _unresolved_ — `getAddress()` é null e `getHostAddress()` daria NPE.
+- **Rate limiting** via Redis (token bucket): LOW 2 req/s cap 5 (registro/IP), MED 5 req/s cap 10 (OAuth2/IP), HIGH 10 req/s cap 20 (autenticados/user). **IP não-falsificável (ADR-010):** `RateLimiterConfig`/`RateLimitLogFilter` resolvem o IP via `com.users.gateway.util.ClientIpResolver` — preferindo o header confiável `security.trusted-client-ip-header` (default `CF-Connecting-IP`), com fallback em `remoteAddress.getHostString()` (que sob `server.forward-headers-strategy=framework`, agora na base, reflete o XFF sanitizado pela borda; o `remoteAddress` vem _unresolved_, por isso `getHostString()` e não `getAddress()`). O `X-Forwarded-For` bruto não é mais lido — sob `cloudflared` (append) o leftmost é controlado pelo cliente.
 - **Rotas em Java** (`GatewayRouter`, `RouteLocatorBuilder`). **`TokenRelay` é por rota** (na rota `user-service`), **não** via `default-filters` do yaml — a DSL Java não recebe default-filters.
 - **CSRF** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`; `/v1/users/register` isento); o entry point devolve **401** (não 302); **logout RP-initiated**.
 - **Sessão WebFlux no Redis** via Spring Session (`@EnableRedisWebSession` — exige anotação explícita). Guarda `OAuth2AuthorizedClient` (com JWT) + `SecurityContext`. Cookie `SESSION`.
@@ -233,7 +243,7 @@ A garantia de que o sistema continua saudável vem de testes + gate de cobertura
 
 ## Gaps de Segurança Conhecidos
 
-Controles ativos e dívida aceita detalhados em [docs/SECURITY.md](docs/SECURITY.md). Gaps **ativos** (dívida consciente, não regredir os controles existentes): sem TLS em prod (curativo `docker-compose.tls.yml` em dev), chave JWK dev no classpath (override em prod via `JWK_*`), Grafana `admin/admin` (externalizado para `.env`), keyfile MongoDB de dev no repo, TLS de transporte Redis ausente (senha trafega em claro na rede interna Docker; portas Redis/Sentinel nunca publicadas no compose base), ACLs Redis por usuário ausentes (todos os clientes compartilham `REDIS_PASSWORD`). Ao fechar um gap ou introduzir dívida, atualize `docs/SECURITY.md` e `.claude/memory/decisions.md`.
+Controles ativos e dívida aceita detalhados em [docs/SECURITY.md](docs/SECURITY.md). Gaps **ativos** (dívida consciente, não regredir os controles existentes): sem TLS em prod (curativos `docker-compose.tls.yml` em dev e `docker-compose.deploy.yml`/Cloudflare quick tunnel — este último valida a mecânica mas a URL efêmera **não** cruza a barra; exige named tunnel + domínio), segredos em **Docker secrets** mas ainda arquivos no host (gap 0.3 fechado **parcialmente** — sem secret manager/rotação) com resíduo do `mongodb-exporter` (distroless) lendo `MONGO_*` do `.env`, keyfile MongoDB de dev no repo, TLS de transporte Redis ausente (senha trafega em claro na rede interna Docker; portas Redis/Sentinel nunca publicadas no compose base), ACLs Redis por usuário ausentes (todos os clientes compartilham `REDIS_PASSWORD`). **Fechado:** chave JWK fora do repositório (gap 0.1 — gerada por `infra/jwk/gen-keys.sh`, secret no compose; [ADR-005](docs/adr/ADR-005-chave-jwk-persistente.md)) e Grafana via secret (`__FILE`). Ao fechar um gap ou introduzir dívida, atualize `docs/SECURITY.md` e `.claude/memory/decisions.md`.
 
 ---
 

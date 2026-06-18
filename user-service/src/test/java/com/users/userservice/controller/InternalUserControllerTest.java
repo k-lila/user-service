@@ -16,10 +16,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.users.userservice.config.SecurityConfig;
+import com.users.userservice.domain.AuditAction;
 import com.users.userservice.domain.User;
 import com.users.userservice.dtos.AuthDTO;
 import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.exceptions.GlobalExceptionHandler;
+import com.users.userservice.services.AuditService;
 import com.users.userservice.services.AuthenticationService;
 
 @WebMvcTest(InternalUserController.class)
@@ -36,6 +38,7 @@ class InternalUserControllerTest {
     @Autowired MockMvc mockMvc;
 
     @MockitoBean AuthenticationService authenticationService;
+    @MockitoBean AuditService auditService;
     @MockitoBean JwtDecoder jwtDecoder;
 
     private AuthDTO buildAuthDTO() {
@@ -58,6 +61,8 @@ class InternalUserControllerTest {
                 .andExpect(jsonPath("$.email").value("fulano@email.com"))
                 .andExpect(jsonPath("$.passwordHash").value("$2a$10$hashed"))
                 .andExpect(jsonPath("$.active").value(true));
+
+        verify(auditService).recordSystem(AuditAction.READ_INTERNAL_CREDENTIAL, "user-id-123", "fulano@email.com");
     }
 
     @Test

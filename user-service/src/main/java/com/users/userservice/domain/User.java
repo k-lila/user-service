@@ -48,4 +48,12 @@ public class User {
     @NotNull
     @Schema(description = "Status | ativo ou inativo", nullable = false)
     private Boolean active;
+
+    // Consentimento LGPD registrado no cadastro. Nullable no entity (sem @NotNull) para não
+    // quebrar o re-save de usuários legados anteriores ao campo; em novos cadastros é sempre setado.
+    @Schema(description = "Momento do aceite dos termos/privacidade (LGPD)", nullable = true)
+    private Instant consentAcceptedAt;
+
+    @Schema(description = "Versão dos termos/privacidade aceita no cadastro", nullable = true)
+    private String termsVersion;
 }

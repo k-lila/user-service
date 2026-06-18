@@ -1,5 +1,6 @@
 package authorizationserver.listeners;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent;
@@ -24,22 +25,26 @@ import authorizationserver.util.ClientIpResolver;
 public class LoginAttemptListener {
 
     private final LoginAttemptService attempts;
+    private final String trustedClientIpHeader;
 
-    public LoginAttemptListener(LoginAttemptService attempts) {
+    public LoginAttemptListener(
+            LoginAttemptService attempts,
+            @Value("${security.trusted-client-ip-header:CF-Connecting-IP}") String trustedClientIpHeader) {
         this.attempts = attempts;
+        this.trustedClientIpHeader = trustedClientIpHeader;
     }
 
     @EventListener
     public void onFailure(AuthenticationFailureBadCredentialsEvent event) {
         if (event.getAuthentication() instanceof UsernamePasswordAuthenticationToken auth) {
-            attempts.recordFailure(auth.getName(), ClientIpResolver.currentIp());
+            attempts.recordFailure(auth.getName(), ClientIpResolver.currentIp(trustedClientIpHeader));
         }
     }
 
     @EventListener
     public void onSuccess(AuthenticationSuccessEvent event) {
         if (event.getAuthentication() instanceof UsernamePasswordAuthenticationToken auth) {
-            attempts.loginSucceeded(auth.getName(), ClientIpResolver.currentIp());
+            attempts.loginSucceeded(auth.getName(), ClientIpResolver.currentIp(trustedClientIpHeader));
         }
     }
 }

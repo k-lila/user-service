@@ -45,6 +45,7 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         dto.setName(nome);
         dto.setEmail(email);
         dto.setPassword(senha);
+        dto.setTermsAccepted(true);
         return dto;
     }
 
@@ -60,6 +61,9 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertEquals("Fulano", encontrado.getName());
         assertTrue(encontrado.getActive());           // lacuna 1
         assertNotNull(encontrado.getRegistrationDate()); // lacuna 2
+        // Consentimento LGPD persistido no cadastro (aceite versionado com timestamp).
+        assertNotNull(encontrado.getConsentAcceptedAt());
+        assertEquals("v1", encontrado.getTermsVersion());
     }
 
     @Test

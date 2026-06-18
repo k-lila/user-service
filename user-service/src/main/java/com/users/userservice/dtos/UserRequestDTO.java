@@ -1,7 +1,9 @@
 package com.users.userservice.dtos;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
@@ -27,4 +29,11 @@ public class UserRequestDTO {
     @Size(min = 8, max = 72)
     @Pattern(regexp = "^(?=.*[A-Za-z])(?=.*\\d).*$", message = "deve conter ao menos uma letra e um número")
     String password;
+
+    // Consentimento LGPD (base legal): obrigatório e true SÓ no cadastro (grupo OnCreate).
+    // @AssertTrue trata null como válido → @NotNull cobre a ausência; juntos exigem presente E true.
+    // Ignorado no update (não pertence ao grupo Default).
+    @NotNull(groups = OnCreate.class)
+    @AssertTrue(groups = OnCreate.class, message = "é necessário aceitar os termos e a política de privacidade")
+    Boolean termsAccepted;
 }

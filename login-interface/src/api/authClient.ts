@@ -5,6 +5,8 @@ export type RegisterRequest = {
   name: string
   email: string
   password: string
+  // Consentimento LGPD: aceite dos termos/privacidade (obrigatório no cadastro).
+  termsAccepted: boolean
 }
 
 // BFF: o gateway é o cliente OAuth2. "Login" é um redirect que inicia o

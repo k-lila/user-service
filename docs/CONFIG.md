@@ -5,12 +5,15 @@
 ## Índice
 
 - [Como ler esta referência](#como-ler-esta-referência)
+- [Docker secrets (base secrets-native)](#docker-secrets-base-secrets-native)
 - [Infraestrutura e descoberta](#infraestrutura-e-descoberta)
 - [Dados (Mongo · Postgres · Redis)](#dados-mongo--postgres--redis)
 - [OAuth2 e JWT](#oauth2-e-jwt)
 - [Canal interno](#canal-interno)
+- [Consentimento LGPD](#consentimento-lgpd)
 - [Swagger / OpenAPI](#swagger--openapi)
 - [CORS](#cors)
+- [Borda e IP do cliente (lockout / rate limit)](#borda-e-ip-do-cliente-lockout--rate-limit)
 - [Observabilidade](#observabilidade)
 - [Front-end](#front-end)
 - [Containers de infraestrutura (só `docker-compose`)](#containers-de-infraestrutura-só-docker-compose)
@@ -23,7 +26,34 @@
 - A coluna **Serviço(s)** indica quem consome a variável.
 - **Compose base prod-safe + override de dev:** `docker-compose.yml` publica só a borda (`gateway:8081` e `interface`); `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas em dev. As URLs voltadas ao **browser** (front-channel/redirects) entram no compose como `${VAR:-localhost-default}` — em dev usam o default; em **prod** (`docker compose -f docker-compose.yml up`) um `.env` as sobrescreve com os hostnames públicos. Ver `.env.example`.
 - **Secrets sem default no config-server:** `AUTH_DB_USER`, `AUTH_DB_PASSWORD` e `OAUTH_CLIENT_SECRET` deixaram de ter default nos YAMLs servidos → ausência da env no cliente derruba a subida (mesma filosofia do `INTERNAL_API_TOKEN`).
+- **Segredos vêm de Docker secrets, não do `.env`:** os valores sensíveis são injetados por arquivos em `/run/secrets/` (base secrets-native) — ver [§ Docker secrets](#docker-secrets-base-secrets-native). Onde as tabelas abaixo dizem "o compose injeta `<valor-dev>`", o valor vem do secret correspondente gerado por `infra/secrets/gen-secrets.sh`.
 - **Config-server com Basic auth:** o endpoint do config-server exige autenticação (só `/actuator/health` fica aberto, para os healthchecks). O par `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` vale para o usuário in-memory do config-server (`spring.security.user.*`) **e** para os clientes (`spring.cloud.config.username`/`password`).
+
+## Docker secrets (base secrets-native)
+
+A base `docker-compose.yml` é **secrets-native** (gap 0.3 RELATORIOA, [ADR-009](adr/ADR-009-base-secrets-native-docker-secrets.md)): os segredos **não** ficam no `.env`, mas em arquivos sob `./secrets/` (gitignorado), montados em `/run/secrets/<NOME>`. Gere uma vez antes do `docker compose up` (o `up` **falha** sem eles):
+
+```bash
+infra/secrets/gen-secrets.sh        # defaults de DEV
+REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen-secrets.sh   # prod
+```
+
+| Arquivo em `./secrets/` | Consumidor(es) | Mecanismo de leitura |
+| --- | --- | --- |
+| `CONFIG_SERVER_PASSWORD` | serviços Spring · prometheus | `configtree:/run/secrets/` · `basic_auth.password_file` |
+| `OAUTH_CLIENT_SECRET` | gateway · auth-server | `configtree:/run/secrets/` |
+| `INTERNAL_API_TOKEN` | user-service · auth-server | `configtree:/run/secrets/` |
+| `REDIS_PASSWORD` | redis-1/2/3 · sentinels · serviços Spring | `$(cat ...)` (runtime) · `configtree:/run/secrets/` |
+| `redis_exporter_json` | redis-exporter | `--redis.password-file` (JSON `{target: senha}`, não a senha crua) |
+| `POSTGRES_PASSWORD` | postgres · postgres-exporter | `POSTGRES_PASSWORD_FILE` (nativo) · `$(cat ...)` |
+| `MONGO_PASSWORD` | mongo | `MONGO_INITDB_ROOT_PASSWORD_FILE` (nativo) |
+| `MONGODB_URI` | user-service | `configtree:/run/secrets/` |
+| `jwk_private` / `jwk_public` | authorization-server | `JWK_PRIVATE_KEY=file:/run/secrets/jwk_private` (gerado por `infra/jwk/gen-keys.sh`) |
+| `GRAFANA_ADMIN_PASSWORD` | grafana | `GF_SECURITY_ADMIN_PASSWORD__FILE` |
+
+> **No `configtree`, o nome do arquivo é o *placeholder* da property** (ex.: `OAUTH_CLIENT_SECRET` → `${OAUTH_CLIENT_SECRET}`). Arquivos gerados com `printf '%s'` (sem newline final) e `chmod 644` (consumidores rodam não-root; em Compose não-Swarm o modo do host é preservado) — ver ADR-009.
+>
+> **Resíduo 0.3:** o `mongodb-exporter` (imagem distroless) **não** lê secret — continua usando `MONGO_USER`/`MONGO_PASSWORD` do `.env`, que devem casar com `./secrets/MONGO_PASSWORD` (ver [SECURITY.md](SECURITY.md)).
 
 ## Infraestrutura e descoberta
 
@@ -47,7 +77,7 @@
 | `MONGODB_DATABASE`      | user-service                        | `user-db`            | Base de dados de usuários.                                                          |
 | `REDIS_SENTINEL_MASTER` | user-service · gateway · auth-server | `mymaster`          | Nome do master monitorado pelos Sentinels. Substitui `REDIS_HOST`/`REDIS_PORT`.     |
 | `REDIS_SENTINEL_NODES`  | user-service · gateway · auth-server | `redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379` | Lista CSV de endereços dos processos Sentinel. |
-| `REDIS_PASSWORD`        | redis-1/2/3 · redis-sentinel-1/2/3 · user-service · gateway · auth-server · redis-exporter | — (fail-fast) | Senha uniforme dos 6 nós Redis (ADR-008). Data nodes: `--requirepass`/`--masterauth`; sentinels: injetada em runtime no `/tmp/sentinel.conf` (`requirepass` + `sentinel auth-pass`). Clientes Spring: `spring.data.redis.password` (data nodes) e `spring.data.redis.sentinel.password` (sentinels). `redis-exporter`: autentica nos 6 alvos multi-target. Sem default no compose (`${REDIS_PASSWORD:?...}`) — fail-fast na subida. Gere com `openssl rand -hex 32`. |
+| `REDIS_PASSWORD`        | redis-1/2/3 · redis-sentinel-1/2/3 · user-service · gateway · auth-server · redis-exporter | — (fail-fast) | Senha uniforme dos 6 nós Redis (ADR-008). Data nodes: `--requirepass`/`--masterauth`; sentinels: injetada em runtime no `/tmp/sentinel.conf` (`requirepass` + `sentinel auth-pass`). Clientes Spring: `spring.data.redis.password` (data nodes) e `spring.data.redis.sentinel.password` (sentinels). `redis-exporter`: JSON multi-alvo no secret `redis_exporter_json`. **Docker secret** (`/run/secrets/REDIS_PASSWORD`), não env — data nodes/sentinels via `$(cat ...)`, clientes Spring via `configtree`. Gere com `openssl rand -hex 32` (ver [§ Docker secrets](#docker-secrets-base-secrets-native)). |
 | `SESSION_TIMEOUT`       | gateway · auth-server               | `30m`                                        | TTL de inatividade da sessão em Redis (Spring Session). Default explícito 30m; aceita unidades de duração (`30m`, `2h`). |
 | `AUTH_DB_URL`       | authorization-server                | `jdbc:postgresql://localhost:5432/authdb`    | Datasource do Postgres que guarda o estado OAuth.                |
 | `AUTH_DB_USER`      | authorization-server                | — (fail-fast)                                | Sem default no config-server; o compose injeta `${POSTGRES_USER}`. |
@@ -59,15 +89,17 @@
 | -------------------------- | --------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `AUTH_ISSUER_URI`          | user-service · gateway | `http://localhost:8082`                              | `issuer-uri` para validação do JWT (resource server). Hostname **interno** (back-channel).  |
 | `AUTH_ISSUER`              | authorization-server  | `http://localhost:8082`                              | Issuer que o próprio auth-server anuncia.                                                    |
-| `JWK_PRIVATE_KEY`          | authorization-server  | `classpath:keys/app.key`                             | Chave privada RSA (PEM). **Default dev** — em prod usar secret montado (`file:/run/secrets/...`). |
-| `JWK_PUBLIC_KEY`           | authorization-server  | `classpath:keys/app.pub`                             | Chave pública RSA (PEM). **Default dev**.                                                    |
+| `JWK_PRIVATE_KEY`          | authorization-server  | `classpath:keys/app.key`                             | Chave privada RSA (PEM). A chave **não é mais versionada** (gap 0.1, [ADR-005](adr/ADR-005-chave-jwk-persistente.md)): gerada fora do repo por `infra/jwk/gen-keys.sh`. No compose secrets-native = `file:/run/secrets/jwk_private` (secret `jwk_private`). Em dev manual, `gen-keys.sh` escreve no classpath. |
+| `JWK_PUBLIC_KEY`           | authorization-server  | `classpath:keys/app.pub`                             | Chave pública RSA (PEM). Idem — secret `jwk_public` no compose (`file:/run/secrets/jwk_public`). |
 | `JWK_KEY_ID`               | authorization-server  | `user-service-key`                                   | `kid` estável da chave de assinatura.                                                        |
 | `OAUTH_CLIENT_ID`          | gateway · auth-server | `gateway-client`                                     | Client confidencial do BFF.                                                                  |
-| `OAUTH_CLIENT_SECRET`      | gateway · auth-server | — (fail-fast)                                        | Sem default no config-server; o compose injeta via `.env`. Sobrescrever em produção.   |
+| `OAUTH_CLIENT_SECRET`      | gateway · auth-server | — (fail-fast)                                        | Sem default no config-server; injetado via Docker secret (`configtree:/run/secrets/`). Sobrescrever em produção. |
 | `OAUTH_REDIRECT_URI`       | gateway               | `{baseUrl}/login/oauth2/code/gateway-client`         | `redirect-uri` do fluxo. Em **dev manual** (`npm run dev`), exporte `http://localhost:5173/login/oauth2/code/gateway-client`.² |
 | `OAUTH_AUTHORIZATION_URI`  | gateway               | `http://localhost:8082/oauth2/authorize`             | Endpoint de autorização **front-channel** (browser). Só este endpoint usa hostname externo. |
 | `OAUTH_END_SESSION_URI`    | gateway               | `http://localhost:8082/connect/logout`               | Endpoint de logout OIDC do IdP (browser). Lido em `gateway/.../SecurityConfig.java`.        |
 | `POST_LOGOUT_REDIRECT_URI` | gateway               | `http://localhost:5173/`                             | Para onde o IdP devolve o browser após o logout. Deve bater com a `postLogoutRedirectUri` registrada no `RegisteredClient`. |
+| `OAUTH_CLIENT_REDIRECT_URIS` | authorization-server | `http://localhost:8081/login/oauth2/code/gateway-client,http://localhost:5173/login/oauth2/code/gateway-client,https://app.localhost/login/oauth2/code/gateway-client,http://localhost:8081/swagger-ui/oauth2-redirect.html,https://oauth.pstmn.io/v1/callback` | CSV dos `redirectUri` do `gateway-client` semeado em `OAuth2ClientConfig` (`oauth.gateway-client.redirect-uris`). **Mudar em prod exige re-seed:** o seed do `RegisteredClient` é idempotente só no `findByClientId` inicial — não há reconciliação; alterar a env sem recriar/atualizar o client no Postgres não atualiza os redirect URIs já persistidos. |
+| `OAUTH_CLIENT_POST_LOGOUT_URIS` | authorization-server | `http://localhost:5173/,https://app.localhost/` | CSV dos `postLogoutRedirectUri` do `gateway-client` (`oauth.gateway-client.post-logout-uris`). Mesma ressalva de re-seed acima. |
 
 > ² O `RegisteredClient` no authorization-server já permite a URI de `:5173`, para o callback aterrissar no SPA.
 
@@ -76,6 +108,12 @@
 | Variável             | Serviço(s)              | Default dev      | Observação                                                                                       |
 | -------------------- | ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------ |
 | `INTERNAL_API_TOKEN` | user-service · auth-server | — (fail-fast) | Shared secret do canal `/internal/**` (header `X-Internal-Token`). Sem default no config-server — o app **não sobe** sem ele; o compose injeta `internal-dev-token`. **Mesmo valor nos dois serviços.** |
+
+## Consentimento LGPD
+
+| Variável         | Serviço(s)   | Default dev | Observação                                                                                                  |
+| ---------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| `TERMS_VERSION`  | user-service | `v1`        | Versão dos termos/privacidade registrada no cadastro (`app.terms.version`, ADR-012). **Bump** quando a política mudar — permite exigir re-consentimento e prova qual versão cada titular aceitou. |
 
 ## Swagger / OpenAPI
 
@@ -87,6 +125,8 @@
 | `OAUTH2SWAGGER_REDIRECT_URL` | gateway                | `http://localhost:8081/swagger-ui/oauth2-redirect.html` | `oauth2-redirect-url` do Swagger UI (`gateway.yml`).³ |
 
 > ³ Nome consumido pelo `gateway.yml` é `OAUTH2SWAGGER_REDIRECT_URL`. As chaves `OAUTH_GATEWAY_CLIENT` e `OAUTH_SWAGGER_REDIRECT_URL` que aparecem no `docker-compose.yml` **não são lidas** por nenhum serviço.
+>
+> **Deploy via Cloudflare Tunnel (`docker-compose.deploy.yml`):** o overlay define `API_BASE_URL` **e** `AUTH_URL` **no user-service** (`${TUNNEL_ORIGIN}` / `${TUNNEL_ORIGIN}/oauth2/authorize`) — sem isso o `servers[]` do doc OpenAPI cai no default `localhost:8081` e o "Try it out" do Swagger dispara para `localhost` (mixed content na página HTTPS do túnel). `AUTH_TOKEN` permanece no default (`localhost:8082`) → o botão **Authorize** redireciona mas o OAuth2 não fecha no quick tunnel (URL efêmera). Todas as envs de borda derivam de `${TUNNEL_ORIGIN}`.
 
 ## CORS
 
@@ -96,6 +136,19 @@ CORS na borda + configurável por ambiente. Cada serviço lê a property `cors.a
 | --------------------------- | -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `CORS_ALLOWED_ORIGINS`      | gateway              | `http://localhost:5173`  | Origens (CSV) do **SPA** permitidas pela borda. Em prod, a origem pública real do SPA. Logada no startup do gateway. |
 | `CORS_ALLOWED_ORIGINS_AUTH` | authorization-server | `http://localhost:8081`  | Origem (CSV) do **Swagger-UI** permitida no auth-server — o Swagger é cliente OAuth2 no browser e faz fetch cross-origin a `/oauth2/token`. Em prod, a origem pública do Swagger/borda. Compose usa `${VAR:-default}`. |
+
+## Borda e IP do cliente (lockout / rate limit)
+
+Fonte de IP do **lockout** (auth-server) e do **rate limiting** (gateway). Não-falsificável sob
+Cloudflare Tunnel (ADR-010, item 1.2 RELATORIOA): o header confiável é a fonte primária; o
+`forward-headers-strategy` é o fallback. Detalhe em [SECURITY.md](SECURITY.md).
+
+| Variável                          | Serviço(s)            | Default dev       | Observação                                                                                                  |
+| --------------------------------- | --------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------- |
+| `SERVER_FORWARD_HEADERS_STRATEGY` | gateway · auth-server | `framework`       | Faz o `remoteAddress`/`getRemoteAddr()` refletir o `X-Forwarded-For` sanitizado pela borda (fallback do IP). Default `framework` na **base** do config-server (antes só nos overlays TLS/deploy); seguro sem proxy. |
+| `TRUSTED_CLIENT_IP_HEADER`        | gateway · auth-server | `CF-Connecting-IP`| Header de IP confiável, **fonte primária** do particionamento por IP. A Cloudflare sobrescreve `CF-Connecting-IP`. **Esvaziar/trocar** em deploy não-Cloudflare (cai no XFF via forward-headers). |
+| `LOCKOUT_MAX_ATTEMPTS`            | auth-server           | `5`               | Falhas (conta+IP) antes do lockout.                                                                          |
+| `LOCKOUT_DURATION`                | auth-server           | `15m`             | Janela/TTL do lockout no Redis.                                                                              |
 
 ## Observabilidade
 

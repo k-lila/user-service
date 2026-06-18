@@ -22,7 +22,7 @@ class RateLimitIntegrationTest extends AbstractGatewayIntegrationTest {
         int rejeitadas = 0;
         for (int i = 0; i < 25; i++) {
             int status = webTestClient.post().uri("/v1/users/register")
-                    .header("X-Forwarded-For", "203.0.113.50")
+                    .header("CF-Connecting-IP", "203.0.113.50")
                     .contentType(MediaType.APPLICATION_JSON).bodyValue("{}")
                     .exchange()
                     .returnResult(Void.class).getStatus().value();

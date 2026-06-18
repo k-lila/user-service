@@ -23,14 +23,24 @@ function renderRegisterBox() {
 }
 
 describe('RegisterBox', () => {
-  it('renderiza os campos nome, email e senha', () => {
+  it('renderiza os campos nome, email, senha e o consentimento', () => {
     renderRegisterBox()
     expect(screen.getByPlaceholderText('Nome')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Email')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Senha')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox')).toBeInTheDocument()
   })
 
-  it('submete os dados e, no sucesso, navega para /login', async () => {
+  it('mantém "Criar conta" desabilitado até aceitar os termos', async () => {
+    renderRegisterBox()
+    expect(screen.getByRole('button', { name: 'Criar conta' })).toBeDisabled()
+
+    await userEvent.click(screen.getByRole('checkbox'))
+
+    expect(screen.getByRole('button', { name: 'Criar conta' })).toBeEnabled()
+  })
+
+  it('submete os dados com termsAccepted e, no sucesso, navega para /login', async () => {
     let body: unknown = null
     server.use(
       http.post('/v1/users/register', async ({ request }) => {
@@ -43,6 +53,7 @@ describe('RegisterBox', () => {
     await userEvent.type(screen.getByPlaceholderText('Nome'), 'Ana Souza')
     await userEvent.type(screen.getByPlaceholderText('Email'), 'ana@example.com')
     await userEvent.type(screen.getByPlaceholderText('Senha'), 'secret123')
+    await userEvent.click(screen.getByRole('checkbox'))
     await userEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
 
     await waitFor(() =>
@@ -52,6 +63,7 @@ describe('RegisterBox', () => {
       name: 'Ana Souza',
       email: 'ana@example.com',
       password: 'secret123',
+      termsAccepted: true,
     })
   })
 
@@ -64,6 +76,7 @@ describe('RegisterBox', () => {
     renderRegisterBox()
 
     await userEvent.type(screen.getByPlaceholderText('Email'), 'a@b.com')
+    await userEvent.click(screen.getByRole('checkbox'))
     await userEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
 
     expect(await screen.findByText('Dados inválidos!')).toBeInTheDocument()

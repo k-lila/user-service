@@ -25,7 +25,7 @@ import reactor.test.StepVerifier;
  */
 class RateLimitLogFilterTest {
 
-    private final RateLimitLogFilter filter = new RateLimitLogFilter();
+    private final RateLimitLogFilter filter = new RateLimitLogFilter("CF-Connecting-IP");
 
     @Test
     void deveTerPrecedenciaMaxima() {
@@ -47,6 +47,22 @@ class RateLimitLogFilterTest {
             assertThat(ev.getLevel()).isEqualTo(Level.WARN);
             assertThat(ev.getFormattedMessage()).contains("429").contains("203.0.113.9");
         });
+    }
+
+    @Test
+    void deveLogarCfConnectingIp_quandoStatus429ComHeaderConfiavel() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/v1/users/register")
+                        .header("CF-Connecting-IP", "203.0.113.42")
+                        .remoteAddress(new InetSocketAddress("10.0.0.1", 9000)));
+        exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
+        GatewayFilterChain chain = e -> Mono.empty();
+
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertThat(appender.list).anySatisfy(ev ->
+                assertThat(ev.getFormattedMessage()).contains("203.0.113.42").doesNotContain("10.0.0.1"));
     }
 
     @Test

@@ -17,7 +17,7 @@ describe('useRegister', () => {
       wrapper: queryWrapper(),
     })
 
-    result.current.mutate({ name: 'A', email: 'a@b.com', password: 'x' })
+    result.current.mutate({ name: 'A', email: 'a@b.com', password: 'x', termsAccepted: true })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(navigateMock).toHaveBeenCalledWith('/login')
@@ -34,7 +34,7 @@ describe('useRegister', () => {
       wrapper: queryWrapper(),
     })
 
-    result.current.mutate({ name: 'A', email: 'a@b.com', password: 'x' })
+    result.current.mutate({ name: 'A', email: 'a@b.com', password: 'x', termsAccepted: true })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(navigateMock).not.toHaveBeenCalledWith('/login')

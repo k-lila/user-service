@@ -7,11 +7,12 @@ export const RegisterBox = () => {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [termsAccepted, setTermsAccepted] = useState(false)
   const mutation = useRegister()
 
   const handleSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault()
-    mutation.mutate({ name, email, password })
+    mutation.mutate({ name, email, password, termsAccepted })
   }
 
   return (
@@ -40,12 +41,32 @@ export const RegisterBox = () => {
           className="border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 mx-2 flex"
           onChange={(e) => setPassword(e.target.value)}
         />
+        <label className="flex items-start gap-2 mx-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={termsAccepted}
+            onChange={(e) => setTermsAccepted(e.target.checked)}
+          />
+          <span>
+            Li e aceito os{' '}
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+              Termos de Serviço
+            </a>{' '}
+            e a{' '}
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+              Política de Privacidade
+            </a>
+            .
+          </span>
+        </label>
         {mutation.isError && (
           <p className="text-red-500 text-center text-sm">Dados inválidos!</p>
         )}
         <button
-          className="mx-2 px-3 py-2 rounded text-white cursor-pointer bg-green-600 hover:bg-green-700"
+          className="mx-2 px-3 py-2 rounded text-white cursor-pointer bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
           type="submit"
+          disabled={!termsAccepted}
         >
           Criar conta
         </button>

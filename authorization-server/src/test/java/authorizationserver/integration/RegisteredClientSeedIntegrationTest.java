@@ -3,6 +3,7 @@ package authorizationserver.integration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,12 @@ class RegisteredClientSeedIntegrationTest extends AbstractAuthIntegrationTest {
     @Value("${oauth.client.secret}")
     private String clientSecret;
 
+    @Value("${oauth.gateway-client.redirect-uris}")
+    private List<String> gatewayClientRedirectUris;
+
+    @Value("${oauth.gateway-client.post-logout-uris}")
+    private List<String> gatewayClientPostLogoutUris;
+
     @Test
     void deveManterRegistroUnico_quandoSeedReexecutado() {
         // ARRANGE — contexto de pé: o seed da subida já criou o gateway-client
@@ -67,13 +74,46 @@ class RegisteredClientSeedIntegrationTest extends AbstractAuthIntegrationTest {
         assertEquals(Set.of("openid", "profile", "users.read", "users.write"), cliente.getScopes());
     }
 
+    @Test
+    void deveAplicarRedirectUrisEPostLogoutUrisExternalizados_quandoPropriedadesDiferemDoDefault() {
+        // ARRANGE — simula troca de domínio via env (oauth.gateway-client.*): o client ainda
+        // não existe sob este client_id, então o seed (findByClientId == null → save) roda.
+        OAuth2ClientConfig config = new OAuth2ClientConfig();
+        ReflectionTestUtils.setField(config, "clientSecret", clientSecret);
+        ReflectionTestUtils.setField(config, "gatewayClientRedirectUris",
+                List.of("https://app.exemplo.com/login/oauth2/code/gateway-client"));
+        ReflectionTestUtils.setField(config, "gatewayClientPostLogoutUris",
+                List.of("https://app.exemplo.com/"));
+
+        // ACT — chama o método de seed real com um client_id isolado, para não colidir com o
+        // gateway-client já semeado na subida do contexto (com os defaults)
+        RegisteredClient clienteCustomizado = ReflectionTestUtils.invokeMethod(config, "gatewayClient");
+        assertNotNull(clienteCustomizado);
+        JdbcRegisteredClientRepository repository = new JdbcRegisteredClientRepository(jdbcTemplate);
+        repository.save(withClientId(clienteCustomizado, "gateway-client-custom-uri-test"));
+
+        // ASSERT — as URIs aplicadas no RegisteredClient salvo são exatamente as externalizadas
+        RegisteredClient persistido = repository.findByClientId("gateway-client-custom-uri-test");
+        assertNotNull(persistido);
+        assertEquals(Set.of("https://app.exemplo.com/login/oauth2/code/gateway-client"),
+                persistido.getRedirectUris());
+        assertEquals(Set.of("https://app.exemplo.com/"), persistido.getPostLogoutRedirectUris());
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     /** Executa o corpo real de {@code registeredClientRepository(...)} (lógica de seed de produção). */
     private void reexecutarSeed() {
         OAuth2ClientConfig config = new OAuth2ClientConfig();
         ReflectionTestUtils.setField(config, "clientSecret", clientSecret);
+        ReflectionTestUtils.setField(config, "gatewayClientRedirectUris", gatewayClientRedirectUris);
+        ReflectionTestUtils.setField(config, "gatewayClientPostLogoutUris", gatewayClientPostLogoutUris);
         config.registeredClientRepository(jdbcTemplate);
+    }
+
+    /** Clona o RegisteredClient sob um client_id distinto, evitando colidir com o gateway-client já semeado. */
+    private RegisteredClient withClientId(RegisteredClient origem, String clientId) {
+        return RegisteredClient.from(origem).id(java.util.UUID.randomUUID().toString()).clientId(clientId).build();
     }
 
     private int contarRegistros() {

@@ -40,6 +40,12 @@ jwk:
 oauth:
   client:
     secret: test-client-secret
+  # Mesmos defaults de produção (authorization-server.yml) — explicitados aqui porque este
+  # yml de teste faz sombra ao config-server (sem import). RegisteredClientSeedIntegrationTest
+  # valida que o seed preserva exatamente estes valores.
+  gateway-client:
+    redirect-uris: http://localhost:8081/login/oauth2/code/gateway-client,http://localhost:5173/login/oauth2/code/gateway-client,https://app.localhost/login/oauth2/code/gateway-client,http://localhost:8081/swagger-ui/oauth2-redirect.html,https://oauth.pstmn.io/v1/callback
+    post-logout-uris: http://localhost:5173/,https://app.localhost/
 
 internal:
   api:

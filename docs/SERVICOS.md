@@ -8,6 +8,7 @@
 - [Exemplos de payload](#exemplos-de-payload)
 - [Claims do JWT](#claims-do-jwt)
 - [Schema MongoDB (coleção `users`)](#schema-mongodb-coleção-users)
+- [Schema MongoDB (coleção `auditLogs`)](#schema-mongodb-coleção-auditlogs)
 - [Estratégia de cache (Redis)](#estratégia-de-cache-redis)
 - [Formato de erros (RFC 7807 / ProblemDetail)](#formato-de-erros-rfc-7807--problemdetail)
 
@@ -43,13 +44,14 @@ soft-deleted (`active=false`):
 
 ## Exemplos de payload
 
-**Request — `POST /v1/users/register`** (Bean Validation; `name` 1–50 chars, `email` formato e-mail, `password` obrigatória, 8–72 chars com ao menos uma letra e um número — no `PUT /v1/users` a senha é opcional: omitida/null mantém a atual):
+**Request — `POST /v1/users/register`** (Bean Validation; `name` 1–50 chars, `email` formato e-mail, `password` obrigatória, 8–72 chars com ao menos uma letra e um número; `termsAccepted` **obrigatório e `true`** — consentimento LGPD, ADR-012 — só no cadastro. No `PUT /v1/users` a senha é opcional (omitida/null mantém a atual) e `termsAccepted` é ignorado):
 
 ```json
 {
   "name": "Maria Silva",
   "email": "maria@exemplo.com",
-  "password": "senhaSegura123"
+  "password": "senhaSegura123",
+  "termsAccepted": true
 }
 ```
 
@@ -61,7 +63,9 @@ soft-deleted (`active=false`):
   "name": "Maria Silva",
   "email": "maria@exemplo.com",
   "registrationDate": "2026-06-08T14:32:10.123",
-  "active": true
+  "active": true,
+  "consentAcceptedAt": "2026-06-08T14:32:10.123",
+  "termsVersion": "v1"
 }
 ```
 
@@ -96,9 +100,34 @@ O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims
   passwordHash: String,  // BCrypt (custo 10)
   registrationDate: ISODate,
   roles: [String],       // ex: ["USER"], ["USER", "ADMIN"]
-  active: Boolean
+  active: Boolean,
+  consentAcceptedAt: ISODate, // consentimento LGPD no cadastro (ADR-012); nullable p/ legados
+  termsVersion: String        // versão dos termos aceita (ex: "v1"); nullable p/ legados
 }
 ```
+
+## Schema MongoDB (coleção `auditLogs`)
+
+Trilha de auditoria de acesso a dado pessoal (LGPD, ADR-011) — distinta do log operacional SLF4J.
+Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetUserId, timestamp desc)`.
+
+```js
+{
+  _id: ObjectId,
+  timestamp: ISODate,        // quando a operação ocorreu
+  action: String,            // REGISTER | UPDATE | SOFT_DELETE_ADMIN | HARD_DELETE_ADMIN
+                             //   | SOFT_DELETE_SELF | READ_INTERNAL_CREDENTIAL | READ_CROSS_SUBJECT
+  actorType: String,         // USER | ADMIN | SYSTEM
+  actorUserId: String,       // null quando SYSTEM
+  actorRoles: [String],      // null quando SYSTEM
+  targetUserId: String,      // titular do dado (quando aplicável)
+  targetEmail: String,       // mascarado (ex: "f***@email.com"); null quando não aplicável
+  correlationId: String      // traceId B3, para correlação com logs/Zipkin
+}
+```
+
+> Leitura do próprio dado (`/me`, consulta ao próprio ID/email) **não** gera trilha. A listagem
+> (`GET /v1/users`) não é auditada (escopo inicial). Sem endpoint de consulta nem TTL — ver ADR-011.
 
 ## Estratégia de cache (Redis)
 
