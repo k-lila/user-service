@@ -67,6 +67,7 @@ describe('authClient.register', () => {
       name: 'Ana Souza',
       email: 'ana@example.com',
       password: 'secret123',
+      termsAccepted: true,
     })
 
     expect(user.email).toBe('ana@example.com')
@@ -83,7 +84,7 @@ describe('authClient.register', () => {
       })
     )
 
-    await register({ name: 'A', email: 'a@b.com', password: 'x' })
+    await register({ name: 'A', email: 'a@b.com', password: 'x', termsAccepted: true })
 
     expect(received).toBe('csrf-abc')
   })
@@ -96,7 +97,7 @@ describe('authClient.register', () => {
     )
 
     await expect(
-      register({ name: 'A', email: 'a@b.com', password: 'x' })
+      register({ name: 'A', email: 'a@b.com', password: 'x', termsAccepted: true })
     ).rejects.toThrow()
   })
 })
