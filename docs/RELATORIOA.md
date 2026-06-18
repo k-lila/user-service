@@ -54,7 +54,7 @@ sob a LGPD. O que o projeto já tem e o que falta:
 |---|---|
 | **Eliminação / direito ao esquecimento** | ✅ Já existe (soft/hard delete — ADR-001). Bom. |
 | **Base legal / consentimento** | ⚠️ Registrar consentimento no cadastro (aceite de termos/privacidade com timestamp). |
-| **Trilha de auditoria de acesso** | ❌ Item 1.4. |
+| **Trilha de auditoria de acesso** | ✅ Item 1.4 fechado (coleção `auditLogs`, ADR-011). |
 | **Portabilidade (exportar meus dados)** | ❌ Endpoint para o titular exportar os próprios dados. Pode ser pós-lançamento, mas planeje. |
 | **Minimização** | ✅ Coleta enxuta (nome, e-mail, senha). PII mascarada em log. Bom. |
 | **Notificação de incidente** | ⚠️ Ter um plano (a auditoria do 1.4 e os alertas do Tier 2 sustentam isso). |
@@ -72,7 +72,7 @@ entram na barra porque nascem com o dado.
 [ ] 1.1  Backup Mongo+Postgres com restore testado
 [x] 1.2  forward-headers + IP confiável (CF-Connecting-IP) → lockout/rate-limit reais  ← FECHADO (2026-06-17, ADR-010)
 [ ] 1.3  Reset de senha (RELATORIOB.md)
-[ ] 1.4  Audit log de acesso a dado pessoal (LGPD)
+[x] 1.4  Audit log de acesso a dado pessoal (LGPD)  ← FECHADO (2026-06-17, ADR-011)
 [ ] 1.5  Zero credencial default de dev
 [ ] LGPD Consentimento registrado no cadastro
 ```

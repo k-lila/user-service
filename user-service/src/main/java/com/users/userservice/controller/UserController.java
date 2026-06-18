@@ -18,8 +18,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.users.userservice.domain.AuditAction;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
+import com.users.userservice.services.AuditService;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
 
@@ -38,10 +40,12 @@ public class UserController {
     private static final Logger LOGGER = LoggerFactory.getLogger(UserController.class);
     private final RegisterService registerService;
     private final SearchService searchService;
+    private final AuditService auditService;
 
-    public UserController(RegisterService registerService, SearchService searchService) {
+    public UserController(RegisterService registerService, SearchService searchService, AuditService auditService) {
         this.registerService = registerService;
         this.searchService = searchService;
+        this.auditService = auditService;
     }
 
     @Operation(summary = "Registrar novo usuário")
@@ -53,6 +57,7 @@ public class UserController {
             userDTO.getName()
         );
         UserResponseDTO newUser = registerService.registerUser(userDTO);
+        auditService.recordRegistration(newUser.getId(), newUser.getEmail());
         return ResponseEntity.status(201).body(newUser);
     }
 
@@ -72,21 +77,29 @@ public class UserController {
     @Operation(summary = "Buscar usuário por ID")
     @GetMapping(value = "/{id}")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UserResponseDTO> searchById(@PathVariable(value = "id", required = true) String userID) {
+    public ResponseEntity<UserResponseDTO> searchById(
+            @PathVariable(value = "id", required = true) String userID,
+            @AuthenticationPrincipal Jwt jwt) {
         LOGGER.info(
             "| GET | buscar por ID | ID: {}",
             userID
         );
-        return ResponseEntity.ok(searchService.searchById(userID));
+        UserResponseDTO found = searchService.searchById(userID);
+        auditCrossSubjectRead(jwt, found);
+        return ResponseEntity.ok(found);
     }
 
     @Operation(summary = "Buscar usuário por Email")
     @GetMapping(value = "/email/{email}")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UserResponseDTO> searchByEmail(@PathVariable(value = "email", required = true) String email) {
+    public ResponseEntity<UserResponseDTO> searchByEmail(
+            @PathVariable(value = "email", required = true) String email,
+            @AuthenticationPrincipal Jwt jwt) {
         LOGGER.info("| GET | buscar por email");
-        
-        return ResponseEntity.ok(searchService.searchByEmail(email));
+
+        UserResponseDTO found = searchService.searchByEmail(email);
+        auditCrossSubjectRead(jwt, found);
+        return ResponseEntity.ok(found);
     }
 
     @Operation(summary = "Modificar um usuário")
@@ -99,30 +112,38 @@ public class UserController {
             userDTO.getName(),
             userID
         );
-        return ResponseEntity.ok(registerService.updateUser(userDTO, userID));
+        UserResponseDTO updated = registerService.updateUser(userDTO, userID);
+        auditService.recordFromJwt(AuditAction.UPDATE, jwt, userID, updated.getEmail());
+        return ResponseEntity.ok(updated);
     }
 
     @Operation(summary = "Desativar um usuário")
     @DeleteMapping(value = "/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Void> removeUser(@PathVariable(value = "id", required = true) String userID) {
+    public ResponseEntity<Void> removeUser(
+            @PathVariable(value = "id", required = true) String userID,
+            @AuthenticationPrincipal Jwt jwt) {
         LOGGER.info(
             "| DELETE | desativação (admin) | ID: {}",
             userID
         );
         registerService.deactivateUser(userID);
+        auditService.recordFromJwt(AuditAction.SOFT_DELETE_ADMIN, jwt, userID, null);
         return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Deletar um usuário")
     @DeleteMapping(value = "/del/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Void> deleteUser(@PathVariable(value = "id", required = true) String userID) {
+    public ResponseEntity<Void> deleteUser(
+            @PathVariable(value = "id", required = true) String userID,
+            @AuthenticationPrincipal Jwt jwt) {
         LOGGER.info(
             "| DELETE | hard-delete (admin) | ID: {}",
             userID
         );
         registerService.deleteUser(userID);
+        auditService.recordFromJwt(AuditAction.HARD_DELETE_ADMIN, jwt, userID, null);
         return ResponseEntity.noContent().build();
     }
 
@@ -136,6 +157,7 @@ public class UserController {
             userID
         );
         registerService.deactivateUser(userID);
+        auditService.recordFromJwt(AuditAction.SOFT_DELETE_SELF, jwt, userID, null);
         return ResponseEntity.noContent().build();
     }
 
@@ -147,5 +169,17 @@ public class UserController {
         LOGGER.info("| GET | usuário autenticado | ID: {}", userID);
         UserResponseDTO user = searchService.searchById(userID);
         return ResponseEntity.ok(user);
+    }
+
+    /**
+     * Audita a leitura apenas quando o titular consultado difere do solicitante
+     * (READ_CROSS_SUBJECT). Leitura do próprio dado (ex.: via /me ou consulta ao próprio ID)
+     * não gera trilha — baixo valor e alto volume.
+     */
+    private void auditCrossSubjectRead(Jwt jwt, UserResponseDTO found) {
+        String callerId = jwt != null ? jwt.getClaimAsString("userID") : null;
+        if (found != null && found.getId() != null && !found.getId().equals(callerId)) {
+            auditService.recordFromJwt(AuditAction.READ_CROSS_SUBJECT, jwt, found.getId(), found.getEmail());
+        }
     }
 }

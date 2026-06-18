@@ -27,8 +27,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.users.userservice.domain.User;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
+import com.users.userservice.domain.AuditAction;
 import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.exceptions.EmailAlreadyRegisteredException;
+import com.users.userservice.services.AuditService;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
 
@@ -46,6 +48,7 @@ class UserControllerTest {
 
     @MockitoBean RegisterService registerService;
     @MockitoBean SearchService searchService;
+    @MockitoBean AuditService auditService;
     @MockitoBean JwtDecoder jwtDecoder;
 
     private static final String USER_ID = "user-id-123";
@@ -520,5 +523,102 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.name").value("Fulano"))
                 .andExpect(jsonPath("$.email").value("fulano@email.com"))
                 .andExpect(jsonPath("$.active").value(true));
+    }
+
+    // ── Trilha de auditoria (LGPD, item 1.4) ─────────────────────────────────
+
+    @Test
+    void register_deveAuditarRegistro() throws Exception {
+        when(registerService.registerUser(any())).thenReturn(buildResponse());
+
+        mockMvc.perform(post("/v1/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", "senha123"))))
+                .andExpect(status().isCreated());
+
+        verify(auditService).recordRegistration(USER_ID, "fulano@email.com");
+    }
+
+    @Test
+    void searchById_deveAuditarLeituraCrossSubject_quandoIdDiferenteDoSolicitante() throws Exception {
+        when(searchService.searchById(USER_ID)).thenReturn(buildResponse());
+
+        mockMvc.perform(get("/v1/users/{id}", USER_ID)
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", "outro-id"))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk());
+
+        verify(auditService).recordFromJwt(eq(AuditAction.READ_CROSS_SUBJECT), any(), eq(USER_ID), eq("fulano@email.com"));
+    }
+
+    @Test
+    void searchById_naoDeveAuditar_quandoLeituraDoProprioDado() throws Exception {
+        when(searchService.searchById(USER_ID)).thenReturn(buildResponse());
+
+        mockMvc.perform(get("/v1/users/{id}", USER_ID)
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk());
+
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void updateUser_deveAuditarUpdate() throws Exception {
+        when(registerService.updateUser(any(), eq(USER_ID))).thenReturn(buildResponse());
+
+        mockMvc.perform(put("/v1/users")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(buildRequest("Fulano", "fulano@email.com", "senha12345"))))
+                .andExpect(status().isOk());
+
+        verify(auditService).recordFromJwt(eq(AuditAction.UPDATE), any(), eq(USER_ID), eq("fulano@email.com"));
+    }
+
+    @Test
+    void removeUser_deveAuditarSoftDeleteAdmin() throws Exception {
+        mockMvc.perform(delete("/v1/users/{id}", USER_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isNoContent());
+
+        verify(auditService).recordFromJwt(eq(AuditAction.SOFT_DELETE_ADMIN), any(), eq(USER_ID), isNull());
+    }
+
+    @Test
+    void deleteUser_deveAuditarHardDeleteAdmin() throws Exception {
+        mockMvc.perform(delete("/v1/users/del/{id}", USER_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isNoContent());
+
+        verify(auditService).recordFromJwt(eq(AuditAction.HARD_DELETE_ADMIN), any(), eq(USER_ID), isNull());
+    }
+
+    @Test
+    void removeCurrentUser_deveAuditarSoftDeleteSelf() throws Exception {
+        mockMvc.perform(delete("/v1/users/remove/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isNoContent());
+
+        verify(auditService).recordFromJwt(eq(AuditAction.SOFT_DELETE_SELF), any(), eq(USER_ID), isNull());
+    }
+
+    @Test
+    void getCurrentUser_naoDeveAuditar() throws Exception {
+        when(searchService.searchById(USER_ID)).thenReturn(buildResponse());
+
+        mockMvc.perform(get("/v1/users/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk());
+
+        verifyNoInteractions(auditService);
     }
 }

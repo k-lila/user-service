@@ -8,6 +8,7 @@
 - [Exemplos de payload](#exemplos-de-payload)
 - [Claims do JWT](#claims-do-jwt)
 - [Schema MongoDB (coleção `users`)](#schema-mongodb-coleção-users)
+- [Schema MongoDB (coleção `auditLogs`)](#schema-mongodb-coleção-auditlogs)
 - [Estratégia de cache (Redis)](#estratégia-de-cache-redis)
 - [Formato de erros (RFC 7807 / ProblemDetail)](#formato-de-erros-rfc-7807--problemdetail)
 
@@ -99,6 +100,29 @@ O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims
   active: Boolean
 }
 ```
+
+## Schema MongoDB (coleção `auditLogs`)
+
+Trilha de auditoria de acesso a dado pessoal (LGPD, ADR-011) — distinta do log operacional SLF4J.
+Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetUserId, timestamp desc)`.
+
+```js
+{
+  _id: ObjectId,
+  timestamp: ISODate,        // quando a operação ocorreu
+  action: String,            // REGISTER | UPDATE | SOFT_DELETE_ADMIN | HARD_DELETE_ADMIN
+                             //   | SOFT_DELETE_SELF | READ_INTERNAL_CREDENTIAL | READ_CROSS_SUBJECT
+  actorType: String,         // USER | ADMIN | SYSTEM
+  actorUserId: String,       // null quando SYSTEM
+  actorRoles: [String],      // null quando SYSTEM
+  targetUserId: String,      // titular do dado (quando aplicável)
+  targetEmail: String,       // mascarado (ex: "f***@email.com"); null quando não aplicável
+  correlationId: String      // traceId B3, para correlação com logs/Zipkin
+}
+```
+
+> Leitura do próprio dado (`/me`, consulta ao próprio ID/email) **não** gera trilha. A listagem
+> (`GET /v1/users`) não é auditada (escopo inicial). Sem endpoint de consulta nem TTL — ver ADR-011.
 
 ## Estratégia de cache (Redis)
 

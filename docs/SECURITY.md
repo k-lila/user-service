@@ -45,6 +45,14 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   auth-server, user-service) autenticam via `spring.data.redis.password` (data nodes) e
   `spring.data.redis.sentinel.password` (sentinels). O `redis-exporter` autentica com
   `REDIS_PASSWORD` nos 6 alvos do modo multi-target.
+- **Trilha de auditoria de dado pessoal (ADR-011, LGPD, item 1.4 RELATORIOA):** coleção Mongo
+  `auditLogs` (user-service) registra *quem acessou/alterou/apagou qual dado de qual titular,
+  quando* — **distinta** do log operacional SLF4J. Cobre mutações (register/update/soft+hard
+  delete), leitura de credencial interna (ator SYSTEM) e leitura cross-subject (titular ≠
+  solicitante); o `/me`/leitura do próprio dado não é auditado. `targetEmail` mascarado;
+  `correlationId` = traceId B3 (o IP do cliente vive no log de borda do gateway, ADR-010). Escrita
+  assíncrona e isolada de falha. Dívida (em "gaps"): async = risco de perda em crash; listagem não
+  auditada; sem endpoint de consulta nem retenção/TTL.
 
 ## Gaps de segurança conhecidos (dívida aceita)
 

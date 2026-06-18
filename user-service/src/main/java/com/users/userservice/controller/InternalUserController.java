@@ -8,7 +8,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.users.userservice.domain.AuditAction;
 import com.users.userservice.dtos.AuthDTO;
+import com.users.userservice.services.AuditService;
 import com.users.userservice.services.AuthenticationService;
 import com.users.userservice.util.LogUtils;
 
@@ -22,10 +24,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @RequestMapping("/internal/users")
 public class InternalUserController {
     private final AuthenticationService authenticationService;
+    private final AuditService auditService;
     private static final Logger LOGGER = LoggerFactory.getLogger(InternalUserController.class);
 
-    public InternalUserController(AuthenticationService authenticationService) {
+    public InternalUserController(AuthenticationService authenticationService, AuditService auditService) {
         this.authenticationService = authenticationService;
+        this.auditService = auditService;
     }
 
     @Operation(summary = "Autenticar um usuário")
@@ -36,6 +40,7 @@ public class InternalUserController {
             LogUtils.maskEmail(email)
         );
         AuthDTO authenticated = authenticationService.getUserByEmail(email);
+        auditService.recordSystem(AuditAction.READ_INTERNAL_CREDENTIAL, authenticated.getId(), email);
         return ResponseEntity.ok(authenticated);
     }
 

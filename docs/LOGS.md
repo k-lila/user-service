@@ -63,6 +63,16 @@ DEBUG [user-service,traceId=...,spanId=...]          | cache usersById | put | I
 - `LogUtils.maskEmail()` (um por módulo: `user-service/.../util/` e `authorization-server/.../util/`) mascara para `f***@dominio`.
 - IDs de usuário (não-PII) são logados normalmente.
 
+### Log operacional ≠ trilha de auditoria
+
+O log SLF4J descrito aqui é **operacional**: efêmero, para diagnóstico/observabilidade, com PII
+mascarada. **Distinto** da **trilha de auditoria LGPD** (coleção Mongo `auditLogs`, ADR-011), que é
+**registro de negócio durável** de *quem acessou/alterou/apagou qual dado de qual titular, quando*,
+consultável por titular. Não confundir: uma operação gera **ambos** — uma linha de log operacional e
+(quando toca dado pessoal no escopo auditado) uma entrada em `auditLogs`. O `correlationId` (traceId
+B3) liga as duas, e ao trace no Zipkin. Detalhe do escopo/modelo em [SERVICOS.md](SERVICOS.md) e
+[ADR-011](adr/ADR-011-trilha-auditoria-dado-pessoal.md).
+
 ## Cobertura por classe
 
 | Classe                   | Camada                           | Destaque                                                                             |
