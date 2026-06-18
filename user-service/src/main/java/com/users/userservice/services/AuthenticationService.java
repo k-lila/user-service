@@ -41,6 +41,8 @@ public class AuthenticationService {
         authDTO.setPasswordHash(user.get().getPasswordHash());
         authDTO.setActive(user.get().getActive());
         authDTO.setRoles(user.get().getRoles());
+        // emailVerified nulo (legado, anterior ao campo) é tratado como verificado.
+        authDTO.setEmailVerified(!Boolean.FALSE.equals(user.get().getEmailVerified()));
 
         LOGGER.info(
             "| auth | enviando credenciais | email: {}",

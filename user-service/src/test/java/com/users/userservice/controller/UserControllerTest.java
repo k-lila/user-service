@@ -554,6 +554,61 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.active").value(true));
     }
 
+    // ── UserResponseDTO — novos campos (tenantIds, emailVerified, emailVerifiedAt) ──
+
+    @Test
+    void searchById_deveRetornarEmailVerifiedTrue_quandoUsuarioComEmailVerificado() throws Exception {
+        UserResponseDTO dto = buildResponse();
+        dto.setEmailVerified(true);
+        dto.setEmailVerifiedAt("2026-01-01T00:00:00Z");
+        when(searchService.searchById(USER_ID)).thenReturn(dto);
+
+        mockMvc.perform(get("/v1/users/{id}", USER_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.emailVerified").value(true))
+                .andExpect(jsonPath("$.emailVerifiedAt").value("2026-01-01T00:00:00Z"));
+    }
+
+    @Test
+    void searchById_deveRetornarEmailVerifiedTrue_quandoUsuarioLegadoComEmailVerifiedNulo() throws Exception {
+        UserResponseDTO dto = buildResponse();
+        dto.setEmailVerified(true);
+        dto.setEmailVerifiedAt(null);
+        when(searchService.searchById(USER_ID)).thenReturn(dto);
+
+        mockMvc.perform(get("/v1/users/{id}", USER_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.emailVerified").value(true))
+                .andExpect(jsonPath("$.emailVerifiedAt").doesNotExist());
+    }
+
+    @Test
+    void searchById_deveRetornarTenantIds_quandoUsuarioComTenantsAtribuidos() throws Exception {
+        UserResponseDTO dto = buildResponse();
+        dto.setTenantIds(List.of("tenant-1", "tenant-2"));
+        when(searchService.searchById(USER_ID)).thenReturn(dto);
+
+        mockMvc.perform(get("/v1/users/{id}", USER_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tenantIds[0]").value("tenant-1"))
+                .andExpect(jsonPath("$.tenantIds[1]").value("tenant-2"));
+    }
+
+    @Test
+    void searchById_deveRetornarTenantIdsNulo_quandoUsuarioSemTenants() throws Exception {
+        UserResponseDTO dto = buildResponse();
+        dto.setTenantIds(null);
+        when(searchService.searchById(USER_ID)).thenReturn(dto);
+
+        mockMvc.perform(get("/v1/users/{id}", USER_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tenantIds").doesNotExist());
+    }
+
     // ── Trilha de auditoria (LGPD, item 1.4) ─────────────────────────────────
 
     @Test

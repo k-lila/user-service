@@ -1,6 +1,7 @@
 package com.users.userservice.domain;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.data.annotation.Id;
@@ -56,4 +57,15 @@ public class User {
 
     @Schema(description = "Versão dos termos/privacidade aceita no cadastro", nullable = true)
     private String termsVersion;
+
+    @Schema(description = "IDs dos tenants aos quais o usuário pertence", nullable = true)
+    private List<String> tenantIds;
+
+    // Nullable: sem fluxo de verificação implementado ainda — null é tratado como
+    // verificado (true) em toda a leitura, igual ao padrão do consentAcceptedAt legado.
+    @Schema(description = "Indica se o e-mail foi verificado", nullable = true)
+    private Boolean emailVerified;
+
+    @Schema(description = "Momento em que o e-mail foi verificado", nullable = true)
+    private Instant emailVerifiedAt;
 }

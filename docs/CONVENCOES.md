@@ -94,6 +94,25 @@ arquivos por **caminho relativo** (ex.: `user-service/src/main`, `docs/adr/TEMPL
 - **Invariante:** ao criar ou editar uma skill, use caminhos relativos. Checagem rápida:
   `grep -rn "/home/" .claude/skills/` deve retornar vazio.
 
+## Campos novos no entity `User`: nullable + scaffold antes do fluxo completo
+
+- Ao adicionar um campo novo ao entity `User` (MongoDB) antes de implementar o fluxo de
+  negócio completo que o consome, o padrão é: **sem `@NotNull`**, documentado como
+  `nullable: true` no `@Schema`, e a leitura trata `null` como o valor "neutro" esperado —
+  nunca lança nem força backfill em massa dos documentos legados.
+- **Exemplos já seguindo o padrão:** `consentAcceptedAt`/`termsVersion` (ADR-012, nullable
+  para usuários cadastrados antes do consentimento LGPD); `tenantIds` (reservado para
+  multi-tenant futuro, sempre `null` até existir atribuição de tenant); `emailVerified`/
+  `emailVerifiedAt` (scaffold sem fluxo de verificação de e-mail — `registerUser` sempre
+  seta `true`; `null` em registros legados é tratado como verificado em toda leitura, nunca
+  como bloqueio de login).
+- **Por quê:** evita migração de dados obrigatória no deploy do campo e mantém o
+  `registerUser`/leituras existentes funcionando sem alteração de comportamento até o dia em
+  que a feature que consome o campo for implementada de fato.
+- **Invariante:** ao introduzir um campo nessa categoria, replique o comentário explicando o
+  default/nullable no entity (`User.java`) e no `UserResponseDTO`, não deixe a intenção
+  implícita no código.
+
 ## Referências cruzadas (ADRs)
 
 - **ADR-001** — leitura somente de ativos (soft-delete)

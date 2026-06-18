@@ -71,8 +71,12 @@ public class AuthorizationService implements UserDetailsService {
         // accountNonLocked=false faz o DaoAuthenticationProvider lançar LockedException
         // antes de checar a senha. Chaveado pelo email submetido (mesmo valor do listener).
         boolean accountNonLocked = !loginAttempts.isBlocked(email, ClientIpResolver.currentIp(trustedClientIpHeader));
+        // emailVerified nulo (legado, anterior ao campo, ou falha de (de)serialização) é
+        // tratado como verificado — sem fluxo de verificação implementado ainda, o gate
+        // só passa a bloquear quando o campo for explicitamente setado como false.
+        boolean emailVerified = !Boolean.FALSE.equals(user.getEmailVerified());
         return new User(user.getEmail(), user.getPasswordHash(),
-                true, true, true, accountNonLocked, authorities);
+                emailVerified, true, true, accountNonLocked, authorities);
     }
 
 }
