@@ -30,6 +30,12 @@ internal:
   api:
     token: ${INTERNAL_API_TOKEN}
 
+# Consentimento LGPD: versão dos termos/privacidade registrada no cadastro (aceite versionado).
+# Bump quando a política mudar (permite exigir re-consentimento). Override em prod via TERMS_VERSION.
+app:
+  terms:
+    version: ${TERMS_VERSION:v1}
+
 eureka:
   client:
     service-url:

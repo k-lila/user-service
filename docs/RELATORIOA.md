@@ -53,7 +53,7 @@ sob a LGPD. O que o projeto já tem e o que falta:
 | Direito / dever LGPD | Estado |
 |---|---|
 | **Eliminação / direito ao esquecimento** | ✅ Já existe (soft/hard delete — ADR-001). Bom. |
-| **Base legal / consentimento** | ⚠️ Registrar consentimento no cadastro (aceite de termos/privacidade com timestamp). |
+| **Base legal / consentimento** | ✅ Fechado (ADR-012): `termsAccepted` obrigatório no cadastro → `consentAcceptedAt` + `termsVersion` na coleção `users`. |
 | **Trilha de auditoria de acesso** | ✅ Item 1.4 fechado (coleção `auditLogs`, ADR-011). |
 | **Portabilidade (exportar meus dados)** | ❌ Endpoint para o titular exportar os próprios dados. Pode ser pós-lançamento, mas planeje. |
 | **Minimização** | ✅ Coleta enxuta (nome, e-mail, senha). PII mascarada em log. Bom. |
@@ -74,7 +74,7 @@ entram na barra porque nascem com o dado.
 [ ] 1.3  Reset de senha (RELATORIOB.md)
 [x] 1.4  Audit log de acesso a dado pessoal (LGPD)  ← FECHADO (2026-06-17, ADR-011)
 [ ] 1.5  Zero credencial default de dev
-[ ] LGPD Consentimento registrado no cadastro
+[x] LGPD Consentimento registrado no cadastro  ← FECHADO (2026-06-17, ADR-012)
 ```
 
 Fechou os 10 → o deploy é legítimo. Tier 2 vira backlog de hardening contínuo (o "hábito" de

@@ -68,6 +68,7 @@ class UserControllerTest {
         dto.setName(name);
         dto.setEmail(email);
         dto.setPassword(password);
+        dto.setTermsAccepted(true);
         return dto;
     }
 
@@ -96,6 +97,34 @@ class UserControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest("Ciclano", "fulano@email.com", "senha456"))))
                 .andExpect(status().isConflict());
+    }
+
+    // ── POST /users/register — consentimento LGPD (grupo OnCreate) ─────────────
+
+    @Test
+    void register_deveRetornar400_quandoConsentimentoAusente() throws Exception {
+        UserRequestDTO semConsentimento = buildRequest("Fulano", "fulano@email.com", "senha123");
+        semConsentimento.setTermsAccepted(null);
+
+        mockMvc.perform(post("/v1/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(semConsentimento)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
+    }
+
+    @Test
+    void register_deveRetornar400_quandoConsentimentoFalse() throws Exception {
+        UserRequestDTO consentimentoFalse = buildRequest("Fulano", "fulano@email.com", "senha123");
+        consentimentoFalse.setTermsAccepted(false);
+
+        mockMvc.perform(post("/v1/users/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(consentimentoFalse)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(registerService);
     }
 
     // ── POST /users/register — validação de corpo (@Valid → 400, C3) ───────────

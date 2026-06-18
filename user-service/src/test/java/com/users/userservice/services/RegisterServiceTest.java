@@ -34,7 +34,7 @@ class RegisterServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RegisterService(userRepository, passwordEncoder, cacheService);
+        service = new RegisterService(userRepository, passwordEncoder, cacheService, "v1");
     }
 
     private User buildUser(String id, String email, boolean active) {
@@ -175,6 +175,27 @@ class RegisterServiceTest {
         assertTrue(inserido.getRoles().contains("USER"));
         assertEquals("$2a$10$hashed", inserido.getPasswordHash());
         assertNotNull(inserido.getRegistrationDate());
+    }
+
+    @Test
+    void deveRegistrarConsentimentoLgpd_comTimestampEVersao() {
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Fulano");
+        dto.setEmail("fulano@email.com");
+        dto.setPassword("senha123");
+        dto.setTermsAccepted(true);
+
+        when(userRepository.findByEmail("fulano@email.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("senha123")).thenReturn("$2a$10$hashed");
+        when(userRepository.insert(any(User.class))).thenReturn(buildUser("id-1", "fulano@email.com", true));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        service.registerUser(dto);
+
+        verify(userRepository).insert(captor.capture());
+        User inserido = captor.getValue();
+        assertNotNull(inserido.getConsentAcceptedAt());
+        assertEquals("v1", inserido.getTermsVersion());
     }
 
     @Test

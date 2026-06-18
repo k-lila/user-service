@@ -10,6 +10,7 @@
 - [Dados (Mongo · Postgres · Redis)](#dados-mongo--postgres--redis)
 - [OAuth2 e JWT](#oauth2-e-jwt)
 - [Canal interno](#canal-interno)
+- [Consentimento LGPD](#consentimento-lgpd)
 - [Swagger / OpenAPI](#swagger--openapi)
 - [CORS](#cors)
 - [Borda e IP do cliente (lockout / rate limit)](#borda-e-ip-do-cliente-lockout--rate-limit)
@@ -107,6 +108,12 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | Variável             | Serviço(s)              | Default dev      | Observação                                                                                       |
 | -------------------- | ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------ |
 | `INTERNAL_API_TOKEN` | user-service · auth-server | — (fail-fast) | Shared secret do canal `/internal/**` (header `X-Internal-Token`). Sem default no config-server — o app **não sobe** sem ele; o compose injeta `internal-dev-token`. **Mesmo valor nos dois serviços.** |
+
+## Consentimento LGPD
+
+| Variável         | Serviço(s)   | Default dev | Observação                                                                                                  |
+| ---------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| `TERMS_VERSION`  | user-service | `v1`        | Versão dos termos/privacidade registrada no cadastro (`app.terms.version`, ADR-012). **Bump** quando a política mudar — permite exigir re-consentimento e prova qual versão cada titular aceitou. |
 
 ## Swagger / OpenAPI
 

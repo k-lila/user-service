@@ -44,13 +44,14 @@ soft-deleted (`active=false`):
 
 ## Exemplos de payload
 
-**Request — `POST /v1/users/register`** (Bean Validation; `name` 1–50 chars, `email` formato e-mail, `password` obrigatória, 8–72 chars com ao menos uma letra e um número — no `PUT /v1/users` a senha é opcional: omitida/null mantém a atual):
+**Request — `POST /v1/users/register`** (Bean Validation; `name` 1–50 chars, `email` formato e-mail, `password` obrigatória, 8–72 chars com ao menos uma letra e um número; `termsAccepted` **obrigatório e `true`** — consentimento LGPD, ADR-012 — só no cadastro. No `PUT /v1/users` a senha é opcional (omitida/null mantém a atual) e `termsAccepted` é ignorado):
 
 ```json
 {
   "name": "Maria Silva",
   "email": "maria@exemplo.com",
-  "password": "senhaSegura123"
+  "password": "senhaSegura123",
+  "termsAccepted": true
 }
 ```
 
@@ -62,7 +63,9 @@ soft-deleted (`active=false`):
   "name": "Maria Silva",
   "email": "maria@exemplo.com",
   "registrationDate": "2026-06-08T14:32:10.123",
-  "active": true
+  "active": true,
+  "consentAcceptedAt": "2026-06-08T14:32:10.123",
+  "termsVersion": "v1"
 }
 ```
 
@@ -97,7 +100,9 @@ O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims
   passwordHash: String,  // BCrypt (custo 10)
   registrationDate: ISODate,
   roles: [String],       // ex: ["USER"], ["USER", "ADMIN"]
-  active: Boolean
+  active: Boolean,
+  consentAcceptedAt: ISODate, // consentimento LGPD no cadastro (ADR-012); nullable p/ legados
+  termsVersion: String        // versão dos termos aceita (ex: "v1"); nullable p/ legados
 }
 ```
 

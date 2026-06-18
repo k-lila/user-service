@@ -6,6 +6,7 @@ import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -28,11 +29,17 @@ public class RegisterService {
     private final IUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final CacheService cacheService;
+    private final String termsVersion;
 
-    public RegisterService(IUserRepository iUserRepository, PasswordEncoder passwordEncoder, CacheService cacheService) {
+    public RegisterService(
+            IUserRepository iUserRepository,
+            PasswordEncoder passwordEncoder,
+            CacheService cacheService,
+            @Value("${app.terms.version:v1}") String termsVersion) {
         this.userRepository = iUserRepository;
         this.passwordEncoder = passwordEncoder;
         this.cacheService = cacheService;
+        this.termsVersion = termsVersion;
     }
 
     public UserResponseDTO registerUser(@Valid UserRequestDTO userDTO) {
@@ -50,6 +57,9 @@ public class RegisterService {
         user.setRoles(Set.of("USER"));
         user.setRegistrationDate(Instant.now());
         user.setActive(true);
+        // Consentimento LGPD registrado no cadastro (aceite versionado com timestamp).
+        user.setConsentAcceptedAt(Instant.now());
+        user.setTermsVersion(termsVersion);
         User registered;
         try {
             registered = userRepository.insert(user);
