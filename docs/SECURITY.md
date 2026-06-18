@@ -20,8 +20,16 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   após 5 falhas (`security.lockout.*`). `LoginAttemptListener` conta só
   `AuthenticationFailureBadCredentialsEvent` de form login; `AuthorizationService` devolve
   `accountNonLocked=false` quando bloqueado → `LockedException` antes da checagem de senha
-  (mensagem genérica). **Prod exige** `server.forward-headers-strategy` + proxy sanitizando
-  `X-Forwarded-For` (senão o IP é falsificável e o particionamento por IP é burlável).
+  (mensagem genérica).
+- **IP do cliente não-falsificável (ADR-010, item 1.2 RELATORIOA):** lockout e rate limiting
+  resolvem o IP via header confiável `security.trusted-client-ip-header` (default `CF-Connecting-IP`,
+  que a Cloudflare **sempre sobrescreve**), com fallback em `getRemoteAddr()`/`getHostString()` sob
+  `server.forward-headers-strategy=framework` — agora na **base** do config-server (gateway +
+  auth-server), não só nos overlays. O `X-Forwarded-For` bruto deixou de ser lido (sob `cloudflared`,
+  que faz *append*, o leftmost é controlado pelo cliente). **Invariante de confiança:** o header só é
+  seguro porque só a borda (cloudflared) alcança o gateway/auth na topologia base (portas internas
+  nunca publicadas); expor um serviço direto reintroduz o spoofing. Deploy não-Cloudflare deve
+  esvaziar/trocar `TRUSTED_CLIENT_IP_HEADER` e garantir que a borda **substitua** (não anexe) o XFF.
 - **Rate limiting no gateway** (token bucket via Redis): LOW (registro/IP), MED (OAuth2/IP),
   HIGH (autenticados/user).
 - **CSRF no gateway** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`;

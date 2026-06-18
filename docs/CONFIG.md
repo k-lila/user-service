@@ -12,6 +12,7 @@
 - [Canal interno](#canal-interno)
 - [Swagger / OpenAPI](#swagger--openapi)
 - [CORS](#cors)
+- [Borda e IP do cliente (lockout / rate limit)](#borda-e-ip-do-cliente-lockout--rate-limit)
 - [Observabilidade](#observabilidade)
 - [Front-end](#front-end)
 - [Containers de infraestrutura (só `docker-compose`)](#containers-de-infraestrutura-só-docker-compose)
@@ -128,6 +129,19 @@ CORS na borda + configurável por ambiente. Cada serviço lê a property `cors.a
 | --------------------------- | -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `CORS_ALLOWED_ORIGINS`      | gateway              | `http://localhost:5173`  | Origens (CSV) do **SPA** permitidas pela borda. Em prod, a origem pública real do SPA. Logada no startup do gateway. |
 | `CORS_ALLOWED_ORIGINS_AUTH` | authorization-server | `http://localhost:8081`  | Origem (CSV) do **Swagger-UI** permitida no auth-server — o Swagger é cliente OAuth2 no browser e faz fetch cross-origin a `/oauth2/token`. Em prod, a origem pública do Swagger/borda. Compose usa `${VAR:-default}`. |
+
+## Borda e IP do cliente (lockout / rate limit)
+
+Fonte de IP do **lockout** (auth-server) e do **rate limiting** (gateway). Não-falsificável sob
+Cloudflare Tunnel (ADR-010, item 1.2 RELATORIOA): o header confiável é a fonte primária; o
+`forward-headers-strategy` é o fallback. Detalhe em [SECURITY.md](SECURITY.md).
+
+| Variável                          | Serviço(s)            | Default dev       | Observação                                                                                                  |
+| --------------------------------- | --------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------- |
+| `SERVER_FORWARD_HEADERS_STRATEGY` | gateway · auth-server | `framework`       | Faz o `remoteAddress`/`getRemoteAddr()` refletir o `X-Forwarded-For` sanitizado pela borda (fallback do IP). Default `framework` na **base** do config-server (antes só nos overlays TLS/deploy); seguro sem proxy. |
+| `TRUSTED_CLIENT_IP_HEADER`        | gateway · auth-server | `CF-Connecting-IP`| Header de IP confiável, **fonte primária** do particionamento por IP. A Cloudflare sobrescreve `CF-Connecting-IP`. **Esvaziar/trocar** em deploy não-Cloudflare (cai no XFF via forward-headers). |
+| `LOCKOUT_MAX_ATTEMPTS`            | auth-server           | `5`               | Falhas (conta+IP) antes do lockout.                                                                          |
+| `LOCKOUT_DURATION`                | auth-server           | `15m`             | Janela/TTL do lockout no Redis.                                                                              |
 
 ## Observabilidade
 

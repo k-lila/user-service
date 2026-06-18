@@ -22,7 +22,7 @@ import reactor.test.StepVerifier;
  */
 class RateLimiterConfigTest {
 
-    private final RateLimiterConfig config = new RateLimiterConfig();
+    private final RateLimiterConfig config = new RateLimiterConfig("CF-Connecting-IP");
 
     // ----- RedisRateLimiter: replenishRate / burstCapacity -----
 
@@ -52,10 +52,12 @@ class RateLimiterConfigTest {
     // ----- ipKeyResolver -----
 
     @Test
-    void deveUsarPrimeiroIpDoXForwardedFor_quandoHeaderPresente() {
+    void deveUsarCfConnectingIp_quandoHeaderPresente() {
         KeyResolver resolver = config.ipKeyResolver();
         MockServerWebExchange exchange = MockServerWebExchange.from(
-                MockServerHttpRequest.get("/").header("X-Forwarded-For", "203.0.113.5, 10.0.0.1"));
+                MockServerHttpRequest.get("/")
+                        .header("CF-Connecting-IP", "203.0.113.5")
+                        .remoteAddress(new InetSocketAddress("10.0.0.1", 12345)));
 
         StepVerifier.create(resolver.resolve(exchange))
                 .expectNext("203.0.113.5")
@@ -63,7 +65,22 @@ class RateLimiterConfigTest {
     }
 
     @Test
-    void deveUsarHostStringDoRemoteAddress_quandoSemXForwardedFor() {
+    void deveIgnorarXForwardedFor_eUsarRemoteAddress() {
+        // X-Forwarded-For bruto não é mais confiável (cloudflared faz append → leftmost
+        // controlado pelo cliente). Sem CF-Connecting-IP, cai no remoteAddress.
+        KeyResolver resolver = config.ipKeyResolver();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/")
+                        .header("X-Forwarded-For", "1.2.3.4, 10.0.0.1")
+                        .remoteAddress(new InetSocketAddress("198.51.100.7", 12345)));
+
+        StepVerifier.create(resolver.resolve(exchange))
+                .expectNext("198.51.100.7")
+                .verifyComplete();
+    }
+
+    @Test
+    void deveUsarHostStringDoRemoteAddress_quandoSemHeaderConfiavel() {
         KeyResolver resolver = config.ipKeyResolver();
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/")

@@ -6,6 +6,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
@@ -24,9 +25,14 @@ public class AuthorizationService implements UserDetailsService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthorizationService.class);
     private final IUserClient userClient;
     private final LoginAttemptService loginAttempts;
-    public AuthorizationService(IUserClient userClient, LoginAttemptService loginAttempts) {
+    private final String trustedClientIpHeader;
+    public AuthorizationService(
+            IUserClient userClient,
+            LoginAttemptService loginAttempts,
+            @Value("${security.trusted-client-ip-header:CF-Connecting-IP}") String trustedClientIpHeader) {
         this.userClient = userClient;
         this.loginAttempts = loginAttempts;
+        this.trustedClientIpHeader = trustedClientIpHeader;
     }
 
     @Override
@@ -64,7 +70,7 @@ public class AuthorizationService implements UserDetailsService {
         // Lockout anti-brute-force: se o par (conta, IP) atingiu o limite de falhas,
         // accountNonLocked=false faz o DaoAuthenticationProvider lançar LockedException
         // antes de checar a senha. Chaveado pelo email submetido (mesmo valor do listener).
-        boolean accountNonLocked = !loginAttempts.isBlocked(email, ClientIpResolver.currentIp());
+        boolean accountNonLocked = !loginAttempts.isBlocked(email, ClientIpResolver.currentIp(trustedClientIpHeader));
         return new User(user.getEmail(), user.getPasswordHash(),
                 true, true, true, accountNonLocked, authorities);
     }

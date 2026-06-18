@@ -70,7 +70,7 @@ entram na barra porque nascem com o dado.
 [~] 0.3  Segredos em secret manager (fora de arquivo plano)                       ← PARCIAL (Docker secrets; ainda arquivo no host)
 [~] 0.4  CORS/origens reais, zero localhost                                       ← PARCIAL (via env; efêmero no quick tunnel)
 [ ] 1.1  Backup Mongo+Postgres com restore testado
-[ ] 1.2  forward-headers + XFF sanitizado (lockout/rate-limit reais)
+[x] 1.2  forward-headers + IP confiável (CF-Connecting-IP) → lockout/rate-limit reais  ← FECHADO (2026-06-17, ADR-010)
 [ ] 1.3  Reset de senha (RELATORIOB.md)
 [ ] 1.4  Audit log de acesso a dado pessoal (LGPD)
 [ ] 1.5  Zero credencial default de dev

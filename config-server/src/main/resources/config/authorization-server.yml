@@ -1,6 +1,10 @@
 server:
   port: ${SERVER_PORT:8082}
   shutdown: graceful
+  # Atrás da borda (Cloudflare Tunnel / proxy TLS), reflete o X-Forwarded-For no
+  # getRemoteAddr() — fallback do lockout quando o header confiável de IP está ausente.
+  # Default framework é seguro sem proxy (sem XFF, getRemoteAddr() devolve o socket).
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:framework}
 
 spring:
   lifecycle:
@@ -77,6 +81,10 @@ security:
   lockout:
     max-attempts: ${LOCKOUT_MAX_ATTEMPTS:5}
     duration: ${LOCKOUT_DURATION:15m}
+  # Header de IP confiável injetado pela borda (Cloudflare sobrescreve CF-Connecting-IP).
+  # Fonte primária de IP do lockout — não-falsificável pois só a borda alcança o serviço.
+  # Esvaziar/trocar para deploy não-Cloudflare (cai no X-Forwarded-For via forward-headers).
+  trusted-client-ip-header: ${TRUSTED_CLIENT_IP_HEADER:CF-Connecting-IP}
 
 # CORS (C12): necessário para o Swagger-UI trocar o code pelo token via fetch cross-origin.
 # Origem do Swagger/borda (distinta da origem do SPA no gateway). Default dev http://localhost:8081.

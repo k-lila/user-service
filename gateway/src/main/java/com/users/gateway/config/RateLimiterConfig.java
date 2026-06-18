@@ -1,16 +1,26 @@
 package com.users.gateway.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
 import org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
+import com.users.gateway.util.ClientIpResolver;
+
 import reactor.core.publisher.Mono;
 
 @Configuration
 public class RateLimiterConfig {
-    
+
+    private final String trustedClientIpHeader;
+
+    public RateLimiterConfig(
+            @Value("${security.trusted-client-ip-header:CF-Connecting-IP}") String trustedClientIpHeader) {
+        this.trustedClientIpHeader = trustedClientIpHeader;
+    }
+
     @Primary
     @Bean
     public RedisRateLimiter redisRateLimiterHigh() {
@@ -30,18 +40,10 @@ public class RateLimiterConfig {
     @Primary
     @Bean
     public KeyResolver ipKeyResolver() {
-        return exchange -> {
-            var headers = exchange.getRequest().getHeaders();
-            String ip = headers.getFirst("X-Forwarded-For");
-            if (ip != null) {
-                return Mono.just(ip.split(",")[0]);
-            }      
-            var address = exchange.getRequest().getRemoteAddress();
-            if (address == null) return Mono.just("unknown");
-            // getHostString(): com server.forward-headers-strategy=framework o remoteAddress
-            // vem do X-Forwarded-For como InetSocketAddress unresolved (getAddress() == null).
-            return Mono.just(address.getHostString());
-        };
+        // IP confiável via CF-Connecting-IP (Cloudflare) e fallback no remoteAddress
+        // (que, sob forward-headers-strategy=framework, reflete o XFF sanitizado pela borda).
+        return exchange ->
+            Mono.just(ClientIpResolver.resolve(exchange.getRequest(), trustedClientIpHeader));
     }
 
     @Bean
