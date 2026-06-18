@@ -547,8 +547,8 @@ services:
       # redirectUri/postLogoutRedirectUri semeados no gateway-client (OAuth2ClientConfig).
       # Em prod, aponte para o domínio público real (CSV). Trocar exige re-seed do
       # gateway-client no Postgres — o seed é idempotente, não reconcilia cliente existente.
-      OAUTH_CLIENT_REDIRECT_URIS: ${OAUTH_CLIENT_REDIRECT_URIS:-http://localhost:8081/login/oauth2/code/gateway-client,http://localhost:5173/login/oauth2/code/gateway-client,https://app.localhost/login/oauth2/code/gateway-client,http://localhost:8081/swagger-ui/oauth2-redirect.html,https://oauth.pstmn.io/v1/callback}
-      OAUTH_CLIENT_POST_LOGOUT_URIS: ${OAUTH_CLIENT_POST_LOGOUT_URIS:-http://localhost:5173/,https://app.localhost/}
+      OAUTH_CLIENT_REDIRECT_URIS: ${OAUTH_CLIENT_REDIRECT_URIS:-http://localhost:8081/login/oauth2/code/gateway-client,http://localhost:5173/login/oauth2/code/gateway-client,http://localhost:8081/swagger-ui/oauth2-redirect.html,https://oauth.pstmn.io/v1/callback}
+      OAUTH_CLIENT_POST_LOGOUT_URIS: ${OAUTH_CLIENT_POST_LOGOUT_URIS:-http://localhost:5173/}
       AUTH_DB_URL: jdbc:postgresql://auth-postgres:5432/authdb
       AUTH_DB_USER: ${POSTGRES_USER}
       REDIS_SENTINEL_MASTER: mymaster

@@ -36,7 +36,7 @@ serviço**:
   `authorization-server/.../config/SecurityConfig.java`; cookie renomeado para
   **`AUTHSESSION`** via `DefaultCookieSerializer.setCookieName("AUTHSESSION")`, `HttpOnly`,
   flag `Secure` parametrizável (`app.cookie.secure` via `setUseSecureCookie`, default false p/
-  dev HTTP) — **simétrico ao gateway**: o overlay TLS liga ambos via `APP_COOKIE_SECURE=true`.
+  dev HTTP) — **simétrico ao gateway**: o overlay de deploy (Cloudflare) liga ambos via `APP_COOKIE_SECURE=true`.
 
 Os nomes distintos (`SESSION` vs `AUTHSESSION`) evitam a colisão no salto front-channel. Em
 produção, domínios separados por serviço também resolveriam, mas os nomes distintos garantem

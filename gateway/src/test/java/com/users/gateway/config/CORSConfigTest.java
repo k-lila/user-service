@@ -21,7 +21,7 @@ class CORSConfigTest {
     void deveConfigurarCorsComOriginsDaConfig() {
         CORSConfig config = new CORSConfig();
         ReflectionTestUtils.setField(config, "allowedOrigins",
-                List.of("http://localhost:5173", "https://app.localhost"));
+                List.of("http://localhost:5173", "https://app.exemplo.com"));
 
         CorsConfigurationSource source = config.corsConfigurationSource();
         MockServerWebExchange exchange = MockServerWebExchange.from(
@@ -30,7 +30,7 @@ class CORSConfigTest {
 
         assertThat(cors).isNotNull();
         assertThat(cors.getAllowedOriginPatterns())
-                .containsExactly("http://localhost:5173", "https://app.localhost");
+                .containsExactly("http://localhost:5173", "https://app.exemplo.com");
         // setAllowedOrigins não deve ser usado (incompatível com allowCredentials + curinga)
         assertThat(cors.getAllowedOrigins()).isNull();
         assertThat(cors.getAllowedMethods())

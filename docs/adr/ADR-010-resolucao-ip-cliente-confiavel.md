@@ -15,8 +15,8 @@ fonte de IP era falsificável:
   o leftmost é o valor que o **cliente** mandou, não o IP real. Qualquer um podia enviar
   `X-Forwarded-For: 1.2.3.4` e burlar o particionamento (rate-limit/lockout viravam teatro).
 - **Auth-server** (`ClientIpResolver.currentIp`) usava `getRemoteAddr()`, que só reflete o XFF
-  com `server.forward-headers-strategy` configurado — setado **apenas** nos overlays
-  (`docker-compose.tls.yml`/`.deploy.yml`), ausente na base do config-server.
+  com `server.forward-headers-strategy` configurado — setado **apenas** no overlay
+  (`docker-compose.deploy.yml`), ausente na base do config-server.
 
 A decisão de deploy (RELATORIOA) é **máquina própria + Cloudflare Tunnel**: só o `cloudflared`
 alcança o gateway/auth (a base nunca publica as portas internas), e a Cloudflare **sempre

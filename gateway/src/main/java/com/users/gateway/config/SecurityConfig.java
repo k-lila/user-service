@@ -44,8 +44,8 @@ import reactor.core.publisher.Mono;
 public class SecurityConfig {
 
     // Flag Secure dos cookies (SESSION/XSRF-TOKEN). Default false p/ dev HTTP puro;
-    // o overlay TLS (docker-compose.tls.yml) liga via APP_COOKIE_SECURE=true. Atrás de
-    // proxy que termina TLS o sslInfo do exchange é null, então a flag é explícita (não inferida).
+    // o overlay de deploy (docker-compose.deploy.yml, Cloudflare) liga via APP_COOKIE_SECURE=true.
+    // Atrás de proxy que termina TLS o sslInfo do exchange é null, então a flag é explícita (não inferida).
     @Value("${app.cookie.secure:false}")
     private boolean cookieSecure;
 
