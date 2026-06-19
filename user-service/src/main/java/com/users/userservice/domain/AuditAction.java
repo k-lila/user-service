@@ -16,8 +16,14 @@ public enum AuditAction {
     HARD_DELETE_ADMIN,
     /** Auto-remoção (soft-delete) do próprio usuário. */
     SOFT_DELETE_SELF,
+    /** Auto-remoção definitiva (hard-delete) do próprio usuário. */
+    HARD_DELETE_SELF,
     /** Leitura de credencial via canal interno (auth-server, ator SYSTEM). */
     READ_INTERNAL_CREDENTIAL,
     /** Leitura dos dados de um titular distinto do solicitante. */
-    READ_CROSS_SUBJECT
+    READ_CROSS_SUBJECT,
+    /** Concessão da role ADMIN a um titular (AdminController, ADR-014). */
+    ROLE_GRANT,
+    /** Revogação da role ADMIN de um titular (AdminController, ADR-014). */
+    ROLE_REVOKE
 }
