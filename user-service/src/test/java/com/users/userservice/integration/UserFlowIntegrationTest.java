@@ -64,8 +64,9 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         // Consentimento LGPD persistido no cadastro (aceite versionado com timestamp).
         assertNotNull(encontrado.getConsentAcceptedAt());
         assertEquals("v1", encontrado.getTermsVersion());
-        assertTrue(encontrado.getEmailVerified());
-        assertNotNull(encontrado.getEmailVerifiedAt());
+        // ADR-015: e-mail nasce não verificado; só vira true após confirmação via token.
+        assertFalse(encontrado.getEmailVerified());
+        assertNull(encontrado.getEmailVerifiedAt());
     }
 
     @Test

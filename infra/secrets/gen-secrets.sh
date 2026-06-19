@@ -32,6 +32,13 @@ POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres-dev-secret}"
 MONGO_USER="${MONGO_USER:-root}"
 MONGO_PASSWORD="${MONGO_PASSWORD:-mongo-dev-secret}"
 GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-admin}"
+# notification-service (ADR-015): sem credenciais reais por default — só placeholders de dev
+# (host/porta compatíveis com um MailHog/Mailpit local). Em prod, exporte os 4 com valores
+# reais do provedor SMTP escolhido antes de rodar este script.
+SMTP_HOST="${SMTP_HOST:-localhost}"
+SMTP_PORT="${SMTP_PORT:-1025}"
+SMTP_USERNAME="${SMTP_USERNAME:-}"
+SMTP_PASSWORD="${SMTP_PASSWORD:-}"
 
 # printf '%s' (sem \n final): o configtree do Spring e o `cat` do redis usam o conteúdo
 # literal — um newline final entraria na senha e quebraria a autenticação.
@@ -51,6 +58,10 @@ write INTERNAL_API_TOKEN     "$INTERNAL_API_TOKEN"
 write POSTGRES_PASSWORD      "$POSTGRES_PASSWORD"
 write MONGO_PASSWORD         "$MONGO_PASSWORD"
 write GRAFANA_ADMIN_PASSWORD "$GRAFANA_ADMIN_PASSWORD"
+write SMTP_HOST              "$SMTP_HOST"
+write SMTP_PORT              "$SMTP_PORT"
+write SMTP_USERNAME          "$SMTP_USERNAME"
+write SMTP_PASSWORD          "$SMTP_PASSWORD"
 # URI completa do Mongo: o user-service resolve ${MONGODB_URI} via configtree.
 write MONGODB_URI "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin"
 

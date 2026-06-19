@@ -50,6 +50,19 @@ public class AuditService {
         persist(log);
     }
 
+    /**
+     * Confirmação de verificação de e-mail (ADR-015): não há JWT (endpoint público,
+     * pré-sessão); o ator é o próprio titular cujo e-mail foi confirmado.
+     */
+    @Async("auditExecutor")
+    public void recordEmailVerified(String userId, String email) {
+        AuditLog log = base(AuditAction.EMAIL_VERIFIED, userId, email);
+        log.setActorType(USER);
+        log.setActorUserId(userId);
+        log.setActorRoles(Set.of(USER));
+        persist(log);
+    }
+
     /** Operação por um usuário autenticado (ator extraído do JWT). */
     @Async("auditExecutor")
     public void recordFromJwt(AuditAction action, Jwt actor, String targetUserId, String targetEmail) {

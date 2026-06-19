@@ -45,13 +45,34 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   auth-server, user-service) autenticam via `spring.data.redis.password` (data nodes) e
   `spring.data.redis.sentinel.password` (sentinels). O `redis-exporter` autentica com
   `REDIS_PASSWORD` nos 6 alvos do modo multi-target.
-- **Gate de e-mail verificado no login (dormente):** `AuthorizationService.loadUserByUsername`
+- **Gate de e-mail verificado no login, ativo (ADR-015):** `AuthorizationService.loadUserByUsername`
   mapeia `AuthDTO.emailVerified` para o flag `enabled` do `UserDetails` — `emailVerified=false`
-  bloquearia o login via `DisabledException`, antes mesmo da checagem de senha. Hoje é
-  **inerte na prática**: sem fluxo de verificação de e-mail implementado, `registerUser`
-  sempre seta `emailVerified=true` e `null` (legado) também é tratado como verificado. O
-  mecanismo de bloqueio já existe e está testado — falta só o fluxo que produz `false` (envio
-  de e-mail + endpoint de confirmação) para ativá-lo de fato.
+  bloqueia o login via `DisabledException` (mensagem genérica), antes da checagem de senha.
+  Desde o `notification-service`, `registerUser` seta `emailVerified=false` no cadastro e
+  dispara o e-mail de verificação (`GET /v1/users/verify-email` confirma); `null` (legado,
+  anterior ao campo) continua tratado como verificado, sem bloqueio. **Mitigação de conta
+  permanentemente inacessível:** janela de carência de 24h (`security.email-verification.
+  grace-period`) desde `AuthDTO.registrationDate` — login funciona dentro da janela mesmo sem
+  confirmação, caso o e-mail nunca chegue (SMTP down, outbox `FAILED`); só bloqueia de fato
+  depois da janela. `registrationDate` é populado só server-side (sem caminho de escrita
+  externa) — não há como um atacante estender a própria janela.
+- **notification-service: canal interno e anti-abuso (ADR-015):** o endpoint
+  `POST /internal/notifications/email-verification` é protegido pelo mesmo `X-Internal-Token`
+  do canal interno existente (ADR-006), via `Filter` de servlet simples (sem Spring Security —
+  o serviço não tem outra rota autenticável); **nunca exposto pelo gateway**. O reenvio
+  (`POST /v1/users/resend-verification`) tem duas camadas de rate limit: tier LOW por IP no
+  gateway (mesmo de `/v1/users/register`) **e** um limite por conta-alvo
+  (`ResendRateLimitService`, Redis, chave `sha256(emailLower)`, default 3/h) — evita e-mail
+  bombing de uma vítima específica via IPs rotativos. A resposta é sempre `202` idêntica
+  (anti-enumeração); a chamada ao notification-service é assíncrona, então o branch interno
+  não varia a latência observável da resposta HTTP.
+- **Token de verificação de e-mail em URL (dívida aceita, ADR-015):** o link de confirmação
+  carrega o token na query string (`GET /v1/users/verify-email?token=...`). Mitigado por TTL
+  de 15 min + uso único (status do outbox vira `CONFIRMED`/`SUPERSEDED` no primeiro uso válido)
+  — padrão de mercado para links de confirmação por e-mail. Confirmado que os filtros de log do
+  gateway (`CorrelationIdFilter`, `RateLimitLogFilter`) só logam o path, não a query string —
+  o token não aparece em log aplicacional deste repositório. Resíduo fora do código: spans
+  Zipkin (`http.url`) e logs de proxy/CDN externos podem capturar a query string completa.
 - **Trilha de auditoria de dado pessoal (ADR-011, LGPD):** coleção Mongo
   `auditLogs` (user-service) registra *quem acessou/alterou/apagou qual dado de qual titular,
   quando* — **distinta** do log operacional SLF4J. Cobre mutações (register/update/soft+hard

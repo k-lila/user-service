@@ -16,12 +16,15 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.users.userservice.domain.AuditAction;
+import com.users.userservice.dtos.ResendVerificationRequestDTO;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.services.AuditService;
+import com.users.userservice.services.EmailVerificationService;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
 
@@ -41,11 +44,17 @@ public class UserController {
     private final RegisterService registerService;
     private final SearchService searchService;
     private final AuditService auditService;
+    private final EmailVerificationService emailVerificationService;
 
-    public UserController(RegisterService registerService, SearchService searchService, AuditService auditService) {
+    public UserController(
+            RegisterService registerService,
+            SearchService searchService,
+            AuditService auditService,
+            EmailVerificationService emailVerificationService) {
         this.registerService = registerService;
         this.searchService = searchService;
         this.auditService = auditService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @Operation(summary = "Registrar novo usuário")
@@ -59,6 +68,26 @@ public class UserController {
         UserResponseDTO newUser = registerService.registerUser(userDTO);
         auditService.recordRegistration(newUser.getId(), newUser.getEmail());
         return ResponseEntity.status(201).body(newUser);
+    }
+
+    // Endpoint público, pré-sessão (usuário recém-cadastrado, sem cookie/JWT). Token opaco
+    // de alta entropia + TTL 15min mitigam o transporte via query string (ADR-015).
+    @Operation(summary = "Confirmar verificação de e-mail")
+    @GetMapping("/verify-email")
+    public ResponseEntity<Void> verifyEmail(@RequestParam String token) {
+        LOGGER.info("| GET | confirmar verificação de e-mail");
+        emailVerificationService.confirm(token);
+        return ResponseEntity.ok().build();
+    }
+
+    // Resposta sempre 202 idêntica, independente do branch interno (anti-enumeração, AC-10) —
+    // não revela se o e-mail existe, já está verificado, ou está pendente.
+    @Operation(summary = "Reenviar e-mail de verificação")
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Void> resendVerification(@RequestBody @Valid ResendVerificationRequestDTO dto) {
+        LOGGER.info("| POST | reenviar verificação de e-mail");
+        emailVerificationService.resend(dto.getEmail());
+        return ResponseEntity.accepted().build();
     }
 
     @Operation(summary = "Lista todos os usuários")

@@ -120,6 +120,15 @@ secrets:
     file: ./secrets/MONGODB_URI
   GRAFANA_ADMIN_PASSWORD:
     file: ./secrets/GRAFANA_ADMIN_PASSWORD
+  # notification-service (ADR-015): placeholders de dev sem credenciais reais.
+  SMTP_HOST:
+    file: ./secrets/SMTP_HOST
+  SMTP_PORT:
+    file: ./secrets/SMTP_PORT
+  SMTP_USERNAME:
+    file: ./secrets/SMTP_USERNAME
+  SMTP_PASSWORD:
+    file: ./secrets/SMTP_PASSWORD
   jwk_private:
     file: ./secrets/jwk_private
   jwk_public:
@@ -469,6 +478,35 @@ services:
     healthcheck:
       <<: *hc
       test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
+    stop_grace_period: 35s
+    restart: unless-stopped
+
+  # notification-service (ADR-015): stateless (sem Mongo/Redis/Postgres) — só SMTP externo.
+  # Sem ports: nunca exposto pelo gateway, só acessível internamente via Eureka/Feign
+  # (canal /internal/**, X-Internal-Token). O user-service NÃO depende de service_healthy
+  # aqui (chamada assíncrona com circuit breaker — indisponibilidade não pode travar o
+  # cadastro), e este serviço também não depende do user-service.
+  notification-service:
+    build: ./notification-service
+    <<: *res-app
+    depends_on:
+      discovery-server-1:
+        condition: service_healthy
+      discovery-server-2:
+        condition: service_healthy
+    environment:
+      <<: *spring-app-env
+      SERVER_PORT: 8095
+    secrets:
+      - CONFIG_SERVER_PASSWORD
+      - INTERNAL_API_TOKEN
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USERNAME
+      - SMTP_PASSWORD
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "curl", "-f", "http://localhost:8095/actuator/health"]
     stop_grace_period: 35s
     restart: unless-stopped
 

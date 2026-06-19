@@ -125,6 +125,9 @@ mvn -f authorization-server/pom.xml test
 # authorization-server — apenas integração (OAuth2, lockout, circuit breaker, seed, sessão; Postgres+Redis+WireMock)
 mvn -f authorization-server/pom.xml test -Dtest="*IntegrationTest"
 
+# notification-service — suite completa (unitários + controller; stateless, sem integração própria)
+mvn -f notification-service/pom.xml test
+
 # Classe específica
 mvn -f user-service/pom.xml test -Dtest=UserControllerTest
 ```
@@ -158,8 +161,8 @@ declarado **em cada módulo** — o `prepare-agent` injeta o `argLine` que o Sur
 (todos os testes, inclusive os de integração com Testcontainers, rodam no Surefire — não há
 Failsafe), e o `report` gera o HTML em `<módulo>/target/site/jacoco/index.html` na fase `verify`.
 
-**Gate de cobertura.** Os três módulos de domínio (`user-service`, `authorization-server`,
-`gateway`) têm a regra `check` ligada à fase `verify`: o build **falha** se a cobertura de
+**Gate de cobertura.** Os quatro módulos de domínio (`user-service`, `authorization-server`,
+`gateway`, `notification-service`) têm a regra `check` ligada à fase `verify`: o build **falha** se a cobertura de
 **linha** (counter `LINE`, escopo `BUNDLE`) cair abaixo de **70%** — o piso bloqueante do
 projeto. 80% segue como meta a perseguir escrevendo testes, não como gate (evita reprovar o
 build por poucos pontos). Quando um módulo ficar abaixo do piso, escreva os testes faltantes
@@ -185,8 +188,9 @@ mvn -f user-service/pom.xml org.jacoco:jacoco-maven-plugin:prepare-agent test or
 # leia: user-service/target/site/jacoco/index.html (linha "Total", coluna Lines)
 ```
 
-Cobertura de linha medida no fechamento do item (referência, não contrato): user-service ~98%,
-authorization-server ~95%, gateway 100% — todos com folga sobre o piso de 70%.
+Cobertura de linha medida no fechamento do item (referência, não contrato): user-service 96%,
+authorization-server 95%, gateway 100%, notification-service 83% — todos com folga sobre o
+piso de 70%.
 
 ---
 
@@ -263,3 +267,13 @@ Dois pontos não óbvios na integração do `gateway`:
 - **`CORSConfig` / `OpenAPIConfig`** (gateway e auth-server) — configuração declarativa sem branch.
 - **Getters/setters, DTOs sem lógica, código gerado** — conforme as diretrizes de unitários desta página.
 - **E2E / Playwright** — sem cobertura end-to-end; o boundary HTTP é coberto pelo MSW nos testes do `login-interface`.
+- **Integração própria do `notification-service`** — o serviço é stateless (sem Mongo/Redis/Postgres
+  próprios); a pirâmide se limita a unit (`EmailServiceTest`, `InternalTokenFilterTest`) e
+  `@WebMvcTest` (`NotificationControllerTest`). O fluxo ponta a ponta (outbox → Feign →
+  notification-service → SMTP) é coberto do lado do **user-service**
+  (`EmailVerificationFlowIntegrationTest`, WireMock simulando o notification-service).
+- **`InternalTokenFilter` real do notification-service não exercitado pelo `@WebMvcTest`**
+  (P3, security-reviewer) — o `FilterRegistrationBean` não é carregado no slice test; o filtro é
+  testado isoladamente (`InternalTokenFilterTest`, sem contexto Spring). Recomendado um teste de
+  integração futuro (`@SpringBootTest` + `MockMvc` real) cobrindo "403 sem `X-Internal-Token`"
+  ponta a ponta.

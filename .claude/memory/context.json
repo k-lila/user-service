@@ -16,8 +16,14 @@
     },
     "user-service": {
       "port": 8090,
-      "role": "Domínio central: CRUD de usuários; canal interno para o auth-server",
-      "stack": ["Spring Boot", "MongoDB (replica set rs0)", "Redis (cache)"],
+      "role": "Domínio central: CRUD de usuários; canal interno para o auth-server; outbox + cliente Feign do notification-service (ADR-015)",
+      "stack": ["Spring Boot", "MongoDB (replica set rs0)", "Redis (cache + rate limit de reenvio)", "OpenFeign + Resilience4j"],
+      "depends_on": ["notification-service"]
+    },
+    "notification-service": {
+      "port": 8095,
+      "role": "Envio de e-mail de verificação de cadastro (ADR-015); stateless; nunca exposto pelo gateway",
+      "stack": ["Spring Boot", "JavaMailSender (SMTP)"],
       "depends_on": []
     },
     "config-server": {
@@ -40,10 +46,10 @@
     }
   },
   "communication": {
-    "sync": "REST via OpenFeign (auth-server -> user-service /internal/users/email/{email})",
-    "resilience": "Resilience4j circuit breaker + UserClientFallbackFactory",
-    "async": "nenhum (sem Kafka/eventos hoje)",
-    "internal_channel_secret": "X-Internal-Token"
+    "sync": "REST via OpenFeign (auth-server -> user-service /internal/users/email/{email}; user-service -> notification-service /internal/notifications/email-verification)",
+    "resilience": "Resilience4j circuit breaker + fallback factory em ambos os clientes Feign",
+    "async": "outbox no MongoDB do user-service (notificationOutbox) + chamada Feign disparada via @Async — sem poller/scan periódico, sem Kafka/broker (ADR-015)",
+    "internal_channel_secret": "X-Internal-Token (reaproveitado pelo notification-service)"
   },
   "current_task": {
     "task_id": null,

@@ -25,5 +25,7 @@ public enum AuditAction {
     /** Concessão da role ADMIN a um titular (AdminController, ADR-014). */
     ROLE_GRANT,
     /** Revogação da role ADMIN de um titular (AdminController, ADR-014). */
-    ROLE_REVOKE
+    ROLE_REVOKE,
+    /** Confirmação de e-mail via token de verificação (ADR-015). Ator: o próprio titular. */
+    EMAIL_VERIFIED
 }

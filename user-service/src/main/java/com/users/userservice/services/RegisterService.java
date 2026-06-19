@@ -29,16 +29,19 @@ public class RegisterService {
     private final IUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final CacheService cacheService;
+    private final EmailVerificationService emailVerificationService;
     private final String termsVersion;
 
     public RegisterService(
             IUserRepository iUserRepository,
             PasswordEncoder passwordEncoder,
             CacheService cacheService,
+            EmailVerificationService emailVerificationService,
             @Value("${app.terms.version:v1}") String termsVersion) {
         this.userRepository = iUserRepository;
         this.passwordEncoder = passwordEncoder;
         this.cacheService = cacheService;
+        this.emailVerificationService = emailVerificationService;
         this.termsVersion = termsVersion;
     }
 
@@ -60,9 +63,9 @@ public class RegisterService {
         // Consentimento LGPD registrado no cadastro (aceite versionado com timestamp).
         user.setConsentAcceptedAt(Instant.now());
         user.setTermsVersion(termsVersion);
-        // Sem fluxo de verificação de e-mail ainda — default true não bloqueia o cadastro.
-        user.setEmailVerified(true);
-        user.setEmailVerifiedAt(Instant.now());
+        // E-mail nasce não verificado (ADR-015) — só vira true após confirmação via token.
+        // O gate em AuthorizationService passa a valer de fato (com grace period de 24h).
+        user.setEmailVerified(false);
         // tenantIds fica null — atribuição de tenant é feature futura.
         User registered;
         try {
@@ -79,6 +82,9 @@ public class RegisterService {
             registered.getName(),
             registered.getId()
         );
+        // Cadastro nunca pode falhar por causa do e-mail (ADR-015): issueVerificationEmail
+        // isola a falha internamente (outbox FAILED), nunca propaga para este método.
+        emailVerificationService.issueVerificationEmail(registered);
         return UserResponseDTO.toResponseDTO(registered);
     }
 

@@ -62,11 +62,15 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                 .csrfTokenRepository(csrfTokenRepository)
                 .csrfTokenRequestHandler(new ServerCsrfTokenRequestAttributeHandler())
-                // /v1/users/register é público e pré-sessão: CSRF não protege nada ali.
+                // /v1/users/register e /v1/users/resend-verification (POST) são públicos e
+                // pré-sessão (ADR-015): CSRF não protege nada ali (sem cookie/sessão para um
+                // atacante forjar). /v1/users/verify-email é GET — já fora do CSRF por padrão.
                 .requireCsrfProtectionMatcher(new AndServerWebExchangeMatcher(
                         CsrfWebFilter.DEFAULT_CSRF_MATCHER,
                         new NegatedServerWebExchangeMatcher(
-                                ServerWebExchangeMatchers.pathMatchers("/v1/users/register"))
+                                ServerWebExchangeMatchers.pathMatchers(
+                                        "/v1/users/register",
+                                        "/v1/users/resend-verification"))
                 ))
             )
             .cors(Customizer.withDefaults())
@@ -80,7 +84,9 @@ public class SecurityConfig {
                         "/swagger-ui/**",
                         "/v3/api-docs/**",
                         "/swagger-ui.html",
-                        "/v1/users/register"
+                        "/v1/users/register",
+                        "/v1/users/verify-email",
+                        "/v1/users/resend-verification"
                 ).permitAll()
                 .anyExchange().authenticated()
             )

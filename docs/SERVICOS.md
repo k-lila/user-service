@@ -17,6 +17,8 @@
 | Método | Path                    | Auth       | Rate Limit      |
 | ------ | ----------------------- | ---------- | --------------- |
 | POST   | /v1/users/register      | Nenhuma    | 2 req/s (IP)    |
+| GET    | /v1/users/verify-email  | Nenhuma    | 2 req/s (IP)    |
+| POST   | /v1/users/resend-verification | Nenhuma | 2 req/s (IP)    |
 | GET    | /v1/users               | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/{id}          | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/email/{email} | ROLE_USER  | 10 req/s (user) |
@@ -67,6 +69,64 @@ requisição.
 
 Detalhe completo em [ADR-014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md).
 
+### Verificação de e-mail no cadastro (ADR-015)
+
+Cadastro (`POST /v1/users/register`) seta `emailVerified=false` e dispara o envio assíncrono
+de um e-mail de confirmação (outbox `notificationOutbox` → notification-service via Feign).
+Dois endpoints públicos pré-sessão, ambos no tier de rate limit LOW por IP do gateway (mesmo
+de `/v1/users/register`):
+
+| Método | Path                          | Auth    | Rate Limit | Descrição |
+| ------ | ------------------------------ | ------- | ---------- | --------- |
+| GET    | /v1/users/verify-email          | Nenhuma | LOW (2/s)  | Confirma o e-mail a partir do `token` (query string) |
+| POST   | /v1/users/resend-verification   | Nenhuma | LOW (2/s)  | Reenvia o e-mail de verificação |
+
+**`GET /v1/users/verify-email?token=...`**
+
+- Token opaco (256 bits, `SecureRandom` + Base64URL) — **não é JWT**; só o hash SHA-256
+  é persistido no outbox. TTL de 15 min (`app.verification.token-ttl`).
+- Resposta genérica em caso de token inexistente/expirado/já usado (não revela o motivo
+  específico — evita oráculo de enumeração). Idempotente: clique duplicado num link já
+  confirmado é sucesso silencioso.
+- Sucesso audita `EMAIL_VERIFIED` (`AuditAction`, ator USER) na trilha LGPD.
+
+**`POST /v1/users/resend-verification`** `{ "email": "maria@exemplo.com" }`
+
+- **Resposta sempre `202 Accepted`**, idêntica independente de o e-mail existir, já estar
+  verificado, ou estar throttled (anti-enumeração) — não auditado em `auditLogs` (chamada
+  anônima de alto volume, auditar criaria ruído/oráculo de timing).
+- Rate limit **complementar por conta-alvo** (`ResendRateLimitService`, Redis, chave
+  `sha256(emailLower)`, janela fixa de 1h, default 3/h — `app.verification.resend-max-per-window`/
+  `app.verification.resend-window`), além do tier LOW por IP do gateway — evita e-mail bombing
+  via IPs rotativos contra uma vítima específica.
+- Supera (`SUPERSEDED`) qualquer outbox `PENDING`/`SENT` anterior do mesmo titular antes de
+  emitir um novo token — só o mais recente é válido.
+
+**Gate de login + grace period (authorization-server):** `AuthorizationService.loadUserByUsername`
+mapeia `AuthDTO.emailVerified` para `enabled` — `emailVerified=false` bloqueia o login
+(`DisabledException`, mensagem genérica). Mitigado por janela de carência de 24h
+(`security.email-verification.grace-period`) desde `AuthDTO.registrationDate` (campo aditivo,
+nullable no lado consumidor — `null` equivale a usuário legado, sem NPE). Usuários legados
+(`emailVerified=null`) continuam tratados como verificados, sem bloqueio.
+
+**Canal interno (notification-service):** `POST /internal/notifications/email-verification`
+— protegido por `X-Internal-Token` (mesmo shared secret do ADR-006), sem Spring Security
+(`Filter` de servlet simples). Chamado só pelo user-service via Feign assíncrono
+(`@Async`, executor `notificationExecutor`) com circuit breaker Resilience4j
+(`configs.notification-service`) + `NotificationClientFallbackFactory`. **Nunca exposto pelo
+gateway.** Payload:
+
+```json
+{
+  "email": "maria@exemplo.com",
+  "name": "Maria Silva",
+  "verificationLink": "http://localhost:8081/v1/users/verify-email?token=<token-opaco>"
+}
+```
+
+Detalhe completo (decisões e alternativas consideradas) em
+[ADR-015](adr/ADR-015-verificacao-email-cadastro.md).
+
 **Leituras só de usuários ativos (ADR-001):** os endpoints de leitura ocultam usuários
 soft-deleted (`active=false`):
 
@@ -90,7 +150,9 @@ soft-deleted (`active=false`):
 }
 ```
 
-**Response — `UserResponseDTO`** (não expõe `passwordHash` nem `roles`):
+**Response — `UserResponseDTO`** (não expõe `passwordHash` nem `roles`; logo após o cadastro
+`emailVerified` vem `false` e `emailVerifiedAt` vem `null` — só vira `true`/preenchido após
+`GET /v1/users/verify-email`, ADR-015):
 
 ```json
 {
@@ -102,15 +164,17 @@ soft-deleted (`active=false`):
   "consentAcceptedAt": "2026-06-08T14:32:10.123",
   "termsVersion": "v1",
   "tenantIds": null,
-  "emailVerified": true,
-  "emailVerifiedAt": "2026-06-08T14:32:10.123"
+  "emailVerified": false,
+  "emailVerifiedAt": null
 }
 ```
 
 `tenantIds` é reservado para uma feature futura de multi-tenant (sempre `null` hoje —
-`registerUser` não atribui tenant). `emailVerified`/`emailVerifiedAt` também são scaffold:
-sem fluxo de verificação de e-mail implementado, `registerUser` sempre seta
-`emailVerified=true`; `null` (registros legados) é tratado como verificado em toda leitura.
+`registerUser` não atribui tenant). `emailVerified`/`emailVerifiedAt` deixaram de ser scaffold
+inerte (ADR-015): `registerUser` agora seta `emailVerified=false` no cadastro e dispara o
+fluxo de verificação por e-mail (`GET /v1/users/verify-email`); `emailVerifiedAt` é preenchido
+na confirmação. `null` (registros legados, anteriores ao campo) continua tratado como
+verificado em toda leitura.
 
 ## Claims do JWT
 
@@ -147,11 +211,37 @@ O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims
   consentAcceptedAt: ISODate, // consentimento LGPD no cadastro (ADR-012); nullable p/ legados
   termsVersion: String,       // versão dos termos aceita (ex: "v1"); nullable p/ legados
   tenantIds: [String],        // reservado p/ multi-tenant futuro; sempre null hoje (sem atribuição)
-  emailVerified: Boolean,     // scaffold sem fluxo de verificação; registerUser sempre seta true;
-                               //   null (legado) tratado como true em toda leitura
-  emailVerifiedAt: ISODate    // nullable; sem fluxo de verificação implementado
+  emailVerified: Boolean,     // ADR-015: registerUser seta false no cadastro; true após confirmação
+                               //   (GET /v1/users/verify-email); null (legado) tratado como true
+  emailVerifiedAt: ISODate    // preenchido na confirmação do e-mail; nullable p/ não confirmados/legados
 }
 ```
+
+## Schema MongoDB (coleção `notificationOutbox`)
+
+Outbox sem poller (ADR-015) — criado e processado no mesmo evento que o originou (cadastro ou
+reenvio), sem `@Scheduled`/scan periódico. Índice composto `(userId, type, status)`.
+
+```js
+{
+  _id: ObjectId,
+  userId: String,           // indexado
+  type: String,              // EMAIL_VERIFICATION (único valor hoje)
+  tokenHash: String,         // SHA-256 do token opaco (unique); o token em claro nunca é persistido
+  expiresAt: ISODate,        // TTL do token (15 min default, app.verification.token-ttl)
+  status: String,            // PENDING | SENT | FAILED | CONFIRMED | SUPERSEDED
+  createdAt: ISODate,
+  lastAttemptAt: ISODate,
+  attempts: Number,
+  purgeAt: ISODate           // TTL index do Mongo (expireAfterSeconds: 0) — retenção separada
+                               //   de expiresAt (createdAt + 30 dias default, preserva histórico
+                               //   de auditoria do outbox; app.verification.outbox-retention)
+}
+```
+
+> O TTL index do Mongo atua sobre `purgeAt`, **não** sobre `expiresAt` — aplicar o TTL direto em
+> `expiresAt` apagaria registros `CONFIRMED`/`SENT` pouco depois da expiração do token, perdendo
+> o histórico do outbox. Detalhe completo em [ADR-015](adr/ADR-015-verificacao-email-cadastro.md).
 
 ## Schema MongoDB (coleção `auditLogs`)
 

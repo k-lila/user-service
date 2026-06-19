@@ -28,9 +28,12 @@ import com.users.userservice.domain.User;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.domain.AuditAction;
+import com.users.userservice.dtos.ResendVerificationRequestDTO;
 import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.exceptions.EmailAlreadyRegisteredException;
+import com.users.userservice.exceptions.InvalidVerificationTokenException;
 import com.users.userservice.services.AuditService;
+import com.users.userservice.services.EmailVerificationService;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
 
@@ -49,6 +52,7 @@ class UserControllerTest {
     @MockitoBean RegisterService registerService;
     @MockitoBean SearchService searchService;
     @MockitoBean AuditService auditService;
+    @MockitoBean EmailVerificationService emailVerificationService;
     @MockitoBean JwtDecoder jwtDecoder;
 
     private static final String USER_ID = "user-id-123";
@@ -667,5 +671,92 @@ class UserControllerTest {
                 .andExpect(status().isOk());
 
         verifyNoInteractions(auditService);
+    }
+
+    // ── GET /users/verify-email ──────────────────────────────────────────────
+
+    @Test
+    void verifyEmail_deveRetornar200_quandoTokenValido() throws Exception {
+        mockMvc.perform(get("/v1/users/verify-email").param("token", "token-valido"))
+                .andExpect(status().isOk());
+
+        verify(emailVerificationService).confirm("token-valido");
+    }
+
+    @Test
+    void verifyEmail_naoDeveExigirAutenticacao() throws Exception {
+        mockMvc.perform(get("/v1/users/verify-email").param("token", "qualquer-token"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void verifyEmail_deveRetornar400_quandoTokenInvalido() throws Exception {
+        doThrow(new InvalidVerificationTokenException())
+                .when(emailVerificationService).confirm("token-invalido");
+
+        mockMvc.perform(get("/v1/users/verify-email").param("token", "token-invalido"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── POST /users/resend-verification ──────────────────────────────────────
+
+    @Test
+    void resendVerification_deveRetornar202_quandoEmailExisteEPendente() throws Exception {
+        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
+        dto.setEmail("fulano@email.com");
+
+        mockMvc.perform(post("/v1/users/resend-verification")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(dto)))
+                .andExpect(status().isAccepted());
+
+        verify(emailVerificationService).resend("fulano@email.com");
+    }
+
+    @Test
+    void resendVerification_deveRetornar202_quandoEmailInexistente() throws Exception {
+        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
+        dto.setEmail("naoexiste@email.com");
+
+        mockMvc.perform(post("/v1/users/resend-verification")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(dto)))
+                .andExpect(status().isAccepted());
+    }
+
+    @Test
+    void resendVerification_deveRetornar202_aindaQuandoServiceLancaRuntimeException() throws Exception {
+        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
+        dto.setEmail("fulano@email.com");
+        doThrow(new RuntimeException("falha inesperada"))
+                .when(emailVerificationService).resend("fulano@email.com");
+
+        mockMvc.perform(post("/v1/users/resend-verification")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(dto)))
+                .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void resendVerification_deveRetornar400_quandoEmailAusente() throws Exception {
+        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
+
+        mockMvc.perform(post("/v1/users/resend-verification")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(dto)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(emailVerificationService);
+    }
+
+    @Test
+    void resendVerification_naoDeveExigirAutenticacao() throws Exception {
+        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
+        dto.setEmail("fulano@email.com");
+
+        mockMvc.perform(post("/v1/users/resend-verification")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(dto)))
+                .andExpect(status().isAccepted());
     }
 }

@@ -38,6 +38,47 @@ class GatewaySecurityIntegrationTest extends AbstractGatewayIntegrationTest {
     }
 
     @Test
+    void devePermitirResendVerificationSemTokenCsrf() {
+        downstream.stubFor(post(urlEqualTo("/v1/users/resend-verification"))
+                .willReturn(aResponse().withStatus(202)));
+
+        webTestClient.post().uri("/v1/users/resend-verification")
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"email\":\"a@b.com\"}")
+                .exchange()
+                .expectStatus().isAccepted(); // não 403, ao contrário de /v1/users/** genérico
+    }
+
+    @Test
+    void deveRetornar401_quandoRotaGenericaDeUsersSemAutenticacao() {
+        // /v1/users/email/{email} cai na rota genérica "user-service" (tokenRelay), não nas
+        // rotas públicas pré-sessão de verificação de e-mail — deve continuar exigindo sessão.
+        webTestClient.get().uri("/v1/users/email/fulano@email.com")
+                .exchange()
+                .expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void devePermitirVerifyEmailSemAutenticacao() {
+        downstream.stubFor(get(urlPathEqualTo("/v1/users/verify-email"))
+                .willReturn(aResponse().withStatus(200)));
+
+        webTestClient.get().uri("/v1/users/verify-email?token=abc")
+                .exchange()
+                .expectStatus().isOk(); // não 401
+    }
+
+    @Test
+    void devePermitirResendVerificationSemAutenticacao() {
+        downstream.stubFor(post(urlEqualTo("/v1/users/resend-verification"))
+                .willReturn(aResponse().withStatus(202)));
+
+        webTestClient.post().uri("/v1/users/resend-verification")
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"email\":\"a@b.com\"}")
+                .exchange()
+                .expectStatus().isAccepted(); // não 401
+    }
+
+    @Test
     void deveEmitirCookieXsrfTokenEmRotaPublica() {
         downstream.stubFor(get(urlPathEqualTo("/oauth2/authorize"))
                 .willReturn(aResponse().withStatus(200)));

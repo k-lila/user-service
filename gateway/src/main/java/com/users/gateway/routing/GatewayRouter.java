@@ -31,6 +31,28 @@ public class GatewayRouter {
                 .uri("lb://user-service")
             )
 
+            // Endpoints públicos pré-sessão (usuário recém-cadastrado, sem cookie/JWT, ADR-015).
+            // Rotas explícitas (precedem a rota genérica "user-service") para não cair no
+            // tokenRelay()/tier HIGH por-usuário dela — aqui não há sessão para relayar, e o
+            // tier LOW por-IP é o mesmo já usado em /v1/users/register (anti-abuso/enumeração).
+            .route("user-verify-email", route -> route
+                .path("/v1/users/verify-email")
+                .filters(f -> f.requestRateLimiter(c -> {
+                    c.setRateLimiter(redisRateLimiterLow);
+                    c.setKeyResolver(ipKeyResolver);
+                }))
+                .uri("lb://user-service")
+            )
+
+            .route("user-resend-verification", route -> route
+                .path("/v1/users/resend-verification")
+                .filters(f -> f.requestRateLimiter(c -> {
+                    c.setRateLimiter(redisRateLimiterLow);
+                    c.setKeyResolver(ipKeyResolver);
+                }))
+                .uri("lb://user-service")
+            )
+
             .route("oauth", route -> route
                 .path("/oauth2/**")
                 .filters(f -> f.requestRateLimiter(c -> {

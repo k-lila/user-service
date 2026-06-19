@@ -11,6 +11,7 @@ scrape_configs:
           - discovery-server-2:9092
           - authorization-server:8082
           - user-service:8090
+          - notification-service:8095
           - gateway:8181
 
   - job_name: "mongodb"

@@ -106,10 +106,16 @@ arquivos por **caminho relativo** (ex.: `user-service/src/main`, `docs/adr/TEMPL
   nunca lança nem força backfill em massa dos documentos legados.
 - **Exemplos já seguindo o padrão:** `consentAcceptedAt`/`termsVersion` (ADR-012, nullable
   para usuários cadastrados antes do consentimento LGPD); `tenantIds` (reservado para
-  multi-tenant futuro, sempre `null` até existir atribuição de tenant); `emailVerified`/
-  `emailVerifiedAt` (scaffold sem fluxo de verificação de e-mail — `registerUser` sempre
-  seta `true`; `null` em registros legados é tratado como verificado em toda leitura, nunca
-  como bloqueio de login).
+  multi-tenant futuro, sempre `null` até existir atribuição de tenant).
+- **Exemplo que saiu do estado scaffold (ADR-015):** `emailVerified`/`emailVerifiedAt`
+  eram scaffold sem fluxo de verificação (`registerUser` sempre setava `true`). Com o
+  notification-service, `registerUser` passou a setar `emailVerified=false` no cadastro e
+  o campo só vira `true` após a confirmação via `GET /v1/users/verify-email`. O tratamento
+  de `null` (registros legados, anteriores ao campo) **não mudou** — continua tratado como
+  verificado em toda leitura, nunca como bloqueio de login. Isso ilustra o ciclo de vida
+  completo do padrão: nasce nullable/scaffold sem migração, e quando a feature real chega,
+  só os registros **novos** passam a ter o valor real — os legados continuam no estado
+  neutro original, sem backfill.
 - **Por quê:** evita migração de dados obrigatória no deploy do campo e mantém o
   `registerUser`/leituras existentes funcionando sem alteração de comportamento até o dia em
   que a feature que consome o campo for implementada de fato.

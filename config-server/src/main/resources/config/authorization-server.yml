@@ -85,6 +85,11 @@ security:
   # Fonte primária de IP do lockout — não-falsificável pois só a borda alcança o serviço.
   # Esvaziar/trocar para deploy não-Cloudflare (cai no X-Forwarded-For via forward-headers).
   trusted-client-ip-header: ${TRUSTED_CLIENT_IP_HEADER:CF-Connecting-IP}
+  # Janela de carência do gate de verificação de e-mail (ADR-015): login permitido mesmo com
+  # emailVerified=false enquanto dentro desta janela desde o cadastro — evita conta
+  # permanentemente inacessível se o e-mail de verificação nunca chegar (SMTP down, etc.).
+  email-verification:
+    grace-period: ${EMAIL_VERIFICATION_GRACE_PERIOD:24h}
 
 # CORS (C12): necessário para o Swagger-UI trocar o code pelo token via fetch cross-origin.
 # Origem do Swagger/borda (distinta da origem do SPA no gateway). Default dev http://localhost:8081.

@@ -29,12 +29,13 @@ class RegisterServiceTest {
     @Mock private IUserRepository userRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private CacheService cacheService;
+    @Mock private EmailVerificationService emailVerificationService;
 
     private RegisterService service;
 
     @BeforeEach
     void setUp() {
-        service = new RegisterService(userRepository, passwordEncoder, cacheService, "v1");
+        service = new RegisterService(userRepository, passwordEncoder, cacheService, emailVerificationService, "v1");
     }
 
     private User buildUser(String id, String email, boolean active) {
@@ -307,7 +308,7 @@ class RegisterServiceTest {
     }
 
     @Test
-    void deveMarcarEmailVerificado_quandoRegistro() {
+    void deveMarcarEmailNaoVerificado_quandoRegistro() {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setName("Fulano");
         dto.setEmail("fulano@email.com");
@@ -322,8 +323,26 @@ class RegisterServiceTest {
 
         verify(userRepository).insert(captor.capture());
         User inserido = captor.getValue();
-        assertTrue(inserido.getEmailVerified());
-        assertNotNull(inserido.getEmailVerifiedAt());
+        assertFalse(inserido.getEmailVerified());
+        assertNull(inserido.getEmailVerifiedAt());
+    }
+
+    @Test
+    void deveChamarIssueVerificationEmail_umaVez_quandoRegistro() {
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Fulano");
+        dto.setEmail("fulano@email.com");
+        dto.setPassword("senha123");
+
+        User registrado = buildUser("id-1", "fulano@email.com", true);
+
+        when(userRepository.findByEmail("fulano@email.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("senha123")).thenReturn("$2a$10$hashed");
+        when(userRepository.insert(any(User.class))).thenReturn(registrado);
+
+        service.registerUser(dto);
+
+        verify(emailVerificationService, times(1)).issueVerificationEmail(registrado);
     }
 
     @Test
