@@ -117,36 +117,6 @@ public class UserController {
         return ResponseEntity.ok(updated);
     }
 
-    @Operation(summary = "Desativar um usuário")
-    @DeleteMapping(value = "/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Void> removeUser(
-            @PathVariable(value = "id", required = true) String userID,
-            @AuthenticationPrincipal Jwt jwt) {
-        LOGGER.info(
-            "| DELETE | desativação (admin) | ID: {}",
-            userID
-        );
-        registerService.deactivateUser(userID);
-        auditService.recordFromJwt(AuditAction.SOFT_DELETE_ADMIN, jwt, userID, null);
-        return ResponseEntity.noContent().build();
-    }
-
-    @Operation(summary = "Deletar um usuário")
-    @DeleteMapping(value = "/del/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Void> deleteUser(
-            @PathVariable(value = "id", required = true) String userID,
-            @AuthenticationPrincipal Jwt jwt) {
-        LOGGER.info(
-            "| DELETE | hard-delete (admin) | ID: {}",
-            userID
-        );
-        registerService.deleteUser(userID);
-        auditService.recordFromJwt(AuditAction.HARD_DELETE_ADMIN, jwt, userID, null);
-        return ResponseEntity.noContent().build();
-    }
-
     @Operation(summary = "Desativar usuário atual")
     @DeleteMapping(value = "/remove/me")
     @PreAuthorize("hasRole('USER')")
@@ -158,6 +128,20 @@ public class UserController {
         );
         registerService.deactivateUser(userID);
         auditService.recordFromJwt(AuditAction.SOFT_DELETE_SELF, jwt, userID, null);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Deletar definitivamente o usuário atual")
+    @DeleteMapping(value = "/delete/me")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<Void> deleteCurrentUser(@AuthenticationPrincipal Jwt jwt) {
+        String userID = jwt.getClaim("userID");
+        LOGGER.info(
+            "| DELETE | auto hard-delete | ID: {}",
+            userID
+        );
+        registerService.deleteUser(userID);
+        auditService.recordFromJwt(AuditAction.HARD_DELETE_SELF, jwt, userID, null);
         return ResponseEntity.noContent().build();
     }
 

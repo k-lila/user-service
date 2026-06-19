@@ -52,9 +52,10 @@ schema ou de formato de resposta.
 - `GET /v1/users/me` passa a retornar **404** para uma conta desativada que ainda detenha
   um JWT válido emitido antes da desativação (edge raro: o login já bloqueia inativos).
   Comportamento aceitável — a conta não deve operar.
-- Não há mais um endpoint que liste/recupere inativos. Se no futuro for preciso uma visão
-  administrativa de contas desativadas (auditoria), será um **novo** endpoint admin-only,
-  registrado em ADR próprio.
+- Não há mais um endpoint que liste/recupere inativos via `UserController`. Essa visão
+  administrativa de contas desativadas foi endereçada por um **novo** endpoint admin-only —
+  ver [ADR-014](ADR-014-admin-controller-gestao-roles-auditoria.md) (`GET /v1/admin/users`,
+  inclui inativos).
 - Consumidores que dependiam de ler inativos (não há nenhum hoje) seriam afetados.
 
 **Testes de regressão:** cobertos em `SearchServiceTest` (unitário: inativo por ID/e-mail →

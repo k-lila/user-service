@@ -41,6 +41,14 @@ public class GlobalExceptionHandler {
         return pd;
     }
 
+    @ExceptionHandler(SelfRoleRevocationException.class)
+    public ProblemDetail handleSelfRoleRevocation(SelfRoleRevocationException e) {
+        LOGGER.warn("| 409 | auto-revogação de ADMIN bloqueada | {}", e.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        pd.setTitle("Conflict");
+        return pd;
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ProblemDetail handleValidation(MethodArgumentNotValidException e) {
         List<Map<String, String>> errors = e.getBindingResult().getFieldErrors().stream()

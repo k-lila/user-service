@@ -24,8 +24,9 @@ contrato exige **ADR** (`/new-adr`) e versionamento.
 - **Separação rígida:** o auth-server **não** acessa MongoDB — só via Feign.
 - **Canal interno isolado:** `/internal/...` fora do gateway/Swagger, protegido por
   `X-Internal-Token`; sem header → 403.
-- **DELETE com 3 semânticas:** soft-delete ADMIN (`/{id}`), hard-delete ADMIN
-  (`/del/{id}`), soft-delete USER (`/remove/me`).
+- **DELETE self-service:** soft-delete USER (`/remove/me`), hard-delete USER
+  (`/delete/me`). Vias ADMIN removidas do `UserController` (ADR-013) e absorvidas pelo
+  `AdminController` dedicado (`/v1/admin/users/{id}` e `.../del/{id}`, ADR-014).
 - **Roles fixas** `USER`/`ADMIN`; **BCrypt** custo 10.
 - **Cookies de sessão distintos:** `SESSION` (gateway) vs `AUTHSESSION` (auth-server).
 - **Spring Session explícito** no Boot 4.0 (`@EnableRedisWebSession`/`@EnableRedisHttpSession`).

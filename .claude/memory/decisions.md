@@ -195,3 +195,57 @@
 - **Arquivos:** modificados `dtos/UserRequestDTO.java`, `domain/User.java`, `services/RegisterService.java` (+@Value termsVersion), `dtos/UserResponseDTO.java`, `config/user-service.yml` (app.terms.version), `RegisterBox.tsx`, `api/authClient.ts`; `ADR-012`. Testes: `UserControllerTest` (400 sem/false consentimento, 201 com true; buildRequest seta termsAccepted=true), `RegisterServiceTest` (consentAcceptedAt+termsVersion; constructor +"v1"), `UserFlowIntegrationTest`, `RegisterBox.test.tsx` (checkbox, submit bloqueado, payload). Docs: CLAUDE.md, SERVICOS.md (payload+schema), CONFIG.md (TERMS_VERSION), RELATORIOA (checklist+tabela LGPD).
 - **Validação:** user-service `mvn -o verify` 154 testes + gate OK; front `npm run coverage` 40 testes + threshold OK; `tsc --noEmit` limpo.
 - **Tipo:** decisão (LGPD/contrato/schema).
+
+## [2026-06-18] TASK-ADMIN-CONTROLLER · user-service · Revisão adversarial da spec do AdminController (rodada 1) — REJECTED
+- **Decisão:** spec do AdminController (4 endpoints sob /v1/admin/**: listagem c/ inativos, auditoria por titular + feed geral, PATCH roles) REJEITADA na rodada 1 por 3 bloqueadores (ver BLOCK-002). Review completo em `/home/k-lila/.claude/plans/planeje-a-adi-o-de-pure-lampson-senso-critico-1.md`.
+- **ADR:** pendente — a tarefa exigirá novo ADR (AuditAction.ROLE_GRANT/ROLE_REVOKE aditivo + contrato dos 4 endpoints + regra de auto-revogação), referenciando ADR-001 e ADR-011 (já previsto na spec; não redescoberto).
+- **Críticos a incorporar como nota/ADR (não bloquearam o handoff por si só):** (C1) eviction de `authByEmail` só afeta o PRÓXIMO token — token de acesso já emitido com roles antigas vive até expirar (janela = TTL do access token, não os 5 min do cache); declarar como dívida aceita em SECURITY.md. (C2) `UserResponseDTO` não expõe `roles` → superfície de gestão de roles fica cega; decidir expor ou assumir. (C3) PATCH /v1/admin/** está sob CSRF do gateway (X-XSRF-TOKEN) — antecipar para testes de integração.
+- **Tech-debt / melhorias:** (M1) filtro dinâmico name/email sem índice → collection scan; (M2) feed de auditoria sem teto de `size` → drenagem possível da trilha LGPD.
+- **Observações de não-regressão verificadas (OK):** ADR-001 (leitura só-ativos) preservado por isolamento de rota (AC-17); ADR-006 (canal interno) e ADR-007 (cookies/sessão) não tocados (AC-16); `security-reviewer` obrigatório PENDENTE — deve revisar pós-implementação (foco B1/C1/C2/M2).
+- **Tipo:** observação (decisão pendente da rodada 2 pós-correção do PM).
+
+## [2026-06-18] TASK-DELETE-ME · user-service · Remoção de rotas admin DELETE + /delete/me (self hard-delete) — APPROVED_WITH_OBSERVATIONS
+- **Decisão:** APROVADO na revisão final (senso-critico, full). Removidas do `UserController` as rotas admin `DELETE /v1/users/{id}` (soft-delete ADMIN) e `DELETE /v1/users/del/{id}` (hard-delete ADMIN); adicionado `DELETE /v1/users/delete/me` (USER, self hard-delete) espelhando `/remove/me`. `AuditAction.HARD_DELETE_SELF` aditivo; `SOFT_DELETE_ADMIN`/`HARD_DELETE_ADMIN` mantidos reservados p/ `AdminUserController` futuro.
+- **ADR:** docs/adr/ADR-013-remocao-rotas-admin-delete-user-controller.md.
+- **Não-regressão verificada (OK):** contrato Feign intacto — `IUserClient` consome só `GET /internal/users/email/{email}`; nenhuma rota removida era usada por gateway/auth-server. `registerService.deleteUser` reaproveitado sem alteração (evicta os 3 caches; lança DomainEntityNotFound→404). Sem mudança de schema/DTO/cache. Testes específicos (sem asserts fracos): 6 casos novos p/ /delete/me (204/404/401/403 + auditoria HARD_DELETE_SELF). `mvn verify` 159 testes verdes, cobertura 99% na classe.
+- **Tech-debt / observações documentais (doc-keeper):** (OBS-1) `docs/SECURITY.md:111` diz "hard-delete ADMIN (ADR-001)" — incorreto pós-mudança; agora é hard-delete USER self (ADR-013). (OBS-2, NOVA, não sinalizada antes) `docs/SERVICOS.md:131-132` comentário do schema `action` em auditLogs omite `HARD_DELETE_SELF` (enum e ADR-011 já corrigidos).
+- **Pipeline:** pular PM + 1ª passada do senso-critico foi aceitável (escopo do usuário em plan mode, específico e baixo risco); regra inviolável honrada — mudança de contrato público coberta por ADR-013 e revista por esta passada do senso-critico. `security-reviewer` já revisou (segurança tocada): APROVADO, sem pendência. Melhoria step-up auth p/ hard-delete = consistente com postura de `/remove/me`, não bloqueia.
+- **Tipo:** decisão (contrato de API / superfície de rotas).
+
+## [2026-06-18] TASK-ADMIN-CONTROLLER · user-service · `AdminController` dedicado — gestão de roles, consulta de auditoria, listagem c/ inativos — APPROVED_WITH_OBSERVATIONS
+- **Decisão:** APROVADO na revisão final (senso-critico) após 3 rodadas. Novo `AdminController`
+  (`/v1/admin/**`, todo método `@PreAuthorize("hasRole('ADMIN')")`): `GET /v1/admin/users`
+  (listagem incl. inativos, filtros `active`/`name`/`email`), `GET /v1/admin/users/{id}/audit-logs`
+  + `GET /v1/admin/audit-logs` (consulta paginada da trilha LGPD, teto `MAX_AUDIT_PAGE_SIZE=100`),
+  `PATCH /v1/admin/users/{id}/roles` (gestão de roles `USER`/`ADMIN`), `DELETE /v1/admin/users/{id}`
+  + `.../del/{id}` (deletes administrativos absorvidos do ADR-013). Nova rota `admin-service` no
+  gateway, rate limit **MED** (5 req/s, cap 10) — superfície sensível, poucos operadores esperados.
+  Enforcement de `ROLE_ADMIN` é exclusivamente downstream (`@PreAuthorize`); o gateway não ganha
+  `hasRole()` (decisão explícita, consistente com o padrão do projeto).
+- **ADR:** `docs/adr/ADR-014-admin-controller-gestao-roles-auditoria.md`. Fecha a dívida do ADR-001
+  (visão administrativa de inativos), do ADR-011 (endpoint de consulta de auditoria — parcial, TTL
+  ainda em aberto) e formaliza o `AdminUserController` previsto pelo ADR-013 (nomeado
+  `AdminController`, mesmo papel).
+- **Regra de auto-revogação:** `PATCH .../roles` bloqueia o ator de remover `ADMIN` de si mesmo —
+  checagem contra o estado **persistido no MongoDB** (não o JWT, que pode estar stale até o TTL do
+  cache `authByEmail`) → **409 Conflict** se violada. Payload sem `USER` ou role fora de
+  `{USER,ADMIN}` → 400 (sem normalização silenciosa).
+- **Schema:** `AuditAction` ganha `ROLE_GRANT`/`ROLE_REVOKE` (aditivo); `SOFT_DELETE_ADMIN`/
+  `HARD_DELETE_ADMIN` (reservados pelo ADR-013) passam a ter rota ativa. DTOs novos isolados do
+  contrato existente: `AdminUserResponseDTO` (expõe `roles`, só nesta superfície ADMIN-only),
+  `AuditLogResponseDTO`, `UpdateRolesRequestDTO`.
+- **Blockers resolvidos:** BLOCK-002 (rodada 1, 3 bloqueadores sobre enforcement de role na borda,
+  DTO sem `roles`, e ancoragem da auto-revogação no JWT) — todos corrigidos nas rodadas 2/3, ver
+  `.claude/memory/blockers.md`.
+- **Dívida aceita:** janela do token já emitido (evicção de `authByEmail` só afeta o próximo token;
+  TTL do access token, não do cache) — documentada em `docs/SECURITY.md`. Retenção/TTL de
+  `auditLogs` continua em aberto (ADR-011, não tocado por esta tarefa). Performance do filtro
+  dinâmico (`MongoTemplate`/`Criteria`) sem índice dedicado para `active`+`name`+`email`.
+- **Testes:** `AdminServiceTest` (17, unit), `AdminControllerTest` (31, `@WebMvcTest`),
+  `AdminFlowIntegrationTest` (6, user-service, Mongo+Redis reais), `GatewayAdminRouteIntegrationTest`
+  (5, gateway, CSRF/roteamento/rate-limit). Suíte completa do projeto: 368 testes backend+front
+  (antes 312), gate JaCoCo (piso 70%) preservado.
+- **Pipeline:** `senso-critico` revisou a spec (rejeitada na rodada 1 — BLOCK-002), aprovou nas
+  rodadas 2/3; `security-reviewer` revisou pós-implementação (achado C-1: `docs/SECURITY.md`
+  desatualizado, corrigido por este `doc-keeper`).
+- **Tipo:** decisão (contrato de API / schema / superfície de rotas / segurança).

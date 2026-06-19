@@ -386,74 +386,6 @@ class UserControllerTest {
                 .andExpect(status().isForbidden());
     }
 
-    // ── DELETE /users/{id} (soft-delete, ADMIN) ──────────────────────────────
-
-    @Test
-    void removeUser_deveRetornar204_quandoIdExiste() throws Exception {
-        mockMvc.perform(delete("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
-                .andExpect(status().isNoContent());
-
-        verify(registerService).deactivateUser(USER_ID);
-    }
-
-    @Test
-    void removeUser_deveRetornar404_quandoIdNaoExiste() throws Exception {
-        doThrow(new DomainEntityNotFound(User.class, "ID", "id-inexistente"))
-                .when(registerService).deactivateUser("id-inexistente");
-
-        mockMvc.perform(delete("/v1/users/{id}", "id-inexistente")
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    void removeUser_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(delete("/v1/users/{id}", USER_ID))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void removeUser_deveRetornar403_quandoTokenComRoleUser() throws Exception {
-        mockMvc.perform(delete("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isForbidden());
-    }
-
-    // ── DELETE /users/del/{id} (hard-delete, ADMIN) ──────────────────────────
-
-    @Test
-    void deleteUser_deveRetornar204_quandoIdExiste() throws Exception {
-        mockMvc.perform(delete("/v1/users/del/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
-                .andExpect(status().isNoContent());
-
-        verify(registerService).deleteUser(USER_ID);
-    }
-
-    @Test
-    void deleteUser_deveRetornar404_quandoIdNaoExiste() throws Exception {
-        doThrow(new DomainEntityNotFound(User.class, "ID", "id-inexistente"))
-                .when(registerService).deleteUser("id-inexistente");
-
-        mockMvc.perform(delete("/v1/users/del/{id}", "id-inexistente")
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    void deleteUser_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(delete("/v1/users/del/{id}", USER_ID))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void deleteUser_deveRetornar403_quandoTokenComRoleUser() throws Exception {
-        mockMvc.perform(delete("/v1/users/del/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isForbidden());
-    }
-
     // ── DELETE /users/remove/me ───────────────────────────────────────────────
 
     @Test
@@ -490,6 +422,55 @@ class UserControllerTest {
         mockMvc.perform(delete("/v1/users/remove/me")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
                 .andExpect(status().isForbidden());
+    }
+
+    // ── DELETE /users/delete/me ───────────────────────────────────────────────
+
+    @Test
+    void deleteCurrentUser_deveRetornar204EPassarUserIdDoJwt() throws Exception {
+        mockMvc.perform(delete("/v1/users/delete/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isNoContent());
+
+        verify(registerService).deleteUser(USER_ID);
+    }
+
+    @Test
+    void deleteCurrentUser_deveRetornar404_quandoIdDoJwtNaoExiste() throws Exception {
+        doThrow(new DomainEntityNotFound(User.class, "ID", USER_ID))
+                .when(registerService).deleteUser(USER_ID);
+
+        mockMvc.perform(delete("/v1/users/delete/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void deleteCurrentUser_deveRetornar401_quandoSemToken() throws Exception {
+        mockMvc.perform(delete("/v1/users/delete/me"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void deleteCurrentUser_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
+        mockMvc.perform(delete("/v1/users/delete/me")
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void deleteCurrentUser_deveAuditarHardDeleteSelf() throws Exception {
+        mockMvc.perform(delete("/v1/users/delete/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isNoContent());
+
+        verify(auditService).recordFromJwt(eq(AuditAction.HARD_DELETE_SELF), any(), eq(USER_ID), isNull());
     }
 
     // ── GET /users/me ─────────────────────────────────────────────────────────
@@ -662,24 +643,6 @@ class UserControllerTest {
                 .andExpect(status().isOk());
 
         verify(auditService).recordFromJwt(eq(AuditAction.UPDATE), any(), eq(USER_ID), eq("fulano@email.com"));
-    }
-
-    @Test
-    void removeUser_deveAuditarSoftDeleteAdmin() throws Exception {
-        mockMvc.perform(delete("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
-                .andExpect(status().isNoContent());
-
-        verify(auditService).recordFromJwt(eq(AuditAction.SOFT_DELETE_ADMIN), any(), eq(USER_ID), isNull());
-    }
-
-    @Test
-    void deleteUser_deveAuditarHardDeleteAdmin() throws Exception {
-        mockMvc.perform(delete("/v1/users/del/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
-                .andExpect(status().isNoContent());
-
-        verify(auditService).recordFromJwt(eq(AuditAction.HARD_DELETE_ADMIN), any(), eq(USER_ID), isNull());
     }
 
     @Test

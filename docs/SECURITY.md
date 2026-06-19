@@ -55,10 +55,20 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 - **Trilha de auditoria de dado pessoal (ADR-011, LGPD):** coleção Mongo
   `auditLogs` (user-service) registra *quem acessou/alterou/apagou qual dado de qual titular,
   quando* — **distinta** do log operacional SLF4J. Cobre mutações (register/update/soft+hard
-  delete), leitura de credencial interna (ator SYSTEM) e leitura cross-subject (titular ≠
-  solicitante); o `/me`/leitura do próprio dado não é auditado. `targetEmail` mascarado;
-  `correlationId` = traceId B3 (o IP do cliente vive no log de borda do gateway, ADR-010). Escrita
-  assíncrona e isolada de falha (dívida consciente detalhada na seção **LGPD**).
+  delete, grant/revoke de role), leitura de credencial interna (ator SYSTEM) e leitura
+  cross-subject (titular ≠ solicitante); o `/me`/leitura do próprio dado não é auditado.
+  `targetEmail` mascarado; `correlationId` = traceId B3 (o IP do cliente vive no log de borda do
+  gateway, ADR-010). Escrita assíncrona e isolada de falha (dívida consciente detalhada na seção
+  **LGPD**). **Consulta via API (ADR-014):** `GET /v1/admin/audit-logs` (feed geral) e
+  `GET /v1/admin/users/{id}/audit-logs` (por titular), ambos ADMIN-only e paginados com teto de
+  100 itens/página — fecha **parcialmente** a dívida "sem endpoint de consulta" do ADR-011 (a
+  trilha ainda não tem TTL/retenção definida).
+- **Gestão de roles via API (ADR-014):** `PATCH /v1/admin/users/{id}/roles` (ADMIN-only,
+  `@PreAuthorize` no user-service) promove/revoga `ADMIN`/`USER`, elimina a necessidade de
+  manipular o MongoDB diretamente em produção e audita `ROLE_GRANT`/`ROLE_REVOKE`. **Bloqueio de
+  auto-revogação:** se o ator tentar remover `ADMIN` de si mesmo (checado contra o estado
+  persistido no Mongo, não o JWT, que pode estar stale) → **409 Conflict** — evita lockout
+  operacional sem rota de recuperação via API.
 
 ## Gaps de segurança conhecidos (dívida aceita)
 
@@ -70,6 +80,7 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 | **Keyfile MongoDB de dev no repo** | Aceito (análogo à chave JWK) | Keyfile gerado/gerido fora do repo em prod |
 | **TLS de transporte Redis ausente** | Aceito. A senha (`REDIS_PASSWORD`) protege o protocolo de comando mas trafega em claro no handshake `AUTH` na rede interna Docker. Mitigado por portas Redis/Sentinel nunca publicadas no compose base (prod-safe). | TLS no Redis (Redis 6+ `tls-port`) + rede Docker isolada em prod |
 | **ACLs por usuário Redis ausentes** | Aceito. Todos os clientes (gateway, auth-server, user-service, exporter) compartilham a mesma `REDIS_PASSWORD` sem segregação de permissões por serviço. | Criar usuários ACL dedicados por serviço com permissões mínimas (Redis 6+) |
+| **Janela do token já emitido pós-revogação de role (ADR-014)** | Aceito. `PATCH /v1/admin/users/{id}/roles` evicta `authByEmail` — garante que o **próximo** token emitido reflita as roles novas. Um access token **já emitido** antes da mudança continua válido com as roles antigas até expirar; a janela real é o **TTL do access token**, não o TTL de 5 min do cache. | Revogação ativa de token (introspection/blocklist) |
 
 ## Estado atual do deploy (borda Cloudflare)
 
@@ -108,14 +119,16 @@ controles já implementados e o que ainda falta.
 | --- | --- | --- |
 | **Base legal / consentimento** | ✅ Implementado | `termsAccepted` obrigatório (`true`) no cadastro → `consentAcceptedAt` + `termsVersion` na coleção `users` (ADR-012). Aceite versionado permite reconsentimento quando os termos mudarem. |
 | **Trilha de auditoria de acesso** | ✅ Implementado | Coleção `auditLogs` registra *quem acessou/alterou/apagou qual dado de qual titular, quando* (ADR-011) — distinta do log SLF4J operacional. Ver "Controles ativos". |
-| **Eliminação / direito ao esquecimento** | ✅ Implementado | Soft-delete (ADMIN e USER) + hard-delete ADMIN (ADR-001). |
+| **Eliminação / direito ao esquecimento** | ✅ Implementado | Self-service: soft-delete (`/remove/me`) e hard-delete (`/delete/me`) da própria conta. A via ADMIN (soft/hard-delete de outro titular) foi removida do `UserController` (ADR-013) e absorvida pelo `AdminController` dedicado (`DELETE /v1/admin/users/{id}` e `.../del/{id}`, ADR-014). |
 | **Minimização** | ✅ Implementado | Coleta enxuta (nome, e-mail, senha); PII mascarada em log (`LogUtils.maskEmail`) e em `auditLogs` (`targetEmail` mascarado). |
 | **Portabilidade (exportar meus dados)** | ❌ Gap | Falta endpoint para o titular exportar os próprios dados. Pode ser pós-lançamento, mas planejar. |
 | **Notificação de incidente** | ⚠️ Parcial | A auditoria (`auditLogs`) e a observabilidade sustentam a investigação; falta **plano** formal de resposta/notificação e alertas (Alertmanager) sobre os SLOs. |
 
 **Dívida da trilha de auditoria (consciente):** escrita assíncrona → risco de perda em crash antes do
-flush; a listagem (`GET /v1/users`) não é auditada; sem endpoint de consulta nem retenção/TTL
-definidos. Detalhe e racional em [ADR-011](adr/ADR-011-trilha-auditoria-dado-pessoal.md).
+flush; a listagem (`GET /v1/users`) não é auditada; sem retenção/TTL definidos. O endpoint de
+consulta já existe (`GET /v1/admin/audit-logs` e `.../users/{id}/audit-logs`, ADMIN-only,
+[ADR-014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md)) — fecha parcialmente a dívida
+original. Detalhe e racional em [ADR-011](adr/ADR-011-trilha-auditoria-dado-pessoal.md).
 
 ## Como manter este documento
 

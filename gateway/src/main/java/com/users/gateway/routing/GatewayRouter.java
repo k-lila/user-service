@@ -57,6 +57,19 @@ public class GatewayRouter {
                 .uri("lb://user-service")
             )
 
+            .route("admin-service", route -> route
+                .path("/v1/admin/**")
+                // Rate limit MED (não HIGH): superfície sensível (ADR-014), poucos operadores,
+                // reduz blast radius em caso de token ADMIN comprometido. ROLE_ADMIN é checado
+                // exclusivamente no AdminController (user-service) via @PreAuthorize — o
+                // gateway não ganha hasRole() aqui (decisão explícita, AC-13).
+                .filters(f -> f.tokenRelay().requestRateLimiter(c -> {
+                    c.setRateLimiter(redisRateLimiterMed);
+                    c.setKeyResolver(userKeyResolver);
+                }))
+                .uri("lb://user-service")
+            )
+
             // ##### swagger
             .route("user-service-docs", r -> r
             .path("/v3/api-docs/user/**", "/v3/api-docs/user/")

@@ -32,11 +32,13 @@ semântica da ação são inequívocos):
 |---|---|---|
 | `REGISTER` | `POST /v1/users/register` | self (novo usuário) |
 | `UPDATE` | `PUT /v1/users` | self (JWT) |
-| `SOFT_DELETE_ADMIN` | `DELETE /v1/users/{id}` | ADMIN (JWT) |
-| `HARD_DELETE_ADMIN` | `DELETE /v1/users/del/{id}` | ADMIN (JWT) |
+| `SOFT_DELETE_ADMIN` | `DELETE /v1/admin/users/{id}` (ver ADR-014) | ADMIN (JWT) |
+| `HARD_DELETE_ADMIN` | `DELETE /v1/admin/users/del/{id}` (ver ADR-014) | ADMIN (JWT) |
 | `SOFT_DELETE_SELF` | `DELETE /v1/users/remove/me` | self (JWT) |
+| `HARD_DELETE_SELF` | `DELETE /v1/users/delete/me` | self (JWT) |
 | `READ_INTERNAL_CREDENTIAL` | `GET /internal/users/email/{email}` | SYSTEM |
 | `READ_CROSS_SUBJECT` | `GET /v1/users/{id}` e `/email/{email}` quando o titular ≠ solicitante | USER/ADMIN (JWT) |
+| `ROLE_GRANT` / `ROLE_REVOKE` | `PATCH /v1/admin/users/{id}/roles` (ver ADR-014) | ADMIN (JWT) |
 
 A leitura do **próprio** dado (`/me`, ou consulta ao próprio ID/email) **não** é auditada — baixo
 valor, alto volume. A auditoria é gravada **após o sucesso** da operação (operações que falham em
@@ -61,8 +63,9 @@ trace completo, inclusive ao log de borda do gateway, que é onde o IP real do c
     atual; durabilidade síncrona seria a evolução se a exigência subir).
   - **Listagem (`GET /v1/users`) não é auditada** — acesso em massa a múltiplos titulares ficou fora
     do escopo inicial (evita ruído de polling do SPA); registrar como limitação conhecida.
-  - **Sem endpoint de consulta** — a trilha se lê via acesso direto ao Mongo por ora (decisão de
-    escopo; um endpoint ADMIN paginado é evolução natural, exigiria novo contrato + ADR).
+  - **Sem endpoint de consulta** — a trilha se lia via acesso direto ao Mongo por ora (decisão de
+    escopo original). Endereçado por [ADR-014](ADR-014-admin-controller-gestao-roles-auditoria.md):
+    `GET /v1/admin/audit-logs` e `GET /v1/admin/users/{id}/audit-logs`, ADMIN-only, paginados.
   - **Sem retenção/TTL** definido — a coleção cresce indefinidamente (política de retenção é trabalho
     futuro, sensível à própria LGPD: minimização vs. prova de auditoria).
 - **Consumidores afetados:** `UserController` e `InternalUserController` ganham dependência de
