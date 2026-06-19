@@ -22,17 +22,21 @@ evoluir o sistema, **preserve estas invariantes**: quebrá-las reintroduz bugs j
 - **Invariante:** nunca exponha esse endpoint pelo gateway nem documente no Swagger; ele
   presume rede interna confiável + o shared secret.
 
-## DELETE com semânticas distintas e intencionais (ADR-001)
+## DELETE com semânticas distintas e intencionais (ADR-001, ADR-013)
 
-| Rota                         | Papel  | Efeito                                  |
-| ---------------------------- | ------ | --------------------------------------- |
-| `DELETE /v1/users/{id}`      | ADMIN  | soft-delete (`deactivateUser`, `active=false`) |
-| `DELETE /v1/users/del/{id}`  | ADMIN  | hard-delete (`deleteUser`)              |
-| `DELETE /v1/users/remove/me` | USER   | soft-delete                             |
+| Rota                          | Papel | Efeito                                         |
+| ----------------------------- | ----- | ----------------------------------------------- |
+| `DELETE /v1/users/remove/me`  | USER  | soft-delete (`deactivateUser`, `active=false`)  |
+| `DELETE /v1/users/delete/me`  | USER  | hard-delete (`deleteUser`)                      |
 
-- **Invariante:** as três rotas são distintas de propósito — o soft-delete preserva o registro
+- **Invariante:** as duas rotas são distintas de propósito — o soft-delete preserva o registro
   (e os endpoints de leitura retornam só ativos, ADR-001). Não unifique nem troque a semântica
   sem ADR.
+- **Operações administrativas removidas deste controller (ADR-013):** as rotas
+  `DELETE /v1/users/{id}` (soft-delete ADMIN sobre outro titular) e `DELETE /v1/users/del/{id}`
+  (hard-delete ADMIN) foram retiradas do `UserController`. Foram absorvidas pelo `AdminController`
+  dedicado (`/v1/admin/**`, ADR-014), que reativa os valores `SOFT_DELETE_ADMIN`/`HARD_DELETE_ADMIN`
+  do enum `AuditAction` (antes reservados, sem rota ativa).
 
 ## Credenciais e roles
 

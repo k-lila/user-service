@@ -22,15 +22,50 @@
 | GET    | /v1/users/email/{email} | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/me            | ROLE_USER  | 10 req/s (user) |
 | PUT    | /v1/users               | ROLE_USER  | 10 req/s (user) |
-| DELETE | /v1/users/{id}          | ROLE_ADMIN | 10 req/s (user) |
-| DELETE | /v1/users/del/{id}      | ROLE_ADMIN | 10 req/s (user) |
 | DELETE | /v1/users/remove/me     | ROLE_USER  | 10 req/s (user) |
+| DELETE | /v1/users/delete/me     | ROLE_USER  | 10 req/s (user) |
 
-**Semânticas de DELETE (intencionais):**
+**Semânticas de DELETE (intencionais, ADR-001/ADR-013):**
 
-- `DELETE /v1/users/{id}` (ADMIN) → soft-delete (`deactivateUser`, `active=false`)
-- `DELETE /v1/users/del/{id}` (ADMIN) → hard-delete (`deleteUser`)
-- `DELETE /v1/users/remove/me` (USER) → soft-delete
+- `DELETE /v1/users/remove/me` (USER) → soft-delete (`deactivateUser`, `active=false`)
+- `DELETE /v1/users/delete/me` (USER) → hard-delete (`deleteUser`)
+
+> As rotas administrativas `DELETE /v1/users/{id}` e `DELETE /v1/users/del/{id}` foram removidas
+> deste controller (ADR-013) e absorvidas pelo `AdminController` dedicado — ver
+> [Endpoints administrativos](#endpoints-administrativos-v1admin) abaixo (ADR-014).
+
+### Endpoints administrativos (`/v1/admin/**`)
+
+Todos exigem `ROLE_ADMIN` via `@PreAuthorize` no user-service (o gateway não enforce `hasRole()`
+— autorização por role é sempre downstream, ver ADR-014). Rate limit MED (5 req/s, cap 10/IP) na
+rota `admin-service` do gateway — superfície sensível, poucos operadores esperados.
+
+| Método | Path                              | Auth       | Rate Limit | Descrição |
+| ------ | ---------------------------------- | ---------- | ---------- | --------- |
+| GET    | /v1/admin/users                    | ROLE_ADMIN | MED (5/s)  | Listagem completa incl. inativos, filtros opcionais `active`/`name`/`email`, paginada |
+| GET    | /v1/admin/users/{id}/audit-logs    | ROLE_ADMIN | MED (5/s)  | Trilha de auditoria LGPD de um titular específico, paginada |
+| GET    | /v1/admin/audit-logs               | ROLE_ADMIN | MED (5/s)  | Feed geral da trilha de auditoria LGPD, paginado |
+| PATCH  | /v1/admin/users/{id}/roles         | ROLE_ADMIN | MED (5/s)  | Promove/revoga roles (`USER`/`ADMIN`) de um titular |
+| DELETE | /v1/admin/users/{id}                | ROLE_ADMIN | MED (5/s)  | Soft-delete administrativo de outro titular (absorvido do ADR-013) |
+| DELETE | /v1/admin/users/del/{id}            | ROLE_ADMIN | MED (5/s)  | Hard-delete administrativo de outro titular (absorvido do ADR-013) |
+
+**Paginação de auditoria com teto:** `GET .../audit-logs` (ambos) aplicam um clamp de tamanho de
+página (`AdminService.MAX_AUDIT_PAGE_SIZE = 100`) — um `size` maior é truncado, não satisfeito
+integralmente, para impedir que um token ADMIN comprometido drene toda a trilha LGPD numa única
+requisição.
+
+**Regras de negócio do `PATCH /v1/admin/users/{id}/roles`:**
+
+- `roles` deve ser ⊆ `{USER, ADMIN}` — valor fora do conjunto → **400**.
+- `roles` deve conter `USER` — payload que o omita é rejeitado com **400** (sem normalização
+  silenciosa).
+- **Auto-revogação bloqueada:** se o ator (`userID` do JWT) == `{id}` do path e o estado
+  persistido no MongoDB (não o JWT, que pode estar stale) contém `ADMIN` e o payload remove
+  `ADMIN` → **409 Conflict** (evita lockout operacional).
+- Em sucesso: evicta `usersById`/`usersByEmail`/`authByEmail` e audita `ROLE_GRANT` ou
+  `ROLE_REVOKE` (nunca os dois; nenhum se não houve mudança efetiva em `ADMIN`).
+
+Detalhe completo em [ADR-014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md).
 
 **Leituras só de usuários ativos (ADR-001):** os endpoints de leitura ocultam usuários
 soft-deleted (`active=false`):
@@ -128,7 +163,8 @@ Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetU
   _id: ObjectId,
   timestamp: ISODate,        // quando a operação ocorreu
   action: String,            // REGISTER | UPDATE | SOFT_DELETE_ADMIN | HARD_DELETE_ADMIN
-                             //   | SOFT_DELETE_SELF | READ_INTERNAL_CREDENTIAL | READ_CROSS_SUBJECT
+                             //   | SOFT_DELETE_SELF | HARD_DELETE_SELF | READ_INTERNAL_CREDENTIAL
+                             //   | READ_CROSS_SUBJECT | ROLE_GRANT | ROLE_REVOKE
   actorType: String,         // USER | ADMIN | SYSTEM
   actorUserId: String,       // null quando SYSTEM
   actorRoles: [String],      // null quando SYSTEM
@@ -139,7 +175,9 @@ Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetU
 ```
 
 > Leitura do próprio dado (`/me`, consulta ao próprio ID/email) **não** gera trilha. A listagem
-> (`GET /v1/users`) não é auditada (escopo inicial). Sem endpoint de consulta nem TTL — ver ADR-011.
+> (`GET /v1/users`) não é auditada (escopo inicial). Sem TTL — ver ADR-011. A consulta da trilha
+> via API existe desde o ADR-014: `GET /v1/admin/audit-logs` (feed geral) e
+> `GET /v1/admin/users/{id}/audit-logs` (por titular), ambos ADMIN-only e paginados.
 
 ## Estratégia de cache (Redis)
 
