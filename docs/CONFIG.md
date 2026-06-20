@@ -44,7 +44,7 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | `CONFIG_SERVER_PASSWORD` | serviços Spring · prometheus | `configtree:/run/secrets/` · `basic_auth.password_file` |
 | `OAUTH_CLIENT_SECRET` | gateway · auth-server | `configtree:/run/secrets/` |
 | `INTERNAL_API_TOKEN` | user-service · auth-server · notification-service | `configtree:/run/secrets/` |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` | notification-service | `configtree:/run/secrets/` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_AUTH` / `SMTP_STARTTLS` | notification-service | `configtree:/run/secrets/` |
 | `REDIS_PASSWORD` | redis-1/2/3 · sentinels · serviços Spring | `$(cat ...)` (runtime) · `configtree:/run/secrets/` |
 | `redis_exporter_json` | redis-exporter | `--redis.password-file` (JSON `{target: senha}`, não a senha crua) |
 | `POSTGRES_PASSWORD` | postgres · postgres-exporter | `POSTGRES_PASSWORD_FILE` (nativo) · `$(cat ...)` |
@@ -130,7 +130,7 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | `SERVER_PORT` (notification-service)   | notification-service   | `8095`                    | Porta do serviço — nunca publicada pelo gateway nem pelo compose base; só republicada em dev via `docker-compose.override.yml`. |
 | `SMTP_HOST` / `SMTP_PORT`              | notification-service   | `localhost` / `1025`      | Host/porta do servidor SMTP (`spring.mail.host/port`). Defaults de dev compatíveis com um MailHog/Mailpit local — sem credenciais reais. |
 | `SMTP_USERNAME` / `SMTP_PASSWORD`      | notification-service   | _(vazio)_                 | Credenciais SMTP — Docker secret, sem valor real por default (placeholder de dev). Exporte com credenciais reais antes de `gen-secrets.sh` em produção. |
-| `SMTP_AUTH` / `SMTP_STARTTLS`          | notification-service   | `false` / `false`         | Flags `spring.mail.properties.mail.smtp.auth`/`starttls.enable` — habilite conforme exigência do provedor SMTP real. |
+| `SMTP_AUTH` / `SMTP_STARTTLS`          | notification-service   | `false` / `false`         | Docker secret (mesmo mecanismo de `SMTP_HOST` etc.) para `spring.mail.properties.mail.smtp.auth`/`starttls.enable`. Gmail (`smtp.gmail.com:587`) exige ambos `true` — exporte antes de `gen-secrets.sh`. |
 | `APP_MAIL_FROM`                        | notification-service   | `no-reply@users.local`    | Remetente exibido nos e-mails de verificação (`app.mail.from`).                                              |
 
 ## Swagger / OpenAPI

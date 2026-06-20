@@ -72,7 +72,11 @@ resilience4j:
   timelimiter:
     configs:
       notification-service:
-        timeoutDuration: 3s
+        # 10s (não 3s): contra SMTP real (ex. Gmail) o handshake/TLS/auth costuma passar de
+        # 3s — o NotificationController do notification-service bloqueia até o
+        # JavaMailSender.send() retornar, então o timeout do Feign precisa cobrir essa latência
+        # real, não só a de um Mailhog/Mailpit local.
+        timeoutDuration: 10s
 
 eureka:
   client:
