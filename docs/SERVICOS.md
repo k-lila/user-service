@@ -18,12 +18,12 @@
 | ------ | ----------------------- | ---------- | --------------- |
 | POST   | /v1/users/register      | Nenhuma    | 2 req/s (IP)    |
 | GET    | /v1/users/verify-email  | Nenhuma    | 2 req/s (IP)    |
-| POST   | /v1/users/resend-verification | Nenhuma | 2 req/s (IP)    |
 | GET    | /v1/users               | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/{id}          | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/email/{email} | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/me            | ROLE_USER  | 10 req/s (user) |
 | PUT    | /v1/users               | ROLE_USER  | 10 req/s (user) |
+| POST   | /v1/users/resend-verification | ROLE_USER | 10 req/s (user) |
 | DELETE | /v1/users/remove/me     | ROLE_USER  | 10 req/s (user) |
 | DELETE | /v1/users/delete/me     | ROLE_USER  | 10 req/s (user) |
 
@@ -48,6 +48,7 @@ rota `admin-service` do gateway — superfície sensível, poucos operadores esp
 | GET    | /v1/admin/users/{id}/audit-logs    | ROLE_ADMIN | MED (5/s)  | Trilha de auditoria LGPD de um titular específico, paginada |
 | GET    | /v1/admin/audit-logs               | ROLE_ADMIN | MED (5/s)  | Feed geral da trilha de auditoria LGPD, paginado |
 | PATCH  | /v1/admin/users/{id}/roles         | ROLE_ADMIN | MED (5/s)  | Promove/revoga roles (`USER`/`ADMIN`) de um titular |
+| POST   | /v1/admin/users/{id}/resend-verification | ROLE_ADMIN | MED (5/s) | Reenvia o e-mail de verificação de cadastro para um titular |
 | DELETE | /v1/admin/users/{id}                | ROLE_ADMIN | MED (5/s)  | Soft-delete administrativo de outro titular (absorvido do ADR-013) |
 | DELETE | /v1/admin/users/del/{id}            | ROLE_ADMIN | MED (5/s)  | Hard-delete administrativo de outro titular (absorvido do ADR-013) |
 
@@ -71,17 +72,13 @@ Detalhe completo em [ADR-014](adr/ADR-014-admin-controller-gestao-roles-auditori
 
 ### Verificação de e-mail no cadastro (ADR-015)
 
-Cadastro (`POST /v1/users/register`) seta `emailVerified=false` e dispara o envio assíncrono
-de um e-mail de confirmação (outbox `notificationOutbox` → notification-service via Feign).
-Dois endpoints públicos pré-sessão, ambos no tier de rate limit LOW por IP do gateway (mesmo
-de `/v1/users/register`):
+Cadastro (`POST /v1/users/register`) só seta `emailVerified=false` — **não dispara** mais
+o e-mail de confirmação automaticamente. O envio (outbox `notificationOutbox` →
+notification-service via Feign) só acontece quando explicitamente requisitado via um dos
+endpoints de reenvio abaixo.
 
-| Método | Path                          | Auth    | Rate Limit | Descrição |
-| ------ | ------------------------------ | ------- | ---------- | --------- |
-| GET    | /v1/users/verify-email          | Nenhuma | LOW (2/s)  | Confirma o e-mail a partir do `token` (query string) |
-| POST   | /v1/users/resend-verification   | Nenhuma | LOW (2/s)  | Reenvia o e-mail de verificação |
-
-**`GET /v1/users/verify-email?token=...`**
+**`GET /v1/users/verify-email?token=...`** — público, pré-sessão, tier LOW (2/s) por IP no gateway
+(mesmo de `/v1/users/register`):
 
 - Token opaco (256 bits, `SecureRandom` + Base64URL) — **não é JWT**; só o hash SHA-256
   é persistido no outbox. TTL de 15 min (`app.verification.token-ttl`).
@@ -90,15 +87,25 @@ de `/v1/users/register`):
   confirmado é sucesso silencioso.
 - Sucesso audita `EMAIL_VERIFIED` (`AuditAction`, ator USER) na trilha LGPD.
 
-**`POST /v1/users/resend-verification`** `{ "email": "maria@exemplo.com" }`
+**Reenvio do e-mail de verificação** — deixou de ser público/por-e-mail; agora existem duas
+rotas autenticadas, ambas delegando a `EmailVerificationService.resendByUserId(String)`:
 
-- **Resposta sempre `202 Accepted`**, idêntica independente de o e-mail existir, já estar
-  verificado, ou estar throttled (anti-enumeração) — não auditado em `auditLogs` (chamada
-  anônima de alto volume, auditar criaria ruído/oráculo de timing).
+| Método | Path                                       | Auth       | Rate Limit | Descrição |
+| ------ | -------------------------------------------- | ---------- | ---------- | --------- |
+| POST   | /v1/users/resend-verification                | ROLE_USER  | 10/s (user) | Self-service: reenvia para o próprio usuário (`userID` do JWT) |
+| POST   | /v1/admin/users/{id}/resend-verification     | ROLE_ADMIN | MED (5/s)  | Admin: reenvia para qualquer titular, por `{id}` |
+
+- Sem corpo — o titular é resolvido por `userID` do JWT (self) ou `{id}` do path (admin), nunca
+  por e-mail no body (evita o vetor de anti-enumeração por e-mail que existia antes).
+- `resendByUserId` lança `DomainEntityNotFound` (404) se o `{id}` não existir — diferente do
+  antigo `resend(email)` (ainda usado internamente, silencioso por design): aqui não há motivo de
+  anti-enumeração, pois o chamador já está autenticado (self) ou é admin (que opera por ID de uma
+  listagem existente).
+- Resposta de sucesso é `202 Accepted`; reenvio **não é auditado** em `auditLogs` (mesmo critério
+  de antes — evita ruído/oráculo de timing).
 - Rate limit **complementar por conta-alvo** (`ResendRateLimitService`, Redis, chave
   `sha256(emailLower)`, janela fixa de 1h, default 3/h — `app.verification.resend-max-per-window`/
-  `app.verification.resend-window`), além do tier LOW por IP do gateway — evita e-mail bombing
-  via IPs rotativos contra uma vítima específica.
+  `app.verification.resend-window`), além do tier por-usuário do gateway — evita e-mail bombing.
 - Supera (`SUPERSEDED`) qualquer outbox `PENDING`/`SENT` anterior do mesmo titular antes de
   emitir um novo token — só o mais recente é válido.
 
@@ -171,10 +178,11 @@ soft-deleted (`active=false`):
 
 `tenantIds` é reservado para uma feature futura de multi-tenant (sempre `null` hoje —
 `registerUser` não atribui tenant). `emailVerified`/`emailVerifiedAt` deixaram de ser scaffold
-inerte (ADR-015): `registerUser` agora seta `emailVerified=false` no cadastro e dispara o
-fluxo de verificação por e-mail (`GET /v1/users/verify-email`); `emailVerifiedAt` é preenchido
-na confirmação. `null` (registros legados, anteriores ao campo) continua tratado como
-verificado em toda leitura.
+inerte (ADR-015): `registerUser` seta `emailVerified=false` no cadastro, mas **não** dispara
+o envio do e-mail — o fluxo de verificação (`GET /v1/users/verify-email`) só começa quando o
+usuário (self) ou um admin chama explicitamente um dos endpoints de reenvio; `emailVerifiedAt`
+é preenchido na confirmação. `null` (registros legados, anteriores ao campo) continua tratado
+como verificado em toda leitura.
 
 ## Claims do JWT
 

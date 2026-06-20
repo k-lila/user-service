@@ -15,6 +15,7 @@ import com.users.userservice.domain.NotificationStatus;
 import com.users.userservice.domain.NotificationType;
 import com.users.userservice.domain.User;
 import com.users.userservice.dtos.EmailVerificationRequestDTO;
+import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.exceptions.InvalidVerificationTokenException;
 import com.users.userservice.repository.INotificationOutboxRepository;
 import com.users.userservice.repository.IUserRepository;
@@ -140,7 +141,27 @@ public class EmailVerificationService {
         if (userOpt.isEmpty()) {
             return;
         }
-        User user = userOpt.get();
+        doResend(userOpt.get());
+    }
+
+    /**
+     * Reenvia o e-mail de verificação para um usuário identificado por ID — usado pelo
+     * self-service (UserController, via JWT) e pelo admin (AdminController, via {id} na rota).
+     * Diferente de {@link #resend(String)}, lança se o ID não existir: aqui não há motivo de
+     * anti-enumeração, pois o chamador já está autenticado (self) ou é admin (que opera por ID
+     * de uma listagem existente).
+     */
+    public void resendByUserId(String userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> {
+                    LOGGER.warn("| EMAIL-VERIFICATION | reenvio | usuário não encontrado | ID: {}", userId);
+                    return new DomainEntityNotFound(User.class, "ID", userId);
+                });
+        doResend(user);
+    }
+
+    private void doResend(User user) {
+        String email = user.getEmail();
         // emailVerified==null é legado (tratado como verificado) — só reenvia para false explícito.
         if (!Boolean.FALSE.equals(user.getEmailVerified())) {
             return;

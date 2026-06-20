@@ -48,9 +48,10 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 - **Gate de e-mail verificado no login, ativo (ADR-015):** `AuthorizationService.loadUserByUsername`
   mapeia `AuthDTO.emailVerified` para o flag `enabled` do `UserDetails` — `emailVerified=false`
   bloqueia o login via `DisabledException` (mensagem genérica), antes da checagem de senha.
-  Desde o `notification-service`, `registerUser` seta `emailVerified=false` no cadastro e
-  dispara o e-mail de verificação (`GET /v1/users/verify-email` confirma); `null` (legado,
-  anterior ao campo) continua tratado como verificado, sem bloqueio. **Mitigação de conta
+  Desde o `notification-service`, `registerUser` seta `emailVerified=false` no cadastro, mas
+  **não** dispara o e-mail automaticamente — o envio só acontece quando explicitamente
+  requisitado via reenvio (self ou admin); `GET /v1/users/verify-email` confirma. `null`
+  (legado, anterior ao campo) continua tratado como verificado, sem bloqueio. **Mitigação de conta
   permanentemente inacessível:** janela de carência de 24h (`security.email-verification.
   grace-period`) desde `AuthDTO.registrationDate` — login funciona dentro da janela mesmo sem
   confirmação, caso o e-mail nunca chegue (SMTP down, outbox `FAILED`); só bloqueia de fato
@@ -59,13 +60,14 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 - **notification-service: canal interno e anti-abuso (ADR-015):** o endpoint
   `POST /internal/notifications/email-verification` é protegido pelo mesmo `X-Internal-Token`
   do canal interno existente (ADR-006), via `Filter` de servlet simples (sem Spring Security —
-  o serviço não tem outra rota autenticável); **nunca exposto pelo gateway**. O reenvio
-  (`POST /v1/users/resend-verification`) tem duas camadas de rate limit: tier LOW por IP no
-  gateway (mesmo de `/v1/users/register`) **e** um limite por conta-alvo
-  (`ResendRateLimitService`, Redis, chave `sha256(emailLower)`, default 3/h) — evita e-mail
-  bombing de uma vítima específica via IPs rotativos. A resposta é sempre `202` idêntica
-  (anti-enumeração); a chamada ao notification-service é assíncrona, então o branch interno
-  não varia a latência observável da resposta HTTP.
+  o serviço não tem outra rota autenticável); **nunca exposto pelo gateway**. O reenvio deixou
+  de ser público/por-e-mail: `POST /v1/users/resend-verification` (self, `ROLE_USER`, resolve o
+  titular pelo `userID` do JWT) e `POST /v1/admin/users/{id}/resend-verification` (admin,
+  `ROLE_ADMIN`, por `{id}`) — ambos exigem sessão e CSRF como qualquer rota autenticada do
+  gateway, eliminando o vetor de anti-enumeração por e-mail que existia antes. Mantém o limite
+  por conta-alvo (`ResendRateLimitService`, Redis, chave `sha256(emailLower)`, default 3/h),
+  complementar ao rate limit por-usuário/por-IP do gateway. A chamada ao notification-service
+  continua assíncrona, então o branch interno não varia a latência observável da resposta HTTP.
 - **Token de verificação de e-mail em URL (dívida aceita, ADR-015):** o link de confirmação
   carrega o token na query string (`GET /v1/users/verify-email?token=...`). Mitigado por TTL
   de 15 min + uso único (status do outbox vira `CONFIRMED`/`SUPERSEDED` no primeiro uso válido)

@@ -62,15 +62,16 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                 .csrfTokenRepository(csrfTokenRepository)
                 .csrfTokenRequestHandler(new ServerCsrfTokenRequestAttributeHandler())
-                // /v1/users/register e /v1/users/resend-verification (POST) são públicos e
-                // pré-sessão (ADR-015): CSRF não protege nada ali (sem cookie/sessão para um
-                // atacante forjar). /v1/users/verify-email é GET — já fora do CSRF por padrão.
+                // /v1/users/register (POST) é público e pré-sessão (ADR-015): CSRF não protege
+                // nada ali (sem cookie/sessão para um atacante forjar). /v1/users/verify-email
+                // é GET — já fora do CSRF por padrão. /v1/users/resend-verification deixou de
+                // ser pré-sessão (agora self-service autenticado) — exige X-XSRF-TOKEN como
+                // qualquer outra rota autenticada.
                 .requireCsrfProtectionMatcher(new AndServerWebExchangeMatcher(
                         CsrfWebFilter.DEFAULT_CSRF_MATCHER,
                         new NegatedServerWebExchangeMatcher(
                                 ServerWebExchangeMatchers.pathMatchers(
-                                        "/v1/users/register",
-                                        "/v1/users/resend-verification"))
+                                        "/v1/users/register"))
                 ))
             )
             .cors(Customizer.withDefaults())

@@ -29,19 +29,16 @@ public class RegisterService {
     private final IUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final CacheService cacheService;
-    private final EmailVerificationService emailVerificationService;
     private final String termsVersion;
 
     public RegisterService(
             IUserRepository iUserRepository,
             PasswordEncoder passwordEncoder,
             CacheService cacheService,
-            EmailVerificationService emailVerificationService,
             @Value("${app.terms.version:v1}") String termsVersion) {
         this.userRepository = iUserRepository;
         this.passwordEncoder = passwordEncoder;
         this.cacheService = cacheService;
-        this.emailVerificationService = emailVerificationService;
         this.termsVersion = termsVersion;
     }
 
@@ -82,9 +79,6 @@ public class RegisterService {
             registered.getName(),
             registered.getId()
         );
-        // Cadastro nunca pode falhar por causa do e-mail (ADR-015): issueVerificationEmail
-        // isola a falha internamente (outbox FAILED), nunca propaga para este método.
-        emailVerificationService.issueVerificationEmail(registered);
         return UserResponseDTO.toResponseDTO(registered);
     }
 

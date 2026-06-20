@@ -27,6 +27,7 @@ import com.users.userservice.domain.NotificationStatus;
 import com.users.userservice.domain.NotificationType;
 import com.users.userservice.domain.User;
 import com.users.userservice.dtos.EmailVerificationRequestDTO;
+import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.exceptions.InvalidVerificationTokenException;
 import com.users.userservice.repository.INotificationOutboxRepository;
 import com.users.userservice.repository.IUserRepository;
@@ -323,6 +324,52 @@ class EmailVerificationServiceTest {
 
         service.resend("fulano@email.com");
 
+        verify(dispatchService, times(1)).dispatchEmailVerification(anyString(), any());
+    }
+
+    // ── resendByUserId ───────────────────────────────────────────────────────
+
+    @Test
+    void resendByUserId_deveLancarDomainEntityNotFound_quandoIdInexistente() {
+        when(userRepository.findById("id-inexistente")).thenReturn(Optional.empty());
+
+        assertThrows(DomainEntityNotFound.class, () -> service.resendByUserId("id-inexistente"));
+
+        verify(outboxRepository, never()).findByUserIdAndTypeAndStatusIn(any(), any(), any());
+        verify(dispatchService, never()).dispatchEmailVerification(any(), any());
+    }
+
+    @Test
+    void resendByUserId_naoDeveFazerNada_quandoEmailJaVerificado() {
+        User user = buildUser("user-1", "fulano@email.com", true);
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(user));
+
+        service.resendByUserId("user-1");
+
+        verify(resendRateLimitService, never()).isThrottled(anyString());
+        verify(dispatchService, never()).dispatchEmailVerification(any(), any());
+    }
+
+    @Test
+    void resendByUserId_deveChamarIssueVerificationEmail_quandoNaoVerificadoENaoThrottled() {
+        User user = buildUser("user-1", "fulano@email.com", false);
+
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(user));
+        when(resendRateLimitService.isThrottled("fulano@email.com")).thenReturn(false);
+        when(outboxRepository.findByUserIdAndTypeAndStatusIn(any(), any(), any())).thenReturn(List.of());
+        when(tokenService.generateToken()).thenReturn("token-novo");
+        when(tokenService.hashToken("token-novo")).thenReturn("hash-novo");
+        when(tokenService.getTokenTtl()).thenReturn(Duration.ofMinutes(15));
+        when(outboxRepository.save(any(NotificationOutbox.class)))
+                .thenAnswer(invocation -> {
+                    NotificationOutbox o = invocation.getArgument(0);
+                    o.setId("outbox-novo");
+                    return o;
+                });
+
+        service.resendByUserId("user-1");
+
+        verify(resendRateLimitService).recordResend("fulano@email.com");
         verify(dispatchService, times(1)).dispatchEmailVerification(anyString(), any());
     }
 }

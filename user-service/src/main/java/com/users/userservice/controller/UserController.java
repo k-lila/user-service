@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.users.userservice.domain.AuditAction;
-import com.users.userservice.dtos.ResendVerificationRequestDTO;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.services.AuditService;
@@ -80,13 +79,13 @@ public class UserController {
         return ResponseEntity.ok().build();
     }
 
-    // Resposta sempre 202 idêntica, independente do branch interno (anti-enumeração, AC-10) —
-    // não revela se o e-mail existe, já está verificado, ou está pendente.
-    @Operation(summary = "Reenviar e-mail de verificação")
+    @Operation(summary = "Reenviar e-mail de verificação para o próprio usuário")
     @PostMapping("/resend-verification")
-    public ResponseEntity<Void> resendVerification(@RequestBody @Valid ResendVerificationRequestDTO dto) {
-        LOGGER.info("| POST | reenviar verificação de e-mail");
-        emailVerificationService.resend(dto.getEmail());
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<Void> resendVerification(@AuthenticationPrincipal Jwt jwt) {
+        String userID = jwt.getClaim("userID");
+        LOGGER.info("| POST | reenviar verificação de e-mail (self) | ID: {}", userID);
+        emailVerificationService.resendByUserId(userID);
         return ResponseEntity.accepted().build();
     }
 

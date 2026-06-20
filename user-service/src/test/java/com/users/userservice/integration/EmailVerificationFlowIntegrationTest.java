@@ -105,11 +105,12 @@ class EmailVerificationFlowIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void deveCriarOutboxSent_quandoRegistroEnviaComSucesso() {
+    void deveCriarOutboxSent_quandoResendAposRegistroEnviaComSucesso() {
         stubNotificationServiceCom(200);
 
         UserResponseDTO registrado = registerService.registerUser(
                 buildDTO("Fulano", "fulano@email.com", "senha123"));
+        emailVerificationService.resendByUserId(registrado.getId());
 
         await().atMost(Duration.ofSeconds(3)).untilAsserted(() -> {
             NotificationOutbox outbox = unicoOutboxDoUsuario(registrado.getId());
@@ -119,7 +120,7 @@ class EmailVerificationFlowIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void deveResponder201_masMarcarOutboxFailed_quandoNotificationServiceRetorna500() {
+    void deveResponder201_masMarcarOutboxFailed_quandoResendAposRegistroEncontraServiceFora() {
         stubNotificationServiceCom(500);
 
         UserResponseDTO registrado = registerService.registerUser(
@@ -127,6 +128,8 @@ class EmailVerificationFlowIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(registrado).isNotNull();
         assertThat(registrado.getId()).isNotBlank();
+
+        emailVerificationService.resendByUserId(registrado.getId());
 
         await().atMost(Duration.ofSeconds(3)).untilAsserted(() -> {
             NotificationOutbox outbox = unicoOutboxDoUsuario(registrado.getId());
@@ -151,6 +154,7 @@ class EmailVerificationFlowIntegrationTest extends AbstractIntegrationTest {
 
         UserResponseDTO registrado = registerService.registerUser(
                 buildDTO("Fulano", "fulano.confirma@email.com", "senha123"));
+        emailVerificationService.resendByUserId(registrado.getId());
 
         NotificationOutbox outbox = await().atMost(Duration.ofSeconds(3))
                 .until(() -> {
@@ -193,6 +197,7 @@ class EmailVerificationFlowIntegrationTest extends AbstractIntegrationTest {
 
         UserResponseDTO registrado = registerService.registerUser(
                 buildDTO("Fulano", "fulano.resend@email.com", "senha123"));
+        emailVerificationService.resendByUserId(registrado.getId());
 
         NotificationOutbox primeiroOutbox = await().atMost(Duration.ofSeconds(3))
                 .until(() -> unicoOutboxDoUsuario(registrado.getId()),
@@ -226,12 +231,14 @@ class EmailVerificationFlowIntegrationTest extends AbstractIntegrationTest {
 
         UserResponseDTO primeiro = registerService.registerUser(
                 buildDTO("Um", "cb.um@email.com", "senha123"));
+        emailVerificationService.resendByUserId(primeiro.getId());
         await().atMost(Duration.ofSeconds(3)).untilAsserted(() ->
                 assertThat(unicoOutboxDoUsuario(primeiro.getId()).getStatus())
                         .isEqualTo(NotificationStatus.FAILED));
 
         UserResponseDTO segundo = registerService.registerUser(
                 buildDTO("Dois", "cb.dois@email.com", "senha123"));
+        emailVerificationService.resendByUserId(segundo.getId());
         await().atMost(Duration.ofSeconds(3)).untilAsserted(() ->
                 assertThat(unicoOutboxDoUsuario(segundo.getId()).getStatus())
                         .isEqualTo(NotificationStatus.FAILED));
@@ -241,6 +248,7 @@ class EmailVerificationFlowIntegrationTest extends AbstractIntegrationTest {
 
         UserResponseDTO terceiro = registerService.registerUser(
                 buildDTO("Tres", "cb.tres@email.com", "senha123"));
+        emailVerificationService.resendByUserId(terceiro.getId());
 
         await().atMost(Duration.ofSeconds(3)).untilAsserted(() ->
                 assertThat(unicoOutboxDoUsuario(terceiro.getId()).getStatus())

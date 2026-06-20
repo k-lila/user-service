@@ -57,8 +57,7 @@ public class SecurityConfig {
                         "/swagger-ui/**",
                         "/v3/api-docs/**",
                         "/v1/users/register",
-                        "/v1/users/verify-email",
-                        "/v1/users/resend-verification"
+                        "/v1/users/verify-email"
                 ).permitAll()
                 .anyRequest().authenticated()
             )

@@ -28,7 +28,6 @@ import com.users.userservice.domain.User;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.domain.AuditAction;
-import com.users.userservice.dtos.ResendVerificationRequestDTO;
 import com.users.userservice.exceptions.DomainEntityNotFound;
 import com.users.userservice.exceptions.EmailAlreadyRegisteredException;
 import com.users.userservice.exceptions.InvalidVerificationTokenException;
@@ -698,65 +697,45 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
-    // ── POST /users/resend-verification ──────────────────────────────────────
+    // ── POST /users/resend-verification (self) ───────────────────────────────
 
     @Test
-    void resendVerification_deveRetornar202_quandoEmailExisteEPendente() throws Exception {
-        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
-        dto.setEmail("fulano@email.com");
-
+    void resendVerification_deveRetornar202EPassarUserIdDoJwt() throws Exception {
         mockMvc.perform(post("/v1/users/resend-verification")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json(dto)))
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isAccepted());
 
-        verify(emailVerificationService).resend("fulano@email.com");
-    }
-
-    @Test
-    void resendVerification_deveRetornar202_quandoEmailInexistente() throws Exception {
-        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
-        dto.setEmail("naoexiste@email.com");
-
-        mockMvc.perform(post("/v1/users/resend-verification")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json(dto)))
-                .andExpect(status().isAccepted());
+        verify(emailVerificationService).resendByUserId(USER_ID);
     }
 
     @Test
     void resendVerification_deveRetornar202_aindaQuandoServiceLancaRuntimeException() throws Exception {
-        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
-        dto.setEmail("fulano@email.com");
         doThrow(new RuntimeException("falha inesperada"))
-                .when(emailVerificationService).resend("fulano@email.com");
+                .when(emailVerificationService).resendByUserId(USER_ID);
 
         mockMvc.perform(post("/v1/users/resend-verification")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json(dto)))
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isInternalServerError());
     }
 
     @Test
-    void resendVerification_deveRetornar400_quandoEmailAusente() throws Exception {
-        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
-
-        mockMvc.perform(post("/v1/users/resend-verification")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json(dto)))
-                .andExpect(status().isBadRequest());
+    void resendVerification_deveRetornar401_quandoSemToken() throws Exception {
+        mockMvc.perform(post("/v1/users/resend-verification"))
+                .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(emailVerificationService);
     }
 
     @Test
-    void resendVerification_naoDeveExigirAutenticacao() throws Exception {
-        ResendVerificationRequestDTO dto = new ResendVerificationRequestDTO();
-        dto.setEmail("fulano@email.com");
-
+    void resendVerification_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
         mockMvc.perform(post("/v1/users/resend-verification")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json(dto)))
-                .andExpect(status().isAccepted());
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(emailVerificationService);
     }
 }

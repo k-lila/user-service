@@ -82,11 +82,9 @@ desproporcional ao risco residual (TTL curto + uso único).
   caso de token inválido/expirado/já usado (sem revelar o motivo). Idempotente (clique
   duplicado no link já confirmado é sucesso silencioso). Audita `EMAIL_VERIFIED`
   (`AuditAction`, ator USER).
-- `POST /v1/users/resend-verification` `{email}` — público, pré-sessão. **Resposta HTTP
-  sempre `202 Accepted` idêntica**, independente de o e-mail existir, já estar
-  verificado, ou estar pendente (anti-enumeração). Não auditado em `auditLogs` (chamada
-  anônima de alto volume/potencial abuso; auditar criaria ruído e um oráculo de
-  volume/timing).
+- ~~`POST /v1/users/resend-verification` `{email}` — público, pré-sessão.~~ **Atualização:**
+  o reenvio deixou de ser público/por-e-mail — ver "Atualização: reenvio movido para
+  self-service + admin" abaixo.
 
 ### Rate limit do reenvio (fechamento do BLOCK-003/B3)
 Duas camadas: tier LOW por IP no gateway (mesmo de `/v1/users/register`, já existente) +
@@ -170,3 +168,57 @@ janela 10, threshold 50%, timeout 3s) + `NotificationClientFallbackFactory`.
   bloqueio real de login, fechando a dívida do gate dormente em vez de deixá-lo inerte
   indefinidamente; o risco de conta inacessível foi endereçado via grace period em vez
   de desativar o gate.
+
+## Atualização: reenvio movido para self-service + admin
+
+O reenvio público por e-mail (`POST /v1/users/resend-verification {email}`) foi
+substituído por dois endpoints autenticados, ambos delegando a
+`EmailVerificationService.resendByUserId(String)`:
+
+- `POST /v1/users/resend-verification` (`ROLE_USER`) — self-service; titular resolvido
+  pelo `userID` do JWT, sem corpo.
+- `POST /v1/admin/users/{id}/resend-verification` (`ROLE_ADMIN`) — admin; titular
+  resolvido por `{id}` no path, consistente com o restante do `AdminController`
+  (ADR-014).
+
+**Motivo:** o motivo original de ser público/pré-sessão (usuário recém-cadastrado, sem
+sessão) deixou de se aplicar ao caso de uso real — quem reenvia já está logado (self) ou
+é um operador administrativo (admin), nunca um visitante anônimo só com um e-mail em
+mãos. Eliminar o body por-e-mail também remove de raiz o vetor de anti-enumeração que o
+endpoint público precisava mitigar (`202` idêntico independente do e-mail existir).
+
+`resendByUserId` lança `DomainEntityNotFound` (404) se o `{id}` não existir — diferente
+do `resend(email)` original (mantido internamente, ainda silencioso por design quando
+chamado por e-mail), pois aqui não há mais motivo de anti-enumeração: o chamador já está
+autenticado ou é admin operando sobre um ID de uma listagem existente.
+
+**Impacto na borda:** a rota dedicada `user-resend-verification` (LOW por IP, isenta de
+CSRF) saiu do `GatewayRouter`; o self-service agora cai na rota genérica `user-service`
+(tokenRelay, tier HIGH por-usuário) e o admin na rota `admin-service` já existente (tier
+MED). `/v1/users/resend-verification` saiu da isenção de CSRF do gateway e do
+`permitAll()` do `SecurityConfig` do user-service.
+
+## Atualização: envio automático no cadastro removido
+
+`RegisterService.registerUser()` deixou de chamar
+`EmailVerificationService.issueVerificationEmail()` ao final do cadastro. O método continua
+existindo (chamado internamente por `doResend()`), mas agora **só** é acionado pelos dois
+endpoints de reenvio (`POST /v1/users/resend-verification` self, `POST
+/v1/admin/users/{id}/resend-verification` admin) — nunca implicitamente no cadastro.
+
+**Motivo:** decisão do usuário de que o disparo do e-mail deve ser sempre um ato explícito,
+nunca um efeito colateral implícito de `POST /v1/users/register`.
+
+**O que muda:** o cadastro passa a só persistir `emailVerified=false` (sem outbox, sem
+chamada Feign ao notification-service). O usuário precisa chamar manualmente um dos
+endpoints de reenvio para receber o e-mail de confirmação pela primeira vez.
+
+**Consequência prática:** a **janela de carência de 24h** (`security.email-verification.
+grace-period`, ver seção "Gate de login + grace period" acima) deixa de ser só um curativo
+para SMTP fora do ar — agora é o mecanismo real pelo qual todo usuário recém-cadastrado
+acessa a conta antes de pedir/confirmar o e-mail, já que nenhum e-mail é enviado sozinho.
+Isso não exige mudança no gate em si; só reforça a importância de não removê-lo.
+
+Os testes de integração de `EmailVerificationFlowIntegrationTest` que hoje assumiam outbox
+criado pelo registro passaram a inserir uma chamada explícita de resend
+(`EmailVerificationService.resendByUserId`/`resend`) imediatamente após o cadastro.

@@ -38,17 +38,6 @@ class GatewaySecurityIntegrationTest extends AbstractGatewayIntegrationTest {
     }
 
     @Test
-    void devePermitirResendVerificationSemTokenCsrf() {
-        downstream.stubFor(post(urlEqualTo("/v1/users/resend-verification"))
-                .willReturn(aResponse().withStatus(202)));
-
-        webTestClient.post().uri("/v1/users/resend-verification")
-                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"email\":\"a@b.com\"}")
-                .exchange()
-                .expectStatus().isAccepted(); // não 403, ao contrário de /v1/users/** genérico
-    }
-
-    @Test
     void deveRetornar401_quandoRotaGenericaDeUsersSemAutenticacao() {
         // /v1/users/email/{email} cai na rota genérica "user-service" (tokenRelay), não nas
         // rotas públicas pré-sessão de verificação de e-mail — deve continuar exigindo sessão.
@@ -68,14 +57,14 @@ class GatewaySecurityIntegrationTest extends AbstractGatewayIntegrationTest {
     }
 
     @Test
-    void devePermitirResendVerificationSemAutenticacao() {
-        downstream.stubFor(post(urlEqualTo("/v1/users/resend-verification"))
-                .willReturn(aResponse().withStatus(202)));
-
+    void deveRetornar403_quandoResendVerificationSemTokenCsrf() {
+        // resend-verification deixou de ser pré-sessão (ADR-015): hoje é self-service
+        // autenticado, coberto pela rota genérica "user-service" — exige CSRF como qualquer
+        // POST autenticado (a checagem de CSRF antecede a de autenticação na cadeia de filtros).
         webTestClient.post().uri("/v1/users/resend-verification")
-                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"email\":\"a@b.com\"}")
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{}")
                 .exchange()
-                .expectStatus().isAccepted(); // não 401
+                .expectStatus().isForbidden();
     }
 
     @Test

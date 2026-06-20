@@ -11,8 +11,9 @@ import org.springframework.http.MediaType;
 
 /**
  * Integração de rate limiting: o limiter LOW (2 rps, burst 5) do /v1/users/register barra
- * uma rajada concentrada do mesmo IP com HTTP 429. As rotas novas de verificação de e-mail
- * (ADR-015) compartilham o mesmo tier LOW (pré-sessão, anti-abuso/enumeração).
+ * uma rajada concentrada do mesmo IP com HTTP 429. /v1/users/verify-email (ADR-015) compartilha
+ * o mesmo tier LOW (pré-sessão, anti-abuso/enumeração); /v1/users/resend-verification deixou de
+ * ser pré-sessão e hoje cai no tier HIGH por-usuário da rota genérica "user-service".
  */
 class RateLimitIntegrationTest extends AbstractGatewayIntegrationTest {
 
@@ -56,28 +57,6 @@ class RateLimitIntegrationTest extends AbstractGatewayIntegrationTest {
 
         assertThat(rejeitadas)
                 .as("verify-email deve cair no mesmo tier LOW de /v1/users/register")
-                .isGreaterThan(0);
-    }
-
-    @Test
-    void deveRetornar429_quandoEstourarLimiteLowDeResendVerification() {
-        downstream.stubFor(post(urlEqualTo("/v1/users/resend-verification"))
-                .willReturn(aResponse().withStatus(202)));
-
-        int rejeitadas = 0;
-        for (int i = 0; i < 25; i++) {
-            int status = webTestClient.post().uri("/v1/users/resend-verification")
-                    .header("CF-Connecting-IP", "203.0.113.52")
-                    .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"email\":\"a@b.com\"}")
-                    .exchange()
-                    .returnResult(Void.class).getStatus().value();
-            if (status == 429) {
-                rejeitadas++;
-            }
-        }
-
-        assertThat(rejeitadas)
-                .as("resend-verification deve cair no mesmo tier LOW de /v1/users/register")
                 .isGreaterThan(0);
     }
 }

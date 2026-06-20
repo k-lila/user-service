@@ -34,6 +34,7 @@ import com.users.userservice.exceptions.SelfRoleRevocationException;
 import com.users.userservice.services.AdminService;
 import com.users.userservice.services.AdminService.RoleUpdateResult;
 import com.users.userservice.services.AuditService;
+import com.users.userservice.services.EmailVerificationService;
 import com.users.userservice.services.RegisterService;
 
 @WebMvcTest(AdminController.class)
@@ -51,6 +52,7 @@ class AdminControllerTest {
     @MockitoBean AdminService adminService;
     @MockitoBean RegisterService registerService;
     @MockitoBean AuditService auditService;
+    @MockitoBean EmailVerificationService emailVerificationService;
     @MockitoBean JwtDecoder jwtDecoder;
 
     private static final String ADMIN_ID = "admin-id-1";
@@ -381,6 +383,46 @@ class AdminControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(adminService);
+    }
+
+    // ── POST /v1/admin/users/{id}/resend-verification ────────────────────────
+
+    @Test
+    void resendVerification_deveRetornar202() throws Exception {
+        mockMvc.perform(post("/v1/admin/users/{id}/resend-verification", TARGET_ID)
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", ADMIN_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isAccepted());
+
+        verify(emailVerificationService).resendByUserId(TARGET_ID);
+    }
+
+    @Test
+    void resendVerification_deveRetornar404_quandoAlvoNaoExiste() throws Exception {
+        doThrow(new DomainEntityNotFound(User.class, "ID", "inexistente"))
+                .when(emailVerificationService).resendByUserId("inexistente");
+
+        mockMvc.perform(post("/v1/admin/users/{id}/resend-verification", "inexistente")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", ADMIN_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void resendVerification_deveRetornar403_quandoTokenSemRoleAdmin() throws Exception {
+        mockMvc.perform(post("/v1/admin/users/{id}/resend-verification", TARGET_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(emailVerificationService);
+    }
+
+    @Test
+    void resendVerification_deveRetornar401_quandoSemToken() throws Exception {
+        mockMvc.perform(post("/v1/admin/users/{id}/resend-verification", TARGET_ID))
+                .andExpect(status().isUnauthorized());
     }
 
     // ── DELETE /v1/admin/users/{id} ──────────────────────────────────────────

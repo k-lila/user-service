@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -24,6 +25,7 @@ import com.users.userservice.dtos.UpdateRolesRequestDTO;
 import com.users.userservice.services.AdminService;
 import com.users.userservice.services.AdminService.RoleUpdateResult;
 import com.users.userservice.services.AuditService;
+import com.users.userservice.services.EmailVerificationService;
 import com.users.userservice.services.RegisterService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -49,11 +51,17 @@ public class AdminController {
     private final AdminService adminService;
     private final RegisterService registerService;
     private final AuditService auditService;
+    private final EmailVerificationService emailVerificationService;
 
-    public AdminController(AdminService adminService, RegisterService registerService, AuditService auditService) {
+    public AdminController(
+            AdminService adminService,
+            RegisterService registerService,
+            AuditService auditService,
+            EmailVerificationService emailVerificationService) {
         this.adminService = adminService;
         this.registerService = registerService;
         this.auditService = auditService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @Operation(summary = "Lista todos os usuários, incluindo inativos, com filtros opcionais")
@@ -120,6 +128,15 @@ public class AdminController {
         }
 
         return ResponseEntity.ok(result.response());
+    }
+
+    @Operation(summary = "Reenvia o e-mail de verificação de cadastro para um titular")
+    @PostMapping("/users/{id}/resend-verification")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> resendVerification(@PathVariable("id") String id) {
+        LOGGER.info("| POST | ADMIN reenviar verificação de e-mail | ID alvo: {}", id);
+        emailVerificationService.resendByUserId(id);
+        return ResponseEntity.accepted().build();
     }
 
     @Operation(summary = "Desativa (soft-delete) outro titular")
