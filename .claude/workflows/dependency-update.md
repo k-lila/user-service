@@ -32,11 +32,8 @@ Obrigatória se o bump é de dependência de segurança (Spring Security, OAuth,
 JWT/serialização, BCrypt) ou fechou um CVE. Confirma que o upgrade não regrediu controle
 nem reintroduziu CVE.
 - `REJECTED` com BLOQUEADOR → devolve ao `dependency-steward` (máx. 2x) → humano.
-
-### FASE 5 — Registro (`doc-keeper`)
-Atualiza as versões no `CLAUDE.md` (stack), registra o bump e qualquer dívida em
-`.claude/memory/decisions.md`, e move o CVE de `docs/SECURITY.md` (gap) para resolvido
-quando aplicável.
+- `APPROVED` → registra o bump e qualquer dívida em `.claude/memory/decisions.md`, e move
+  o CVE de `docs/SECURITY.md` (gap) para resolvido quando aplicável.
 
 ## Regra inviolável
 Bump que **exige mudança de código** deixa de ser tarefa do `dependency-steward` e vira

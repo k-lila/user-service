@@ -31,8 +31,8 @@ as seções como esqueleto para o `techlead`/humano completarem.
    - Mantenha as seções **Contexto / Decisão / Consequências / Alternativas consideradas**
      como esqueleto (não invente conteúdo).
 4. Confirme o caminho criado e lembre: registrar a decisão também em
-   `.claude/memory/decisions.md` e, se mudar contrato, sinalizar `senso-critico` +
-   `doc-keeper`. Atualize a lista de ADRs no `CLAUDE.md` (Mapa de documentos) e em
+   `.claude/memory/decisions.md` e, se mudar contrato, sinalizar `senso-critico`.
+   Atualize a lista de ADRs no `CLAUDE.md` (Mapa de documentos) e em
    `docs/CONVENCOES.md` se a decisão formaliza uma invariante.
 
 Antes de gravar, se `$title` estiver vazio, peça o título ao usuário em vez de criar um

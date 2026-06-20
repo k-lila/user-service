@@ -21,7 +21,7 @@ cobertura) — os guardrails que deixam o produto crescer sem regredir.
 | `senso-critico`      | opus-4-8                             | Revisão adversarial: consistência + **compatibilidade de contrato** + bugs latentes | Após o `product-manager` e após o `qa-tester` |
 | `security-reviewer`  | opus-4-8                             | Revisão de segurança dedicada (authn/authz, segredos, canal interno, CSRF/CORS)    | Condicional (superfície de segurança) + novo serviço |
 | `dependency-steward` | sonnet-4-6                           | Higiene de dependências: CVE, upgrades Spring/React, compat de versões             | Higiene de dependências / CVE / upgrade |
-| `doc-keeper`         | sonnet-4-6                           | Sincroniza `CLAUDE.md` e `docs/` com o código                                      | Fase final, após `APPROVED`             |
+| `report-writer`      | sonnet-4-6                           | Gera relatórios de impacto (mudanças recentes) ou estado de uma fatia do projeto (segurança, endpoints, infra, testes, etc.) | Sob demanda, fora do pipeline linear |
 
 > Histórico: `techlead` fundiu os antigos `backlog-driver` + `security-auditor`, mas a
 > revisão de segurança voltou a ser dedicada no **`security-reviewer`** (a evolução ativa
@@ -45,7 +45,7 @@ read-only); `/new-adr "<título>"` (scaffolda ADR do template com o próximo nú
 
 `feature.md`, `bugfix.md`, `hotfix.md`, `new-service.md`, `dependency-update.md`. O
 pipeline de domínio segue `product-manager → senso-critico → techlead → qa-tester →
-[security-reviewer] → senso-critico → doc-keeper` com pontos de retry e escalonamento.
+[security-reviewer] → senso-critico` com pontos de retry e escalonamento.
 Protocolo geral:
 
 ```
@@ -56,11 +56,11 @@ Protocolo geral:
 5. qa-tester       → testa           (bug P0 → devolve ao techlead, máx. 2x)
 6. security-reviewer → CONDICIONAL: só se a superfície de segurança foi tocada
 7. senso-critico   → revisão final   (REJECTED → agente responsável, máx. 1x → humano)
-8. APPROVED        → doc-keeper sincroniza docs/ e registra em decisions.md
+8. APPROVED        → registra em decisions.md
 ```
 
 > `dependency-update.md` é o workflow de higiene de dependências do `dependency-steward`:
-> steward (bump) → qa-tester (regressão) → security-reviewer (se dep de segurança) → doc-keeper.
+> steward (bump) → qa-tester (regressão) → security-reviewer (se dep de segurança).
 
 ## Memória (`.claude/memory/`)
 
@@ -83,6 +83,11 @@ Protocolo geral:
 Os agentes também podem ser chamados isoladamente via Claude Code: `techlead` para
 "implemente C\<n\>" ou "feche o gap G\<n\>"; `senso-critico` para auditoria preventiva
 ou "qual gap fechar agora?"; `security-reviewer` para uma auditoria de segurança;
-`dependency-steward` para "audite/atualize as dependências"; `doc-keeper` após mudanças
-que afetem `docs/`. Skills: `/suggest-tests <Classe>`, `/check-compat`, `/security-scan`,
-`/new-adr "<título>"`.
+`dependency-steward` para "audite/atualize as dependências"; `report-writer` para
+"resuma o que mudamos hoje" ou "como está a cobertura de testes do user-service" — gera
+relatório de impacto ou de estado de uma fatia, sem aprovar/reprovar nada. Skills:
+`/suggest-tests <Classe>`, `/check-compat`, `/security-scan`, `/new-adr "<título>"`.
+
+> A sincronização de `CLAUDE.md`/`docs/` após `APPROVED` deixou de ter um agente dedicado
+> (`doc-keeper`, removido) — fica a cargo de quem conduz o pipeline (humano ou
+> orquestrador) atualizar os docs afetados manualmente quando necessário.

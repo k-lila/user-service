@@ -46,8 +46,3 @@ config-server, canal interno se houver, CORS/CSRF e exposição na borda (`/secu
 ### FASE 6 — Revisão final (`senso-critico`, reviewing: full)
 Foco adicional: acoplamento desnecessário introduzido? Contratos versionados
 (`/check-compat`)? Observabilidade completa desde o início? JWT/sessão conforme o BFF?
-
-### FASE 7 — Registro (`doc-keeper`)
-Atualiza `docs/SERVICOS.md`, `docs/CONFIG.md` (novas variáveis), `docs/TESTES.md`,
-`docs/CONVENCOES.md`/`docs/SECURITY.md` se aplicável, e o diagrama de arquitetura no
-`CLAUDE.md`.
