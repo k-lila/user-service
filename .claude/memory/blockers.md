@@ -55,3 +55,11 @@
 - **Não-regressão verificada (OK):** AC-08 (emailVerified=null loga normal) coberto por !Boolean.FALSE.equals(null)=true; ADR-012 (consentimento) preservado em RegisterService.java:60-65; contrato Feign IUserClient/AuthDTO intacto (emailVerified já existe no AuthDTO).
 - **Justificativa do novo serviço (FASE 1):** APROVADA — bounded context ortogonal (SMTP != identidade) consistente com a separação rígida do projeto; padrão Feign+X-Internal-Token = ADR-006. Não é decomposição prematura.
 - **Status:** resolvido (rodada 2/2 do senso-critico, 2026-06-19 — APPROVED com observações p/ FASE 3; ver decisions.md). B1/B2/B3 fechados: permitAll+CSRF no gateway, grace period 24h null-safe (`registrationDate` adicionado ao `AuthDTO` — mudança de contrato aditiva, exige ADR-015), `ResendRateLimitService` por conta. Críticos C1/C2/C3 encaminhados ao ADR-015. PENDENTE: security-reviewer (FASE 5) antes do merge.)
+
+## [2026-06-21] BLOCK-004 · auditoria-seguranca · user-service
+- **Origem:** security-reviewer (auditoria de segurança ad hoc, read-only)
+- **Severidade:** BLOQUEADOR (P0) — diretamente explorável por qualquer usuário autenticado; bloqueia a barra de produção
+- **Agente responsável:** techlead (correção), via pipeline (product-manager → senso-critico → techlead → qa → security-reviewer)
+- **Referência:** G1 / `UserController.java` — `GET /v1/users/{id}` e `GET /v1/users/email/{email}` (`@PreAuthorize`/`hasRole('USER')` sem checagem de titularidade); `UserResponseDTO`
+- **Descrição:** IDOR de leitura de PII. As duas rotas exigem só `ROLE_USER` e não validam que o titular consultado é o solicitante — qualquer usuário autenticado itera ids/e-mails e lê PII (nome, e-mail, `registrationDate`, `consentAcceptedAt`, `emailVerified`) de **toda a base** (enumeração/exfiltração, insumo de phishing; impacto LGPD). O código já **audita** como `READ_CROSS_SUBJECT` mas **não bloqueia**. Correção: restringir a ADMIN, ou ao próprio titular, ou reduzir o `UserResponseDTO` público. Detalhe e demais achados (G2–G9) em `docs/SECURITY.md § Gaps recém-identificados`.
+- **Status:** aberto

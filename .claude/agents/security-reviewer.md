@@ -41,6 +41,10 @@ Você **não edita `src/`**. `Bash`/`Grep` são para leitura e diagnóstico
   pública? O JWT continua **fora do browser** (padrão BFF) — sem token em `localStorage`/
   `Authorization` no front?
 - Claims (`userID`, `roles`, `permissions`) derivados corretamente, não confiáveis do cliente?
+- **IDOR / authz por-titular:** rota de leitura por `{id}`/e-mail de **terceiro** (ex.:
+  `GET /v1/users/{id}`, `/email/{email}`) valida titularidade (solicitante = titular) ou é
+  ADMIN-only? Um `USER` consegue ler PII de outro titular? (auditar ≠ bloquear — ver **G1** em
+  `docs/SECURITY.md`).
 
 ### 2 — Canal interno e segredos
 - `/internal/users/email/{email}` segue fora do gateway/Swagger e protegido por
@@ -53,6 +57,9 @@ Você **não edita `src/`**. `Bash`/`Grep` são para leitura e diagnóstico
 - CORS por env, não wildcard? Rate limiting (LOW/MED/HIGH) preservado nas rotas certas?
 - Cookies `SESSION`/`AUTHSESSION` sem colisão? Lockout anti-brute-force
   (`LoginAttemptService`) intacto e dependente de `X-Forwarded-For` confiável?
+- **Headers de segurança HTTP** presentes (CSP, `X-Frame-Options`/`frame-ancestors`, HSTS,
+  `X-Content-Type-Options`) no nginx do front e/ou no gateway? (ausência hoje = **G3** em
+  `docs/SECURITY.md`).
 
 ### 4 — Dependências e premissas de prod
 - Bump de dependência de segurança não regrediu versão nem introduziu CVE?
