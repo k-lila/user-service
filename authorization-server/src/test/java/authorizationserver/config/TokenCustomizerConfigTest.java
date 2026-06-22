@@ -16,16 +16,21 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 
+import authorizationserver.services.RevocationRefreshGuard;
+
 @ExtendWith(MockitoExtension.class)
 class TokenCustomizerConfigTest {
 
+    private final RevocationRefreshGuard refreshGuard = mock(RevocationRefreshGuard.class);
     private final OAuth2TokenCustomizer<JwtEncodingContext> customizer =
-            new TokenCustomizerConfig().jwtCustomizer();
+            new TokenCustomizerConfig().jwtCustomizer(refreshGuard);
 
     /**
      * Monta o contexto mockado e devolve o mapa de claims que o customizer produziria.
@@ -128,5 +133,40 @@ class TokenCustomizerConfigTest {
         // O JdbcOAuth2AuthorizationService rejeita coleções imutáveis na releitura — invariante.
         assertInstanceOf(ArrayList.class, claims.get("roles"));
         assertInstanceOf(ArrayList.class, claims.get("permissions"));
+    }
+
+    @Test
+    void deveBarrarRefresh_quandoTitularRevogado() {
+        // ADR-017: grant refresh_token + titular revogado → aborta a reemissão (invalid_grant).
+        when(refreshGuard.isRevoked(any(), any())).thenReturn(true);
+
+        JwtEncodingContext context = mock(JwtEncodingContext.class);
+        when(context.getTokenType()).thenReturn(new OAuth2TokenType("access_token"));
+        when(context.getPrincipal()).thenReturn(
+                new TestingAuthenticationToken("user", "pass", "USER_ID:abc123", "ROLE_USER"));
+        when(context.getAuthorizationGrantType()).thenReturn(AuthorizationGrantType.REFRESH_TOKEN);
+        when(context.getAuthorization()).thenReturn(null);
+
+        assertThrows(OAuth2AuthenticationException.class, () -> customizer.customize(context));
+        // Barrou antes de montar claims.
+        verify(context, never()).getClaims();
+    }
+
+    @Test
+    void naoDeveBarrarRefresh_quandoNaoRevogado_eDeveCustomizar() {
+        // refreshGuard.isRevoked(...) retorna false por padrão (mock) — não revogado.
+        JwtEncodingContext context = mock(JwtEncodingContext.class);
+        when(context.getTokenType()).thenReturn(new OAuth2TokenType("access_token"));
+        when(context.getPrincipal()).thenReturn(
+                new TestingAuthenticationToken("user", "pass", "USER_ID:abc123", "ROLE_USER"));
+        when(context.getAuthorizationGrantType()).thenReturn(AuthorizationGrantType.REFRESH_TOKEN);
+        when(context.getAuthorization()).thenReturn(null);
+        JwtClaimsSet.Builder builder = mock(JwtClaimsSet.Builder.class);
+        when(context.getClaims()).thenReturn(builder);
+
+        customizer.customize(context);
+
+        // Não barrou: seguiu para a montagem de claims (o Consumer capturado lê os scopes lazy).
+        verify(builder).claims(any());
     }
 }

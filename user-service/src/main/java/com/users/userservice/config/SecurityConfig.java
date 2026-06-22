@@ -9,12 +9,20 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.util.function.SingletonSupplier;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.users.userservice.services.TokenRevocationService;
 
 @Configuration
 @EnableMethodSecurity
@@ -29,6 +37,28 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * Decoder do resource server com revogação ativa (ADR-017): aos validadores default
+     * (issuer/exp) soma o {@link RevocationTokenValidator}. A resolução do metadata OIDC é
+     * <b>preguiçosa</b> ({@link SingletonSupplier}, na 1ª decodificação) — preserva a
+     * independência de startup do user-service em relação ao authorization-server, como faz a
+     * autoconfig por issuer-uri.
+     */
+    @Bean
+    public JwtDecoder jwtDecoder(
+            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
+            TokenRevocationService revocationService) {
+        SingletonSupplier<JwtDecoder> delegate = SingletonSupplier.of(() -> {
+            NimbusJwtDecoder decoder = NimbusJwtDecoder.withIssuerLocation(issuerUri).build();
+            OAuth2TokenValidator<Jwt> withRevocation = new DelegatingOAuth2TokenValidator<>(
+                    JwtValidators.createDefaultWithIssuer(issuerUri),
+                    new RevocationTokenValidator(revocationService));
+            decoder.setJwtValidator(withRevocation);
+            return decoder;
+        });
+        return token -> delegate.obtain().decode(token);
     }
 
     @Bean

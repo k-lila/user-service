@@ -167,6 +167,9 @@ Cloudflare Tunnel (ADR-010, item 1.2 RELATORIOA): o header confiável é a fonte
 | `TRUSTED_CLIENT_IP_HEADER`        | gateway · auth-server | `CF-Connecting-IP`| Header de IP confiável, **fonte primária** do particionamento por IP. A Cloudflare sobrescreve `CF-Connecting-IP`. **Esvaziar/trocar** em deploy não-Cloudflare (cai no XFF via forward-headers). |
 | `LOCKOUT_MAX_ATTEMPTS`            | auth-server           | `5`               | Falhas (conta+IP) antes do lockout.                                                                          |
 | `LOCKOUT_DURATION`                | auth-server           | `15m`             | Janela/TTL do lockout no Redis.                                                                              |
+| `TOKEN_REVOCATION_ENABLED`        | user-service · gateway · auth-server | `true` | Liga/desliga a revogação ativa de token (ADR-017). `false` torna a escrita e a checagem do epoch no-op.       |
+| `TOKEN_REVOCATION_KEY_PREFIX`     | user-service · gateway · auth-server | `revoke:user:` | Prefixo da chave do epoch de revogação no Redis. **Deve casar entre os três serviços** (fonte única compartilhada). |
+| `TOKEN_REVOCATION_TTL`            | user-service          | `75m`       | TTL do epoch de revogação (`security.revocation.ttl`) — só o user-service grava. Deve ser **≥ a vida máxima do refresh token**: depois disso não há token vivo anterior à revogação e a marca se auto-limpa. |
 
 ## Observabilidade
 

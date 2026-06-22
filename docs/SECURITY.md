@@ -92,6 +92,30 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   auto-revogação:** se o ator tentar remover `ADMIN` de si mesmo (checado contra o estado
   persistido no Mongo, não o JWT, que pode estar stale) → **409 Conflict** — evita lockout
   operacional sem rota de recuperação via API.
+- **Leitura de PII por id/e-mail restrita a ADMIN (ADR-016 — fecha o G1/IDOR):** as rotas
+  `GET /v1/users/{id}` e `GET /v1/users/email/{email}` foram **removidas** do `UserController`
+  público e reabertas no `AdminController` como `GET /v1/admin/users/{id}` e
+  `GET /v1/admin/users/email/{email}` (`@PreAuthorize("hasRole('ADMIN')")`, `AdminUserResponseDTO`
+  com `roles`, inclui inativos). Um `USER` não enumera mais PII de terceiro (antes: leitura
+  cross-subject auditada mas **não bloqueada**). A leitura do próprio dado permanece em
+  `GET /v1/users/me`. Toda leitura admin é auditada com a nova ação `ADMIN_READ_USER` (rastro LGPD
+  de *qual admin acessou o dado de qual titular*); `READ_CROSS_SUBJECT` fica `@Deprecated` (não mais
+  emitido, mantido para registros históricos). Sem mudança no gateway (rota `/v1/admin/**`).
+- **Revogação ativa de token (ADR-017 — fecha o gap de revogação):** um **epoch de revogação por
+  usuário** no Redis (`revoke:user:{userID}`, TTL ≥ vida do refresh token) é a fonte única compartilhada
+  pelos três serviços. O user-service grava o epoch (junto das evictions de cache) em revogação de role
+  (`AdminService.updateUserRoles`), desativação (`RegisterService.deactivateUser`) e hard-delete
+  (`RegisterService.deleteUser`) — self **e** admin. Os resource servers rejeitam o token cujo `iat`
+  precede o epoch: user-service via `RevocationTokenValidator` (somado aos validadores default no
+  `JwtDecoder`); gateway via `RevocationWebFilter` (`GlobalFilter`) que inspeciona o access token da
+  sessão e responde **401** + invalida a sessão (defesa em profundidade; o user-service é autoritativo).
+  O caminho do refresh é fechado no auth-server: `RevocationRefreshGuard` + `TokenCustomizerConfig`
+  abortam o grant `refresh_token` (`invalid_grant`) quando a revogação é mais recente que o refresh token
+  apresentado — sem isso o gateway renovaria o access token silenciosamente, perpetuando credenciais
+  válidas. **Fail-open** (erro de Redis → não bloqueia; disponibilidade sobre rigor), toggle
+  `security.revocation.enabled`. **Invariante:** revogação força re-autenticação (re-login re-deriva
+  roles e aplica o gate de e-mail/`active`, ADR-015). Janela residual ≈ segundos (era *indefinida* via
+  refresh). `key-prefix` deve casar entre os serviços.
 
 ## Gaps de segurança conhecidos (dívida aceita)
 
@@ -103,7 +127,6 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 | **Keyfile MongoDB de dev no repo** | Aceito (análogo à chave JWK) | Keyfile gerado/gerido fora do repo em prod |
 | **TLS de transporte Redis ausente** | Aceito. A senha (`REDIS_PASSWORD`) protege o protocolo de comando mas trafega em claro no handshake `AUTH` na rede interna Docker. Mitigado por portas Redis/Sentinel nunca publicadas no compose base (prod-safe). | TLS no Redis (Redis 6+ `tls-port`) + rede Docker isolada em prod |
 | **ACLs por usuário Redis ausentes** | Aceito. Todos os clientes (gateway, auth-server, user-service, exporter) compartilham a mesma `REDIS_PASSWORD` sem segregação de permissões por serviço. | Criar usuários ACL dedicados por serviço com permissões mínimas (Redis 6+) |
-| **Ausência de revogação ativa de token (pós-revogação de role ou desativação de conta)** | Aceito. Mesma raiz para dois cenários: (a) `PATCH /v1/admin/users/{id}/roles` evicta `authByEmail` e (b) a desativação/soft-delete seta `active=false` e evicta o cache — em ambos só o **próximo** token emitido reflete o novo estado. Um access token **já emitido** antes da mudança continua aceito pelos resource servers (gateway/user-service validam só assinatura + `exp`, sem introspection/blocklist): roles antigas seguem valendo, e uma conta desativada continua operando com o token em mãos. A janela real é o **TTL do access token**, não o TTL de 5 min do cache. | Revogação ativa de token (introspection/blocklist) |
 
 ## Gaps recém-identificados (a tratar / não ratificados)
 
@@ -113,9 +136,10 @@ Achados levantados na **auditoria de segurança ad hoc de 2026-06-21** (`securit
 um item for tratado, mova-o para "controles ativos"; se for conscientemente aceito, mova-o para a
 tabela de dívida aceita). Os controles já ativos **não** regrediram; estes são gaps novos.
 
+> **G1 — IDOR de leitura de PII (ALTO): corrigido (2026-06-21, [ADR-016](adr/ADR-016-leitura-pii-restrita-admin.md)).** As rotas de leitura por id/e-mail viraram ADMIN-only (`/v1/admin/users/{id}` e `.../email/{email}`) — ver "Controles ativos". Movido para lá; não é mais dívida.
+
 | Gap | Severidade | Cenário de exploração | Caminho de correção |
 | --- | --- | --- | --- |
-| **G1 — IDOR de leitura de PII** | **ALTO** | `GET /v1/users/{id}` e `GET /v1/users/email/{email}` exigem só `hasRole('USER')`, sem checar que o titular consultado é o solicitante. Qualquer usuário autenticado itera ids/e-mails e lê PII (nome, e-mail, `registrationDate`, `consentAcceptedAt`, `emailVerified`) de **toda a base** → enumeração/exfiltração (insumo de phishing). O código já **audita** isso como `READ_CROSS_SUBJECT`, mas **não bloqueia**. | Restringir as duas rotas a ADMIN, ou ao próprio titular, ou reduzir o `UserResponseDTO` público |
 | **G3 — Sem headers de segurança HTTP** | MÉDIO | Nenhum `Content-Security-Policy`, `X-Frame-Options`/`frame-ancestors`, `Strict-Transport-Security` ou `X-Content-Type-Options` é emitido pelo nginx do front (`login-interface/nginx.conf`) nem pelo gateway. SPA fica clickjacking-able; XSS tem superfície ampla (mitigada só em parte pelo BFF; o cookie `XSRF-TOKEN` é `HttpOnly=false`, legível por JS). | Adicionar os headers no nginx do front e/ou no gateway |
 | **G5 — `/v1/admin/**` sem 2FA nem tier dedicado** | MÉDIO | As rotas admin caem no tier MED por-usuário genérico; não há step-up auth/2FA nem rate-limit mais restritivo para mutações destrutivas (`DELETE /v1/admin/users/del/{id}` hard-delete). Combinado com a ausência de revogação ativa de token, o blast radius de um token ADMIN comprometido é alto. | 2FA/step-up para ADMIN e/ou tier dedicado para deletes |
 | **G4 — CORS pattern curinga (risco operacional)** | BAIXO | `CORSConfig` usa `setAllowedOriginPatterns(allowedOrigins)` + `allowCredentials(true)`. Seguro hoje (default `localhost:5173`, não-wildcard), mas como vem de `CORS_ALLOWED_ORIGINS`, um pattern curinga setado por engano em prod vira exfiltração cross-origin **com credenciais**. | Validar/rejeitar pattern curinga quando `allowCredentials=true` |
@@ -169,7 +193,7 @@ controles já implementados e o que ainda falta.
 | --- | --- | --- |
 | **Base legal / consentimento** | ✅ Implementado | `termsAccepted` obrigatório (`true`) no cadastro → `consentAcceptedAt` + `termsVersion` na coleção `users` (ADR-012). Aceite versionado permite reconsentimento quando os termos mudarem. |
 | **Trilha de auditoria de acesso** | ✅ Implementado | Coleção `auditLogs` registra *quem acessou/alterou/apagou qual dado de qual titular, quando* (ADR-011) — distinta do log SLF4J operacional. Ver "Controles ativos". |
-| **Controle de acesso a dado de terceiro** | ⚠️ Gap (G1) | A leitura cross-subject é **auditada mas não bloqueada**: qualquer `USER` lê PII de outro titular via `GET /v1/users/{id}`/`email/{email}` (ver § Gaps recém-identificados, **G1 ALTO**). Acesso indevido a dado pessoal — a tratar (restringir a ADMIN/titular). |
+| **Controle de acesso a dado de terceiro** | ✅ Implementado | A leitura de PII por id/e-mail é **ADMIN-only** (`GET /v1/admin/users/{id}` e `.../email/{email}`, ADR-016 — fecha o G1); um `USER` só lê o próprio dado (`/me`). Acesso admin a PII é auditado (`ADMIN_READ_USER`). |
 | **Eliminação / direito ao esquecimento** | ✅ Implementado | Self-service: soft-delete (`/remove/me`) e hard-delete (`/delete/me`) da própria conta. A via ADMIN (soft/hard-delete de outro titular) foi removida do `UserController` (ADR-013) e absorvida pelo `AdminController` dedicado (`DELETE /v1/admin/users/{id}` e `.../del/{id}`, ADR-014). |
 | **Minimização** | ✅ Implementado | Coleta enxuta (nome, e-mail, senha); PII mascarada em log (`LogUtils.maskEmail`) e em `auditLogs` (`targetEmail` mascarado). |
 | **Portabilidade (exportar meus dados)** | ❌ Gap | Falta endpoint para o titular exportar os próprios dados. Pode ser pós-lançamento, mas planejar. |

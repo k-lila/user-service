@@ -40,6 +40,15 @@ internal:
   api:
     token: ${INTERNAL_API_TOKEN}
 
+# Revogação ativa de token (ADR-017): epoch por usuário no Redis. O user-service grava em
+# revogação de role / desativação / hard-delete; o resource server rejeita o token cujo iat
+# precede o epoch. TTL ≥ vida máxima do refresh token (a marca se auto-limpa depois).
+security:
+  revocation:
+    enabled: ${TOKEN_REVOCATION_ENABLED:true}
+    key-prefix: ${TOKEN_REVOCATION_KEY_PREFIX:revoke:user:}
+    ttl: ${TOKEN_REVOCATION_TTL:75m}
+
 # Consentimento LGPD: versão dos termos/privacidade registrada no cadastro (aceite versionado).
 # Bump quando a política mudar (permite exigir re-consentimento). Override em prod via TERMS_VERSION.
 app:

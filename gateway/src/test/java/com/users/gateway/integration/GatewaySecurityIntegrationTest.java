@@ -39,9 +39,9 @@ class GatewaySecurityIntegrationTest extends AbstractGatewayIntegrationTest {
 
     @Test
     void deveRetornar401_quandoRotaGenericaDeUsersSemAutenticacao() {
-        // /v1/users/email/{email} cai na rota genérica "user-service" (tokenRelay), não nas
-        // rotas públicas pré-sessão de verificação de e-mail — deve continuar exigindo sessão.
-        webTestClient.get().uri("/v1/users/email/fulano@email.com")
+        // /v1/users/me cai na rota genérica "user-service" (tokenRelay), não nas rotas públicas
+        // pré-sessão de verificação de e-mail — deve continuar exigindo sessão.
+        webTestClient.get().uri("/v1/users/me")
                 .exchange()
                 .expectStatus().isUnauthorized();
     }

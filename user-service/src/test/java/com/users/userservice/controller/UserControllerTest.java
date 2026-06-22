@@ -216,77 +216,6 @@ class UserControllerTest {
                 .andExpect(status().isForbidden());
     }
 
-    // ── GET /users/{id} ──────────────────────────────────────────────────────
-
-    @Test
-    void searchById_deveRetornar200ComBody_quandoIdExiste() throws Exception {
-        when(searchService.searchById(USER_ID)).thenReturn(buildResponse());
-
-        mockMvc.perform(get("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(USER_ID))
-                .andExpect(jsonPath("$.email").value("fulano@email.com"));
-    }
-
-    @Test
-    void searchById_deveRetornar404_quandoIdNaoExiste() throws Exception {
-        when(searchService.searchById("id-inexistente"))
-                .thenThrow(new DomainEntityNotFound(User.class, "ID", "id-inexistente"));
-
-        mockMvc.perform(get("/v1/users/{id}", "id-inexistente")
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    void searchById_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(get("/v1/users/{id}", USER_ID))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void searchById_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(get("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
-                .andExpect(status().isForbidden());
-    }
-
-    // ── GET /users/email/{email} ─────────────────────────────────────────────
-
-    @Test
-    void searchByEmail_deveRetornar200ComBody_quandoEmailExiste() throws Exception {
-        when(searchService.searchByEmail("fulano@email.com")).thenReturn(buildResponse());
-
-        mockMvc.perform(get("/v1/users/email/{email}", "fulano@email.com")
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.email").value("fulano@email.com"));
-    }
-
-    @Test
-    void searchByEmail_deveRetornar404_quandoEmailNaoExiste() throws Exception {
-        when(searchService.searchByEmail("nao@existe.com"))
-                .thenThrow(new DomainEntityNotFound(User.class, "Email", "nao@existe.com"));
-
-        mockMvc.perform(get("/v1/users/email/{email}", "nao@existe.com")
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    void searchByEmail_deveRetornar401_quandoSemToken() throws Exception {
-        mockMvc.perform(get("/v1/users/email/{email}", "fulano@email.com"))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void searchByEmail_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(get("/v1/users/email/{email}", "fulano@email.com")
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
-                .andExpect(status().isForbidden());
-    }
-
     // ── PUT /users ───────────────────────────────────────────────────────────
 
     @Test
@@ -538,57 +467,65 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.active").value(true));
     }
 
-    // ── UserResponseDTO — novos campos (tenantIds, emailVerified, emailVerifiedAt) ──
+    // ── UserResponseDTO — novos campos (tenantIds, emailVerified, emailVerifiedAt) via /me ──
 
     @Test
-    void searchById_deveRetornarEmailVerifiedTrue_quandoUsuarioComEmailVerificado() throws Exception {
+    void getCurrentUser_deveRetornarEmailVerifiedTrue_quandoUsuarioComEmailVerificado() throws Exception {
         UserResponseDTO dto = buildResponse();
         dto.setEmailVerified(true);
         dto.setEmailVerifiedAt("2026-01-01T00:00:00Z");
         when(searchService.searchById(USER_ID)).thenReturn(dto);
 
-        mockMvc.perform(get("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+        mockMvc.perform(get("/v1/users/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.emailVerified").value(true))
                 .andExpect(jsonPath("$.emailVerifiedAt").value("2026-01-01T00:00:00Z"));
     }
 
     @Test
-    void searchById_deveRetornarEmailVerifiedTrue_quandoUsuarioLegadoComEmailVerifiedNulo() throws Exception {
+    void getCurrentUser_deveRetornarEmailVerifiedTrue_quandoUsuarioLegadoComEmailVerifiedNulo() throws Exception {
         UserResponseDTO dto = buildResponse();
         dto.setEmailVerified(true);
         dto.setEmailVerifiedAt(null);
         when(searchService.searchById(USER_ID)).thenReturn(dto);
 
-        mockMvc.perform(get("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+        mockMvc.perform(get("/v1/users/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.emailVerified").value(true))
                 .andExpect(jsonPath("$.emailVerifiedAt").doesNotExist());
     }
 
     @Test
-    void searchById_deveRetornarTenantIds_quandoUsuarioComTenantsAtribuidos() throws Exception {
+    void getCurrentUser_deveRetornarTenantIds_quandoUsuarioComTenantsAtribuidos() throws Exception {
         UserResponseDTO dto = buildResponse();
         dto.setTenantIds(List.of("tenant-1", "tenant-2"));
         when(searchService.searchById(USER_ID)).thenReturn(dto);
 
-        mockMvc.perform(get("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+        mockMvc.perform(get("/v1/users/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.tenantIds[0]").value("tenant-1"))
                 .andExpect(jsonPath("$.tenantIds[1]").value("tenant-2"));
     }
 
     @Test
-    void searchById_deveRetornarTenantIdsNulo_quandoUsuarioSemTenants() throws Exception {
+    void getCurrentUser_deveRetornarTenantIdsNulo_quandoUsuarioSemTenants() throws Exception {
         UserResponseDTO dto = buildResponse();
         dto.setTenantIds(null);
         when(searchService.searchById(USER_ID)).thenReturn(dto);
 
-        mockMvc.perform(get("/v1/users/{id}", USER_ID)
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+        mockMvc.perform(get("/v1/users/me")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", USER_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.tenantIds").doesNotExist());
     }
@@ -605,32 +542,6 @@ class UserControllerTest {
                 .andExpect(status().isCreated());
 
         verify(auditService).recordRegistration(USER_ID, "fulano@email.com");
-    }
-
-    @Test
-    void searchById_deveAuditarLeituraCrossSubject_quandoIdDiferenteDoSolicitante() throws Exception {
-        when(searchService.searchById(USER_ID)).thenReturn(buildResponse());
-
-        mockMvc.perform(get("/v1/users/{id}", USER_ID)
-                .with(jwt()
-                        .jwt(b -> b.claim("userID", "outro-id"))
-                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isOk());
-
-        verify(auditService).recordFromJwt(eq(AuditAction.READ_CROSS_SUBJECT), any(), eq(USER_ID), eq("fulano@email.com"));
-    }
-
-    @Test
-    void searchById_naoDeveAuditar_quandoLeituraDoProprioDado() throws Exception {
-        when(searchService.searchById(USER_ID)).thenReturn(buildResponse());
-
-        mockMvc.perform(get("/v1/users/{id}", USER_ID)
-                .with(jwt()
-                        .jwt(b -> b.claim("userID", USER_ID))
-                        .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isOk());
-
-        verifyNoInteractions(auditService);
     }
 
     @Test

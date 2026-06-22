@@ -19,8 +19,6 @@
 | POST   | /v1/users/register      | Nenhuma    | 2 req/s (IP)    |
 | GET    | /v1/users/verify-email  | Nenhuma    | 2 req/s (IP)    |
 | GET    | /v1/users               | ROLE_USER  | 10 req/s (user) |
-| GET    | /v1/users/{id}          | ROLE_USER  | 10 req/s (user) |
-| GET    | /v1/users/email/{email} | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/me            | ROLE_USER  | 10 req/s (user) |
 | PUT    | /v1/users               | ROLE_USER  | 10 req/s (user) |
 | POST   | /v1/users/resend-verification | ROLE_USER | 10 req/s (user) |
@@ -35,6 +33,11 @@
 > As rotas administrativas `DELETE /v1/users/{id}` e `DELETE /v1/users/del/{id}` foram removidas
 > deste controller (ADR-013) e absorvidas pelo `AdminController` dedicado — ver
 > [Endpoints administrativos](#endpoints-administrativos-v1admin) abaixo (ADR-014).
+>
+> As leituras `GET /v1/users/{id}` e `GET /v1/users/email/{email}` também foram removidas deste
+> controller público (eram `ROLE_USER`, sem checagem de titularidade → IDOR de PII) e reabertas como
+> ADMIN-only no `AdminController` (ADR-016 — fecha o G1). A leitura do próprio dado permanece em
+> `GET /v1/users/me`.
 
 ### Endpoints administrativos (`/v1/admin/**`)
 
@@ -45,6 +48,8 @@ rota `admin-service` do gateway — superfície sensível, poucos operadores esp
 | Método | Path                              | Auth       | Rate Limit | Descrição |
 | ------ | ---------------------------------- | ---------- | ---------- | --------- |
 | GET    | /v1/admin/users                    | ROLE_ADMIN | MED (5/s)  | Listagem completa incl. inativos, filtros opcionais `active`/`name`/`email`, paginada |
+| GET    | /v1/admin/users/{id}               | ROLE_ADMIN | MED (5/s)  | Busca um titular por ID, incl. inativos (`AdminUserResponseDTO` com `roles`); audita `ADMIN_READ_USER` (ADR-016) |
+| GET    | /v1/admin/users/email/{email}      | ROLE_ADMIN | MED (5/s)  | Busca um titular por e-mail, incl. inativos; audita `ADMIN_READ_USER` (ADR-016) |
 | GET    | /v1/admin/users/{id}/audit-logs    | ROLE_ADMIN | MED (5/s)  | Trilha de auditoria LGPD de um titular específico, paginada |
 | GET    | /v1/admin/audit-logs               | ROLE_ADMIN | MED (5/s)  | Feed geral da trilha de auditoria LGPD, paginado |
 | PATCH  | /v1/admin/users/{id}/roles         | ROLE_ADMIN | MED (5/s)  | Promove/revoga roles (`USER`/`ADMIN`) de um titular |
@@ -138,9 +143,11 @@ Detalhe completo (decisões e alternativas consideradas) em
 soft-deleted (`active=false`):
 
 - `GET /v1/users` lista apenas ativos (`findByActiveTrue`).
-- `GET /v1/users/{id}` e `GET /v1/users/email/{email}` retornam **404** para usuário inativo
-  (tratado como inexistente).
 - `GET /v1/users/me` retorna **404** se a própria conta estiver desativada.
+
+> **Exceção administrativa (ADR-016):** as leituras admin `GET /v1/admin/users/{id}` e
+> `GET /v1/admin/users/email/{email}` **incluem** titulares inativos (soft-deleted), coerentes com
+> a listagem `GET /v1/admin/users` — a ocultação de inativos é só da superfície pública.
 
 > Ver _Convenções_ no [CLAUDE.md](../CLAUDE.md) e [ADR-001](adr/ADR-001-leitura-somente-ativos.md).
 
@@ -262,7 +269,8 @@ Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetU
   timestamp: ISODate,        // quando a operação ocorreu
   action: String,            // REGISTER | UPDATE | SOFT_DELETE_ADMIN | HARD_DELETE_ADMIN
                              //   | SOFT_DELETE_SELF | HARD_DELETE_SELF | READ_INTERNAL_CREDENTIAL
-                             //   | READ_CROSS_SUBJECT | ROLE_GRANT | ROLE_REVOKE
+                             //   | ADMIN_READ_USER | ROLE_GRANT | ROLE_REVOKE | EMAIL_VERIFIED
+                             //   | READ_CROSS_SUBJECT (legado/deprecated, ADR-016 — não mais emitido)
   actorType: String,         // USER | ADMIN | SYSTEM
   actorUserId: String,       // null quando SYSTEM
   actorRoles: [String],      // null quando SYSTEM
@@ -295,6 +303,16 @@ TTL de 5 min, três caches distintos:
 - `deleteUser` e `deactivateUser` — **evictam** os três caches.
 
 > A escrita é manual (não declarativa) porque cada cache usa uma chave diferente — ID vs e-mail.
+
+### Outras chaves no mesmo Redis (não-cache)
+
+Além dos caches, o Redis compartilhado guarda o **epoch de revogação de token** por usuário
+(ADR-017): chave `revoke:user:{userID}` → instante (millis) da última revogação, TTL `75m`
+(`security.revocation.ttl`). Gravada pelo user-service em revogação de role / desativação /
+hard-delete (junto das evictions acima); lida pelos resource servers (user-service, gateway) e
+pelo guard de refresh do auth-server. **Comportamento:** um access token cujo `iat` precede o
+epoch é rejeitado com **401**, e o grant `refresh_token` de um titular revogado falha com
+`invalid_grant` — a revogação **força re-autenticação**. Fail-open se o Redis estiver indisponível.
 
 ## Formato de erros (RFC 7807 / ProblemDetail)
 

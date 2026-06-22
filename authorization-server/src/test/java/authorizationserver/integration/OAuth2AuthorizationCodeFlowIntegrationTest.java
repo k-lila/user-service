@@ -19,6 +19,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -50,6 +51,9 @@ class OAuth2AuthorizationCodeFlowIntegrationTest extends AbstractAuthIntegration
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     @Test
     void deveEmitirJwtComClaimsCustomizados_quandoFluxoAuthorizationCodePkceCompleto() throws Exception {
@@ -159,7 +163,77 @@ class OAuth2AuthorizationCodeFlowIntegrationTest extends AbstractAuthIntegration
         assertFalse(location.contains("code="));
     }
 
+    @Test
+    void deveRenovarAccessToken_viaRefreshToken_quandoNaoRevogado() throws Exception {
+        // Controle (regressão): o grant refresh_token continua emitindo um novo access token quando
+        // o titular não foi revogado — garante que o guard do ADR-017 não quebrou o caminho feliz.
+        Map<String, Object> tokens = autenticarEObterTokens("refresh.feliz@test.com", "user-id-789");
+        String refreshToken = (String) tokens.get("refresh_token");
+        assertNotNull(refreshToken, "o fluxo deve emitir refresh_token");
+
+        mockMvc.perform(refreshRequest(refreshToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void deveBarrarRefreshToken_quandoTitularRevogado() throws Exception {
+        // ADR-017: marca o titular como revogado AGORA (epoch > emissão do refresh token) — é o que o
+        // user-service grava em revogação de role / desativação. O guard do auth-server deve barrar a
+        // reemissão, impedindo o gateway de renovar silenciosamente o access token.
+        String userId = "user-id-revogado";
+        Map<String, Object> tokens = autenticarEObterTokens("refresh.revogado@test.com", userId);
+        String refreshToken = (String) tokens.get("refresh_token");
+        assertNotNull(refreshToken);
+
+        redisTemplate.opsForValue().set("revoke:user:" + userId,
+                Long.toString(System.currentTimeMillis() + 5000));
+
+        mockMvc.perform(refreshRequest(refreshToken))
+                .andExpect(status().is4xxClientError());
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /** Completa o fluxo authorization_code + PKCE e devolve o corpo JSON da resposta de token. */
+    private Map<String, Object> autenticarEObterTokens(String email, String userId) throws Exception {
+        stubUsuarioAtivo(email, userId, "USER");
+        String codeVerifier = gerarCodeVerifier();
+        String codeChallenge = gerarCodeChallenge(codeVerifier);
+
+        MvcResult authorizeAnonimo = mockMvc.perform(authorizeRequest(codeChallenge))
+                .andExpect(status().is3xxRedirection()).andReturn();
+        Cookie sessao = authorizeAnonimo.getResponse().getCookie("AUTHSESSION");
+
+        MvcResult login = mockMvc.perform(post("/login")
+                        .param("username", email).param("password", SENHA)
+                        .cookie(sessao).with(csrf()))
+                .andExpect(status().is3xxRedirection()).andReturn();
+        Cookie sessaoAutenticada = sessaoAtualizada(login.getResponse(), sessao);
+
+        MvcResult authorizeAutenticado = mockMvc.perform(authorizeRequest(codeChallenge)
+                        .cookie(sessaoAutenticada))
+                .andExpect(status().is3xxRedirection()).andReturn();
+        String code = extrairParametro(authorizeAutenticado.getResponse().getRedirectedUrl(), "code");
+
+        MvcResult token = mockMvc.perform(post("/oauth2/token")
+                        .with(httpBasic(CLIENT_ID, CLIENT_SECRET))
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("grant_type", "authorization_code")
+                        .param("code", code)
+                        .param("redirect_uri", REDIRECT_URI)
+                        .param("code_verifier", codeVerifier))
+                .andExpect(status().isOk()).andReturn();
+        return JSONObjectUtils.parse(token.getResponse().getContentAsString());
+    }
+
+    private MockHttpServletRequestBuilder refreshRequest(String refreshToken) {
+        return post("/oauth2/token")
+                .with(httpBasic(CLIENT_ID, CLIENT_SECRET))
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .param("grant_type", "refresh_token")
+                .param("refresh_token", refreshToken);
+    }
+
 
     /** Stub do canal interno Feign: exige o X-Internal-Token injetado pelo FeignConfig. */
     private void stubUsuarioAtivo(String email, String userId, String role) {

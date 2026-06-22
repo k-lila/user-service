@@ -90,6 +90,12 @@ security:
   # permanentemente inacessível se o e-mail de verificação nunca chegar (SMTP down, etc.).
   email-verification:
     grace-period: ${EMAIL_VERIFICATION_GRACE_PERIOD:24h}
+  # Revogação ativa de token (ADR-017): no grant refresh_token, barra a reemissão se o titular foi
+  # revogado depois da emissão do refresh token. Lê o mesmo epoch que o user-service grava no Redis —
+  # key-prefix deve casar com o do user-service.
+  revocation:
+    enabled: ${TOKEN_REVOCATION_ENABLED:true}
+    key-prefix: ${TOKEN_REVOCATION_KEY_PREFIX:revoke:user:}
 
 # CORS (C12): necessário para o Swagger-UI trocar o code pelo token via fetch cross-origin.
 # Origem do Swagger/borda (distinta da origem do SPA no gateway). Default dev http://localhost:8081.

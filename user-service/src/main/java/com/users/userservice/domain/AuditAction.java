@@ -20,8 +20,17 @@ public enum AuditAction {
     HARD_DELETE_SELF,
     /** Leitura de credencial via canal interno (auth-server, ator SYSTEM). */
     READ_INTERNAL_CREDENTIAL,
-    /** Leitura dos dados de um titular distinto do solicitante. */
+    /**
+     * Leitura dos dados de um titular distinto do solicitante.
+     *
+     * @deprecated Não mais emitido: as leituras públicas por id/e-mail viraram ADMIN-only
+     *     ({@link #ADMIN_READ_USER}, fix do G1/IDOR, ADR-016). Mantido para desserializar
+     *     registros históricos de {@code auditLogs}.
+     */
+    @Deprecated
     READ_CROSS_SUBJECT,
+    /** Leitura administrativa de um titular por id/e-mail (AdminController, ADR-016 — fix G1). */
+    ADMIN_READ_USER,
     /** Concessão da role ADMIN a um titular (AdminController, ADR-014). */
     ROLE_GRANT,
     /** Revogação da role ADMIN de um titular (AdminController, ADR-014). */

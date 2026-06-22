@@ -68,7 +68,7 @@ class AuditServiceTest {
 
     @Test
     void recordFromJwt_deveMarcarActorTypeUser_quandoSemAdmin() {
-        service().recordFromJwt(AuditAction.READ_CROSS_SUBJECT, jwt("user-id", List.of("USER")), "target-id", "alvo@email.com");
+        service().recordFromJwt(AuditAction.UPDATE, jwt("user-id", List.of("USER")), "target-id", "alvo@email.com");
 
         AuditLog log = captureSaved();
         assertThat(log.getActorType()).isEqualTo("USER");

@@ -11,7 +11,6 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -102,34 +101,6 @@ public class UserController {
         return ResponseEntity.ok(users);
     }
 
-    @Operation(summary = "Buscar usuário por ID")
-    @GetMapping(value = "/{id}")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UserResponseDTO> searchById(
-            @PathVariable(value = "id", required = true) String userID,
-            @AuthenticationPrincipal Jwt jwt) {
-        LOGGER.info(
-            "| GET | buscar por ID | ID: {}",
-            userID
-        );
-        UserResponseDTO found = searchService.searchById(userID);
-        auditCrossSubjectRead(jwt, found);
-        return ResponseEntity.ok(found);
-    }
-
-    @Operation(summary = "Buscar usuário por Email")
-    @GetMapping(value = "/email/{email}")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UserResponseDTO> searchByEmail(
-            @PathVariable(value = "email", required = true) String email,
-            @AuthenticationPrincipal Jwt jwt) {
-        LOGGER.info("| GET | buscar por email");
-
-        UserResponseDTO found = searchService.searchByEmail(email);
-        auditCrossSubjectRead(jwt, found);
-        return ResponseEntity.ok(found);
-    }
-
     @Operation(summary = "Modificar um usuário")
     @PutMapping
     @PreAuthorize("hasRole('USER')")
@@ -181,17 +152,5 @@ public class UserController {
         LOGGER.info("| GET | usuário autenticado | ID: {}", userID);
         UserResponseDTO user = searchService.searchById(userID);
         return ResponseEntity.ok(user);
-    }
-
-    /**
-     * Audita a leitura apenas quando o titular consultado difere do solicitante
-     * (READ_CROSS_SUBJECT). Leitura do próprio dado (ex.: via /me ou consulta ao próprio ID)
-     * não gera trilha — baixo valor e alto volume.
-     */
-    private void auditCrossSubjectRead(Jwt jwt, UserResponseDTO found) {
-        String callerId = jwt != null ? jwt.getClaimAsString("userID") : null;
-        if (found != null && found.getId() != null && !found.getId().equals(callerId)) {
-            auditService.recordFromJwt(AuditAction.READ_CROSS_SUBJECT, jwt, found.getId(), found.getEmail());
-        }
     }
 }

@@ -5,6 +5,7 @@ import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Duration;
+import java.util.OptionalLong;
 import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
@@ -28,6 +29,7 @@ import com.users.userservice.services.AdminService.RoleUpdateResult;
 import com.users.userservice.services.AuthenticationService;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
+import com.users.userservice.services.TokenRevocationService;
 
 /**
  * Integração da superfície administrativa (ADR-014): listagem incluindo inativos persistidos
@@ -40,6 +42,7 @@ class AdminFlowIntegrationTest extends AbstractIntegrationTest {
     @Autowired RegisterService registerService;
     @Autowired SearchService searchService;
     @Autowired AuthenticationService authenticationService;
+    @Autowired TokenRevocationService tokenRevocationService;
     @Autowired CacheManager cacheManager;
     @Autowired IUserRepository userRepository;
 
@@ -137,6 +140,29 @@ class AdminFlowIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void deveLerTitularPorIdEPorEmail_incluindoInativo_naLeituraAdministrativa() {
+        UserResponseDTO ativo = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+        UserResponseDTO inativo = registerService.registerUser(
+                buildDTO("Ciclano", "ciclano@email.com", "senha456"));
+        adminService.updateUserRoles(ativo.getId(), Set.of("USER", "ADMIN"), "outro-admin-id");
+        registerService.deactivateUser(inativo.getId());
+
+        // Por ID: titular ativo, com roles no DTO admin.
+        AdminUserResponseDTO porId = adminService.findById(ativo.getId());
+        assertThat(porId.getEmail()).isEqualTo("fulano@email.com");
+        assertThat(porId.getRoles()).containsExactlyInAnyOrder("USER", "ADMIN");
+
+        // Por e-mail: titular inativo é retornado (ADR-016 — leitura admin inclui soft-deleted),
+        // ao contrário da leitura pública (ADR-001).
+        AdminUserResponseDTO porEmail = adminService.findByEmail("ciclano@email.com");
+        assertThat(porEmail.getId()).isEqualTo(inativo.getId());
+        assertThat(porEmail.getActive()).isFalse();
+
+        assertThrows(DomainEntityNotFound.class, () -> adminService.findById("id-inexistente"));
+    }
+
+    @Test
     void deveRevogarAdminDeTerceiro_eEvictarCachesReais() {
         UserResponseDTO registrado = registerService.registerUser(
                 buildDTO("Fulano", "fulano@email.com", "senha123"));
@@ -176,5 +202,29 @@ class AdminFlowIntegrationTest extends AbstractIntegrationTest {
     void deveLancar404_quandoAlvoInexistenteNaGestaoDeRoles() {
         assertThrows(DomainEntityNotFound.class,
                 () -> adminService.updateUserRoles("id-inexistente", Set.of("USER"), "admin-id"));
+    }
+
+    @Test
+    void deveGravarEpochDeRevogacaoNoRedisReal_aoMudarRoleEAoDesativar() {
+        // ADR-017: a mudança de role e a desativação devem marcar o epoch de revogação no Redis,
+        // para que os resource servers rejeitem tokens já emitidos do titular.
+        UserResponseDTO promovido = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+        UserResponseDTO desativado = registerService.registerUser(
+                buildDTO("Ciclano", "ciclano@email.com", "senha456"));
+
+        assertThat(tokenRevocationService.revokedAtMillis(promovido.getId())).isEmpty();
+
+        long antesPromocao = System.currentTimeMillis();
+        adminService.updateUserRoles(promovido.getId(), Set.of("USER", "ADMIN"), "outro-admin-id");
+        OptionalLong epochPromocao = tokenRevocationService.revokedAtMillis(promovido.getId());
+        assertThat(epochPromocao).isPresent();
+        assertThat(epochPromocao.getAsLong()).isGreaterThanOrEqualTo(antesPromocao);
+
+        long antesDesativacao = System.currentTimeMillis();
+        registerService.deactivateUser(desativado.getId());
+        OptionalLong epochDesativacao = tokenRevocationService.revokedAtMillis(desativado.getId());
+        assertThat(epochDesativacao).isPresent();
+        assertThat(epochDesativacao.getAsLong()).isGreaterThanOrEqualTo(antesDesativacao);
     }
 }

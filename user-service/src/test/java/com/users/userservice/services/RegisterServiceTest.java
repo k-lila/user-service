@@ -29,12 +29,13 @@ class RegisterServiceTest {
     @Mock private IUserRepository userRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private CacheService cacheService;
+    @Mock private TokenRevocationService tokenRevocationService;
 
     private RegisterService service;
 
     @BeforeEach
     void setUp() {
-        service = new RegisterService(userRepository, passwordEncoder, cacheService, "v1");
+        service = new RegisterService(userRepository, passwordEncoder, cacheService, tokenRevocationService, "v1");
     }
 
     private User buildUser(String id, String email, boolean active) {

@@ -120,6 +120,117 @@ class AdminControllerTest {
         verify(adminService).listAllUsers(eq(false), eq("Maria"), any(), any());
     }
 
+    // ── GET /v1/admin/users/{id} (leitura admin, ADR-016 — fix G1) ────────────
+
+    @Test
+    void findById_deveRetornar200ComRoles_quandoTokenComRoleAdmin() throws Exception {
+        when(adminService.findById(TARGET_ID)).thenReturn(buildAdminUserResponse(Set.of("USER", "ADMIN")));
+
+        mockMvc.perform(get("/v1/admin/users/{id}", TARGET_ID)
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", ADMIN_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(TARGET_ID))
+                .andExpect(jsonPath("$.email").value("fulano@email.com"))
+                .andExpect(jsonPath("$.roles", org.hamcrest.Matchers.containsInAnyOrder("USER", "ADMIN")));
+    }
+
+    @Test
+    void findById_deveAuditarAdminReadUser() throws Exception {
+        when(adminService.findById(TARGET_ID)).thenReturn(buildAdminUserResponse(Set.of("USER")));
+
+        mockMvc.perform(get("/v1/admin/users/{id}", TARGET_ID)
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", ADMIN_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isOk());
+
+        verify(auditService).recordFromJwt(eq(AuditAction.ADMIN_READ_USER), any(), eq(TARGET_ID), eq("fulano@email.com"));
+    }
+
+    @Test
+    void findById_deveRetornar404_quandoTitularNaoExiste() throws Exception {
+        when(adminService.findById("inexistente"))
+                .thenThrow(new DomainEntityNotFound(User.class, "ID", "inexistente"));
+
+        mockMvc.perform(get("/v1/admin/users/{id}", "inexistente")
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void findById_deveRetornar403_quandoTokenSemRoleAdmin() throws Exception {
+        mockMvc.perform(get("/v1/admin/users/{id}", TARGET_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(adminService);
+    }
+
+    @Test
+    void findById_deveRetornar401_quandoSemToken() throws Exception {
+        mockMvc.perform(get("/v1/admin/users/{id}", TARGET_ID))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(adminService);
+    }
+
+    // ── GET /v1/admin/users/email/{email} (leitura admin, ADR-016 — fix G1) ───
+
+    @Test
+    void findByEmail_deveRetornar200ComRoles_quandoTokenComRoleAdmin() throws Exception {
+        when(adminService.findByEmail("fulano@email.com")).thenReturn(buildAdminUserResponse(Set.of("USER")));
+
+        mockMvc.perform(get("/v1/admin/users/email/{email}", "fulano@email.com")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", ADMIN_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("fulano@email.com"))
+                .andExpect(jsonPath("$.roles", org.hamcrest.Matchers.containsInAnyOrder("USER")));
+    }
+
+    @Test
+    void findByEmail_deveAuditarAdminReadUser() throws Exception {
+        when(adminService.findByEmail("fulano@email.com")).thenReturn(buildAdminUserResponse(Set.of("USER")));
+
+        mockMvc.perform(get("/v1/admin/users/email/{email}", "fulano@email.com")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", ADMIN_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isOk());
+
+        verify(auditService).recordFromJwt(eq(AuditAction.ADMIN_READ_USER), any(), eq(TARGET_ID), eq("fulano@email.com"));
+    }
+
+    @Test
+    void findByEmail_deveRetornar404_quandoTitularNaoExiste() throws Exception {
+        when(adminService.findByEmail("nao@existe.com"))
+                .thenThrow(new DomainEntityNotFound(User.class, "Email", "nao@existe.com"));
+
+        mockMvc.perform(get("/v1/admin/users/email/{email}", "nao@existe.com")
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void findByEmail_deveRetornar403_quandoTokenSemRoleAdmin() throws Exception {
+        mockMvc.perform(get("/v1/admin/users/email/{email}", "fulano@email.com")
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(adminService);
+    }
+
+    @Test
+    void findByEmail_deveRetornar401_quandoSemToken() throws Exception {
+        mockMvc.perform(get("/v1/admin/users/email/{email}", "fulano@email.com"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(adminService);
+    }
+
     // ── GET /v1/admin/users/{id}/audit-logs ──────────────────────────────────
 
     @Test

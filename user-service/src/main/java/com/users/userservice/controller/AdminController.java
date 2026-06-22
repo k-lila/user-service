@@ -82,6 +82,30 @@ public class AdminController {
         return ResponseEntity.ok(users);
     }
 
+    @Operation(summary = "Busca um titular por ID (admin), incluindo inativos")
+    @GetMapping("/users/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AdminUserResponseDTO> findById(
+            @PathVariable("id") String id,
+            @AuthenticationPrincipal Jwt jwt) {
+        LOGGER.info("| GET | ADMIN busca por ID | ID alvo: {}", id);
+        AdminUserResponseDTO found = adminService.findById(id);
+        auditService.recordFromJwt(AuditAction.ADMIN_READ_USER, jwt, found.getId(), found.getEmail());
+        return ResponseEntity.ok(found);
+    }
+
+    @Operation(summary = "Busca um titular por e-mail (admin), incluindo inativos")
+    @GetMapping("/users/email/{email}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AdminUserResponseDTO> findByEmail(
+            @PathVariable("email") String email,
+            @AuthenticationPrincipal Jwt jwt) {
+        LOGGER.info("| GET | ADMIN busca por email");
+        AdminUserResponseDTO found = adminService.findByEmail(email);
+        auditService.recordFromJwt(AuditAction.ADMIN_READ_USER, jwt, found.getId(), found.getEmail());
+        return ResponseEntity.ok(found);
+    }
+
     @Operation(summary = "Consulta a trilha de auditoria LGPD de um titular específico")
     @GetMapping("/users/{id}/audit-logs")
     @PreAuthorize("hasRole('ADMIN')")
