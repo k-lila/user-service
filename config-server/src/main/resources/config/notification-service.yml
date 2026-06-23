@@ -1,0 +1,78 @@
+server:
+  port: ${SERVER_PORT:8095}
+  shutdown: graceful
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  application:
+    name: notification-service
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SMTP_AUTH:false}
+          starttls:
+            enable: ${SMTP_STARTTLS:false}
+
+# Remetente exibido nos e-mails de verificação. Override em prod via APP_MAIL_FROM.
+app:
+  mail:
+    from: ${APP_MAIL_FROM:no-reply@users.local}
+
+internal:
+  api:
+    token: ${INTERNAL_API_TOKEN}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},traceId=%X{traceId:-},spanId=%X{spanId:-}]"
+
+springdoc:
+  swagger-ui:
+    enabled: false
+
+management:
+  tracing:
+    enabled: true
+    propagation:
+      produce: b3
+      consume: b3
+    sampling:
+      # Default dev 100%; override em prod via MANAGEMENT_TRACING_SAMPLING_PROBABILITY.
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      zipkin:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+    prometheus:
+      enabled: true
+  health:
+    readiness-state:
+      enabled: true
+    liveness-state:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 50ms,100ms,200ms,500ms,1s,2s

@@ -75,6 +75,12 @@ cors:
 # alcança o gateway. Esvaziar/trocar para deploy não-Cloudflare (cai no XFF via forward-headers).
 security:
   trusted-client-ip-header: ${TRUSTED_CLIENT_IP_HEADER:CF-Connecting-IP}
+  # Revogação ativa de token na borda (ADR-017, defesa em profundidade): inspeciona o access token
+  # da sessão e rejeita (401) quando emitido antes do epoch de revogação do titular. key-prefix deve
+  # casar com o do user-service (que grava o epoch).
+  revocation:
+    enabled: ${TOKEN_REVOCATION_ENABLED:true}
+    key-prefix: ${TOKEN_REVOCATION_KEY_PREFIX:revoke:user:}
 
 eureka:
   client:

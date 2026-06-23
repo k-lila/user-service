@@ -1,5 +1,7 @@
 package authorizationserver.services;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,13 +28,16 @@ public class AuthorizationService implements UserDetailsService {
     private final IUserClient userClient;
     private final LoginAttemptService loginAttempts;
     private final String trustedClientIpHeader;
+    private final Duration emailVerificationGracePeriod;
     public AuthorizationService(
             IUserClient userClient,
             LoginAttemptService loginAttempts,
-            @Value("${security.trusted-client-ip-header:CF-Connecting-IP}") String trustedClientIpHeader) {
+            @Value("${security.trusted-client-ip-header:CF-Connecting-IP}") String trustedClientIpHeader,
+            @Value("${security.email-verification.grace-period:24h}") Duration emailVerificationGracePeriod) {
         this.userClient = userClient;
         this.loginAttempts = loginAttempts;
         this.trustedClientIpHeader = trustedClientIpHeader;
+        this.emailVerificationGracePeriod = emailVerificationGracePeriod;
     }
 
     @Override
@@ -72,9 +77,14 @@ public class AuthorizationService implements UserDetailsService {
         // antes de checar a senha. Chaveado pelo email submetido (mesmo valor do listener).
         boolean accountNonLocked = !loginAttempts.isBlocked(email, ClientIpResolver.currentIp(trustedClientIpHeader));
         // emailVerified nulo (legado, anterior ao campo, ou falha de (de)serialização) é
-        // tratado como verificado — sem fluxo de verificação implementado ainda, o gate
-        // só passa a bloquear quando o campo for explicitamente setado como false.
-        boolean emailVerified = !Boolean.FALSE.equals(user.getEmailVerified());
+        // tratado como verificado. Cadastros novos (ADR-015) nascem com emailVerified=false
+        // e só viram true após a confirmação — mas ficam dentro de uma janela de carência
+        // (grace period) desde o cadastro, para não tornar a conta permanentemente
+        // inacessível caso o e-mail nunca chegue (SMTP fora do ar, outbox FAILED, etc.):
+        // o reenvio manual é a única saída fora dessa janela.
+        boolean withinGracePeriod = user.getRegistrationDate() != null
+                && user.getRegistrationDate().plus(emailVerificationGracePeriod).isAfter(Instant.now());
+        boolean emailVerified = !Boolean.FALSE.equals(user.getEmailVerified()) || withinGracePeriod;
         return new User(user.getEmail(), user.getPasswordHash(),
                 emailVerified, true, true, accountNonLocked, authorities);
     }

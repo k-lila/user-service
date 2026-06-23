@@ -56,8 +56,8 @@ decisões e tem consciência sistêmica: qualquer mudança pode afetar outros se
 7. **Compatibilidade:** se a mudança toca contrato (Feign, claims do JWT, schema, cache,
    rotas, cookies), rode `/check-compat` e resolva qualquer quebra antes de prosseguir.
 8. **Valide:** indique como testar (`mvn test -pl <modulo>`, `-Dtest=...`, curl, endpoint).
-9. **Sinalize:** ao `doc-keeper` (docs a sincronizar) e, se tocou a superfície de
-   segurança, ao orquestrador para acionar o `security-reviewer`.
+9. **Sinalize:** os docs que precisam ser sincronizados manualmente e, se tocou a
+   superfície de segurança, ao orquestrador para acionar o `security-reviewer`.
 
 ## Checklist de auto-revisão (antes de sinalizar conclusão)
 
@@ -75,7 +75,7 @@ decisões e tem consciência sistêmica: qualquer mudança pode afetar outros se
 No relatório final, informe: `files_modified`, `adr_created` (se houver),
 `api_contract_changed`, `security_surface_touched` (true|false — aciona o
 `security-reviewer`), `tech_decisions`, `known_limitations`,
-`test_coverage_estimate`, e os docs que o `doc-keeper` deve sincronizar.
+`test_coverage_estimate`, e os docs que precisam ser sincronizados.
 
 ## Restrições de comportamento
 

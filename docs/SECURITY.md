@@ -45,13 +45,36 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   auth-server, user-service) autenticam via `spring.data.redis.password` (data nodes) e
   `spring.data.redis.sentinel.password` (sentinels). O `redis-exporter` autentica com
   `REDIS_PASSWORD` nos 6 alvos do modo multi-target.
-- **Gate de e-mail verificado no login (dormente):** `AuthorizationService.loadUserByUsername`
+- **Gate de e-mail verificado no login, ativo (ADR-015):** `AuthorizationService.loadUserByUsername`
   mapeia `AuthDTO.emailVerified` para o flag `enabled` do `UserDetails` — `emailVerified=false`
-  bloquearia o login via `DisabledException`, antes mesmo da checagem de senha. Hoje é
-  **inerte na prática**: sem fluxo de verificação de e-mail implementado, `registerUser`
-  sempre seta `emailVerified=true` e `null` (legado) também é tratado como verificado. O
-  mecanismo de bloqueio já existe e está testado — falta só o fluxo que produz `false` (envio
-  de e-mail + endpoint de confirmação) para ativá-lo de fato.
+  bloqueia o login via `DisabledException` (mensagem genérica), antes da checagem de senha.
+  Desde o `notification-service`, `registerUser` seta `emailVerified=false` no cadastro, mas
+  **não** dispara o e-mail automaticamente — o envio só acontece quando explicitamente
+  requisitado via reenvio (self ou admin); `GET /v1/users/verify-email` confirma. `null`
+  (legado, anterior ao campo) continua tratado como verificado, sem bloqueio. **Mitigação de conta
+  permanentemente inacessível:** janela de carência de 24h (`security.email-verification.
+  grace-period`) desde `AuthDTO.registrationDate` — login funciona dentro da janela mesmo sem
+  confirmação, caso o e-mail nunca chegue (SMTP down, outbox `FAILED`); só bloqueia de fato
+  depois da janela. `registrationDate` é populado só server-side (sem caminho de escrita
+  externa) — não há como um atacante estender a própria janela.
+- **notification-service: canal interno e anti-abuso (ADR-015):** o endpoint
+  `POST /internal/notifications/email-verification` é protegido pelo mesmo `X-Internal-Token`
+  do canal interno existente (ADR-006), via `Filter` de servlet simples (sem Spring Security —
+  o serviço não tem outra rota autenticável); **nunca exposto pelo gateway**. O reenvio deixou
+  de ser público/por-e-mail: `POST /v1/users/resend-verification` (self, `ROLE_USER`, resolve o
+  titular pelo `userID` do JWT) e `POST /v1/admin/users/{id}/resend-verification` (admin,
+  `ROLE_ADMIN`, por `{id}`) — ambos exigem sessão e CSRF como qualquer rota autenticada do
+  gateway, eliminando o vetor de anti-enumeração por e-mail que existia antes. Mantém o limite
+  por conta-alvo (`ResendRateLimitService`, Redis, chave `sha256(emailLower)`, default 3/h),
+  complementar ao rate limit por-usuário/por-IP do gateway. A chamada ao notification-service
+  continua assíncrona, então o branch interno não varia a latência observável da resposta HTTP.
+- **Token de verificação de e-mail em URL (dívida aceita, ADR-015):** o link de confirmação
+  carrega o token na query string (`GET /v1/users/verify-email?token=...`). Mitigado por TTL
+  de 15 min + uso único (status do outbox vira `CONFIRMED`/`SUPERSEDED` no primeiro uso válido)
+  — padrão de mercado para links de confirmação por e-mail. Confirmado que os filtros de log do
+  gateway (`CorrelationIdFilter`, `RateLimitLogFilter`) só logam o path, não a query string —
+  o token não aparece em log aplicacional deste repositório. Resíduo fora do código: spans
+  Zipkin (`http.url`) e logs de proxy/CDN externos podem capturar a query string completa.
 - **Trilha de auditoria de dado pessoal (ADR-011, LGPD):** coleção Mongo
   `auditLogs` (user-service) registra *quem acessou/alterou/apagou qual dado de qual titular,
   quando* — **distinta** do log operacional SLF4J. Cobre mutações (register/update/soft+hard
@@ -69,6 +92,30 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   auto-revogação:** se o ator tentar remover `ADMIN` de si mesmo (checado contra o estado
   persistido no Mongo, não o JWT, que pode estar stale) → **409 Conflict** — evita lockout
   operacional sem rota de recuperação via API.
+- **Leitura de PII por id/e-mail restrita a ADMIN (ADR-016 — fecha o G1/IDOR):** as rotas
+  `GET /v1/users/{id}` e `GET /v1/users/email/{email}` foram **removidas** do `UserController`
+  público e reabertas no `AdminController` como `GET /v1/admin/users/{id}` e
+  `GET /v1/admin/users/email/{email}` (`@PreAuthorize("hasRole('ADMIN')")`, `AdminUserResponseDTO`
+  com `roles`, inclui inativos). Um `USER` não enumera mais PII de terceiro (antes: leitura
+  cross-subject auditada mas **não bloqueada**). A leitura do próprio dado permanece em
+  `GET /v1/users/me`. Toda leitura admin é auditada com a nova ação `ADMIN_READ_USER` (rastro LGPD
+  de *qual admin acessou o dado de qual titular*); `READ_CROSS_SUBJECT` fica `@Deprecated` (não mais
+  emitido, mantido para registros históricos). Sem mudança no gateway (rota `/v1/admin/**`).
+- **Revogação ativa de token (ADR-017 — fecha o gap de revogação):** um **epoch de revogação por
+  usuário** no Redis (`revoke:user:{userID}`, TTL ≥ vida do refresh token) é a fonte única compartilhada
+  pelos três serviços. O user-service grava o epoch (junto das evictions de cache) em revogação de role
+  (`AdminService.updateUserRoles`), desativação (`RegisterService.deactivateUser`) e hard-delete
+  (`RegisterService.deleteUser`) — self **e** admin. Os resource servers rejeitam o token cujo `iat`
+  precede o epoch: user-service via `RevocationTokenValidator` (somado aos validadores default no
+  `JwtDecoder`); gateway via `RevocationWebFilter` (`GlobalFilter`) que inspeciona o access token da
+  sessão e responde **401** + invalida a sessão (defesa em profundidade; o user-service é autoritativo).
+  O caminho do refresh é fechado no auth-server: `RevocationRefreshGuard` + `TokenCustomizerConfig`
+  abortam o grant `refresh_token` (`invalid_grant`) quando a revogação é mais recente que o refresh token
+  apresentado — sem isso o gateway renovaria o access token silenciosamente, perpetuando credenciais
+  válidas. **Fail-open** (erro de Redis → não bloqueia; disponibilidade sobre rigor), toggle
+  `security.revocation.enabled`. **Invariante:** revogação força re-autenticação (re-login re-deriva
+  roles e aplica o gate de e-mail/`active`, ADR-015). Janela residual ≈ segundos (era *indefinida* via
+  refresh). `key-prefix` deve casar entre os serviços.
 
 ## Gaps de segurança conhecidos (dívida aceita)
 
@@ -80,7 +127,34 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 | **Keyfile MongoDB de dev no repo** | Aceito (análogo à chave JWK) | Keyfile gerado/gerido fora do repo em prod |
 | **TLS de transporte Redis ausente** | Aceito. A senha (`REDIS_PASSWORD`) protege o protocolo de comando mas trafega em claro no handshake `AUTH` na rede interna Docker. Mitigado por portas Redis/Sentinel nunca publicadas no compose base (prod-safe). | TLS no Redis (Redis 6+ `tls-port`) + rede Docker isolada em prod |
 | **ACLs por usuário Redis ausentes** | Aceito. Todos os clientes (gateway, auth-server, user-service, exporter) compartilham a mesma `REDIS_PASSWORD` sem segregação de permissões por serviço. | Criar usuários ACL dedicados por serviço com permissões mínimas (Redis 6+) |
-| **Janela do token já emitido pós-revogação de role (ADR-014)** | Aceito. `PATCH /v1/admin/users/{id}/roles` evicta `authByEmail` — garante que o **próximo** token emitido reflita as roles novas. Um access token **já emitido** antes da mudança continua válido com as roles antigas até expirar; a janela real é o **TTL do access token**, não o TTL de 5 min do cache. | Revogação ativa de token (introspection/blocklist) |
+
+## Gaps recém-identificados (a tratar / não ratificados)
+
+Achados levantados na **auditoria de segurança ad hoc de 2026-06-21** (`security-reviewer`),
+**ainda não ratificados** como dívida aceita. Diferente da tabela acima — que registra escolhas
+**conscientes** — estes aguardam **correção** ou uma **decisão explícita de aceitação** (quando
+um item for tratado, mova-o para "controles ativos"; se for conscientemente aceito, mova-o para a
+tabela de dívida aceita). Os controles já ativos **não** regrediram; estes são gaps novos.
+
+> **G1 — IDOR de leitura de PII (ALTO): corrigido (2026-06-21, [ADR-016](adr/ADR-016-leitura-pii-restrita-admin.md)).** As rotas de leitura por id/e-mail viraram ADMIN-only (`/v1/admin/users/{id}` e `.../email/{email}`) — ver "Controles ativos". Movido para lá; não é mais dívida.
+
+| Gap | Severidade | Cenário de exploração | Caminho de correção |
+| --- | --- | --- | --- |
+| **G3 — Sem headers de segurança HTTP** | MÉDIO | Nenhum `Content-Security-Policy`, `X-Frame-Options`/`frame-ancestors`, `Strict-Transport-Security` ou `X-Content-Type-Options` é emitido pelo nginx do front (`login-interface/nginx.conf`) nem pelo gateway. SPA fica clickjacking-able; XSS tem superfície ampla (mitigada só em parte pelo BFF; o cookie `XSRF-TOKEN` é `HttpOnly=false`, legível por JS). | Adicionar os headers no nginx do front e/ou no gateway |
+| **G5 — `/v1/admin/**` sem 2FA nem tier dedicado** | MÉDIO | As rotas admin caem no tier MED por-usuário genérico; não há step-up auth/2FA nem rate-limit mais restritivo para mutações destrutivas (`DELETE /v1/admin/users/del/{id}` hard-delete). Combinado com a ausência de revogação ativa de token, o blast radius de um token ADMIN comprometido é alto. | 2FA/step-up para ADMIN e/ou tier dedicado para deletes |
+| **G4 — CORS pattern curinga (risco operacional)** | BAIXO | `CORSConfig` usa `setAllowedOriginPatterns(allowedOrigins)` + `allowCredentials(true)`. Seguro hoje (default `localhost:5173`, não-wildcard), mas como vem de `CORS_ALLOWED_ORIGINS`, um pattern curinga setado por engano em prod vira exfiltração cross-origin **com credenciais**. | Validar/rejeitar pattern curinga quando `allowCredentials=true` |
+| **G8 — Sem invalidação de sessões concorrentes** | BAIXO | Não há limite/registro de sessões simultâneas; um usuário pode manter N sessões ativas e o logout encerra só a corrente. Combinado com a ausência de revogação ativa, sessões antigas não são revogáveis centralmente. | Limitar/registrar sessões concorrentes (Spring Session) |
+
+**G9 — Scan transitivo de dependências pendente.** As versões diretas (Spring Boot 4.0.3 /
+Spring Cloud 2025.1.0 / Java 21) não têm CVE conhecida no patch level, mas o scan **transitivo**
+(Nimbus JOSE, Jackson, BCrypt) ainda não foi rodado nesta auditoria. Rodar `/security-scan` +
+OWASP dependency-check (via `dependency-steward`) antes de prod.
+
+**Investigados e sem gap (não re-auditar).** A mesma auditoria descartou dois vetores: **NoSQL
+injection** (G6 — `AdminService` usa `Criteria`/`Pattern.quote`, sem concatenação de string;
+repositórios com métodos derivados parametrizados) e **timing attack no token de verificação de
+e-mail** (G7 — a comparação ocorre sobre o **hash** SHA-256 no índice do Mongo, com token de 256
+bits de entropia; o `X-Internal-Token`, esse sim, usa `MessageDigest.isEqual` constant-time).
 
 ## Estado atual do deploy (borda Cloudflare)
 
@@ -119,6 +193,7 @@ controles já implementados e o que ainda falta.
 | --- | --- | --- |
 | **Base legal / consentimento** | ✅ Implementado | `termsAccepted` obrigatório (`true`) no cadastro → `consentAcceptedAt` + `termsVersion` na coleção `users` (ADR-012). Aceite versionado permite reconsentimento quando os termos mudarem. |
 | **Trilha de auditoria de acesso** | ✅ Implementado | Coleção `auditLogs` registra *quem acessou/alterou/apagou qual dado de qual titular, quando* (ADR-011) — distinta do log SLF4J operacional. Ver "Controles ativos". |
+| **Controle de acesso a dado de terceiro** | ✅ Implementado | A leitura de PII por id/e-mail é **ADMIN-only** (`GET /v1/admin/users/{id}` e `.../email/{email}`, ADR-016 — fecha o G1); um `USER` só lê o próprio dado (`/me`). Acesso admin a PII é auditado (`ADMIN_READ_USER`). |
 | **Eliminação / direito ao esquecimento** | ✅ Implementado | Self-service: soft-delete (`/remove/me`) e hard-delete (`/delete/me`) da própria conta. A via ADMIN (soft/hard-delete de outro titular) foi removida do `UserController` (ADR-013) e absorvida pelo `AdminController` dedicado (`DELETE /v1/admin/users/{id}` e `.../del/{id}`, ADR-014). |
 | **Minimização** | ✅ Implementado | Coleta enxuta (nome, e-mail, senha); PII mascarada em log (`LogUtils.maskEmail`) e em `auditLogs` (`targetEmail` mascarado). |
 | **Portabilidade (exportar meus dados)** | ❌ Gap | Falta endpoint para o titular exportar os próprios dados. Pode ser pós-lançamento, mas planejar. |
@@ -134,6 +209,9 @@ original. Detalhe e racional em [ADR-011](adr/ADR-011-trilha-auditoria-dado-pess
 
 - Ao **fechar** um gap, mova-o de "gaps" para "controles ativos" (ou remova) e registre em
   `.claude/memory/decisions.md`.
+- Um achado em **"Gaps recém-identificados (a tratar)"** tem dois destinos: ao ser **corrigido**
+  vira "controle ativo"; ao ser **conscientemente aceito** vira linha na tabela de "dívida aceita".
+  Não deixe um achado morar na seção "a tratar" indefinidamente — ou se trata, ou se ratifica.
 - Ao **introduzir** dívida de segurança consciente, registre-a aqui com mitigação e caminho de
   saída — dívida não documentada é a que volta a morder.
 - Mudanças que afetem contrato/superfície de segurança seguem o fluxo com ADR

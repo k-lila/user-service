@@ -27,8 +27,5 @@ hotfix segue sem regressão verde, mesmo sob urgência.
 Foco em Dimensão 3 (bugs latentes) e Dimensão 4 (adversarial: "o fix abre outro buraco?").
 Se o incidente é de segurança, o `security-reviewer` revisa em paralelo (`/security-scan`).
 - `REJECTED` com BLOQUEADOR → para e escala ao humano imediatamente.
-- `APPROVED` → registra a decisão e move o incidente de `blockers.md` para `decisions.md`.
-
-### FASE 5 — Registro + follow-up (`doc-keeper`)
-Atualiza docs afetados e registra qualquer dívida deixada para tratar depois
-em `.claude/memory/decisions.md`.
+- `APPROVED` → registra a decisão, qualquer dívida deixada para tratar depois, e move o
+  incidente de `blockers.md` para `decisions.md`.

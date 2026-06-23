@@ -11,17 +11,18 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.users.userservice.domain.AuditAction;
 import com.users.userservice.dtos.UserRequestDTO;
 import com.users.userservice.dtos.UserResponseDTO;
 import com.users.userservice.services.AuditService;
+import com.users.userservice.services.EmailVerificationService;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
 
@@ -41,11 +42,17 @@ public class UserController {
     private final RegisterService registerService;
     private final SearchService searchService;
     private final AuditService auditService;
+    private final EmailVerificationService emailVerificationService;
 
-    public UserController(RegisterService registerService, SearchService searchService, AuditService auditService) {
+    public UserController(
+            RegisterService registerService,
+            SearchService searchService,
+            AuditService auditService,
+            EmailVerificationService emailVerificationService) {
         this.registerService = registerService;
         this.searchService = searchService;
         this.auditService = auditService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @Operation(summary = "Registrar novo usuário")
@@ -61,6 +68,26 @@ public class UserController {
         return ResponseEntity.status(201).body(newUser);
     }
 
+    // Endpoint público, pré-sessão (usuário recém-cadastrado, sem cookie/JWT). Token opaco
+    // de alta entropia + TTL 15min mitigam o transporte via query string (ADR-015).
+    @Operation(summary = "Confirmar verificação de e-mail")
+    @GetMapping("/verify-email")
+    public ResponseEntity<Void> verifyEmail(@RequestParam String token) {
+        LOGGER.info("| GET | confirmar verificação de e-mail");
+        emailVerificationService.confirm(token);
+        return ResponseEntity.ok().build();
+    }
+
+    @Operation(summary = "Reenviar e-mail de verificação para o próprio usuário")
+    @PostMapping("/resend-verification")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<Void> resendVerification(@AuthenticationPrincipal Jwt jwt) {
+        String userID = jwt.getClaim("userID");
+        LOGGER.info("| POST | reenviar verificação de e-mail (self) | ID: {}", userID);
+        emailVerificationService.resendByUserId(userID);
+        return ResponseEntity.accepted().build();
+    }
+
     @Operation(summary = "Lista todos os usuários")
     @GetMapping
     @PreAuthorize("hasRole('USER')")
@@ -72,34 +99,6 @@ public class UserController {
         );
         Page<UserResponseDTO> users = searchService.searchAll(pageable);
         return ResponseEntity.ok(users);
-    }
-
-    @Operation(summary = "Buscar usuário por ID")
-    @GetMapping(value = "/{id}")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UserResponseDTO> searchById(
-            @PathVariable(value = "id", required = true) String userID,
-            @AuthenticationPrincipal Jwt jwt) {
-        LOGGER.info(
-            "| GET | buscar por ID | ID: {}",
-            userID
-        );
-        UserResponseDTO found = searchService.searchById(userID);
-        auditCrossSubjectRead(jwt, found);
-        return ResponseEntity.ok(found);
-    }
-
-    @Operation(summary = "Buscar usuário por Email")
-    @GetMapping(value = "/email/{email}")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UserResponseDTO> searchByEmail(
-            @PathVariable(value = "email", required = true) String email,
-            @AuthenticationPrincipal Jwt jwt) {
-        LOGGER.info("| GET | buscar por email");
-
-        UserResponseDTO found = searchService.searchByEmail(email);
-        auditCrossSubjectRead(jwt, found);
-        return ResponseEntity.ok(found);
     }
 
     @Operation(summary = "Modificar um usuário")
@@ -153,17 +152,5 @@ public class UserController {
         LOGGER.info("| GET | usuário autenticado | ID: {}", userID);
         UserResponseDTO user = searchService.searchById(userID);
         return ResponseEntity.ok(user);
-    }
-
-    /**
-     * Audita a leitura apenas quando o titular consultado difere do solicitante
-     * (READ_CROSS_SUBJECT). Leitura do próprio dado (ex.: via /me ou consulta ao próprio ID)
-     * não gera trilha — baixo valor e alto volume.
-     */
-    private void auditCrossSubjectRead(Jwt jwt, UserResponseDTO found) {
-        String callerId = jwt != null ? jwt.getClaimAsString("userID") : null;
-        if (found != null && found.getId() != null && !found.getId().equals(callerId)) {
-            auditService.recordFromJwt(AuditAction.READ_CROSS_SUBJECT, jwt, found.getId(), found.getEmail());
-        }
     }
 }

@@ -25,7 +25,3 @@ contrato (`/check-compat`) e a regressão está coberta. Se o bug era de seguran
 o `security-reviewer` (`/security-scan`) antes de aprovar.
 - `REJECTED` → agente responsável (máx. 1x) → humano se persistir.
 - `APPROVED` → registra em `.claude/memory/decisions.md`.
-
-### FASE 5 — Registro (`doc-keeper`)
-Atualiza docs apenas se o comportamento documentado mudou (ex.: `docs/SERVICOS.md`,
-`docs/TESTES.md` se uma armadilha nova foi descoberta).

@@ -17,11 +17,11 @@
 | Método | Path                    | Auth       | Rate Limit      |
 | ------ | ----------------------- | ---------- | --------------- |
 | POST   | /v1/users/register      | Nenhuma    | 2 req/s (IP)    |
+| GET    | /v1/users/verify-email  | Nenhuma    | 2 req/s (IP)    |
 | GET    | /v1/users               | ROLE_USER  | 10 req/s (user) |
-| GET    | /v1/users/{id}          | ROLE_USER  | 10 req/s (user) |
-| GET    | /v1/users/email/{email} | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/me            | ROLE_USER  | 10 req/s (user) |
 | PUT    | /v1/users               | ROLE_USER  | 10 req/s (user) |
+| POST   | /v1/users/resend-verification | ROLE_USER | 10 req/s (user) |
 | DELETE | /v1/users/remove/me     | ROLE_USER  | 10 req/s (user) |
 | DELETE | /v1/users/delete/me     | ROLE_USER  | 10 req/s (user) |
 
@@ -33,6 +33,11 @@
 > As rotas administrativas `DELETE /v1/users/{id}` e `DELETE /v1/users/del/{id}` foram removidas
 > deste controller (ADR-013) e absorvidas pelo `AdminController` dedicado — ver
 > [Endpoints administrativos](#endpoints-administrativos-v1admin) abaixo (ADR-014).
+>
+> As leituras `GET /v1/users/{id}` e `GET /v1/users/email/{email}` também foram removidas deste
+> controller público (eram `ROLE_USER`, sem checagem de titularidade → IDOR de PII) e reabertas como
+> ADMIN-only no `AdminController` (ADR-016 — fecha o G1). A leitura do próprio dado permanece em
+> `GET /v1/users/me`.
 
 ### Endpoints administrativos (`/v1/admin/**`)
 
@@ -43,9 +48,12 @@ rota `admin-service` do gateway — superfície sensível, poucos operadores esp
 | Método | Path                              | Auth       | Rate Limit | Descrição |
 | ------ | ---------------------------------- | ---------- | ---------- | --------- |
 | GET    | /v1/admin/users                    | ROLE_ADMIN | MED (5/s)  | Listagem completa incl. inativos, filtros opcionais `active`/`name`/`email`, paginada |
+| GET    | /v1/admin/users/{id}               | ROLE_ADMIN | MED (5/s)  | Busca um titular por ID, incl. inativos (`AdminUserResponseDTO` com `roles`); audita `ADMIN_READ_USER` (ADR-016) |
+| GET    | /v1/admin/users/email/{email}      | ROLE_ADMIN | MED (5/s)  | Busca um titular por e-mail, incl. inativos; audita `ADMIN_READ_USER` (ADR-016) |
 | GET    | /v1/admin/users/{id}/audit-logs    | ROLE_ADMIN | MED (5/s)  | Trilha de auditoria LGPD de um titular específico, paginada |
 | GET    | /v1/admin/audit-logs               | ROLE_ADMIN | MED (5/s)  | Feed geral da trilha de auditoria LGPD, paginado |
 | PATCH  | /v1/admin/users/{id}/roles         | ROLE_ADMIN | MED (5/s)  | Promove/revoga roles (`USER`/`ADMIN`) de um titular |
+| POST   | /v1/admin/users/{id}/resend-verification | ROLE_ADMIN | MED (5/s) | Reenvia o e-mail de verificação de cadastro para um titular |
 | DELETE | /v1/admin/users/{id}                | ROLE_ADMIN | MED (5/s)  | Soft-delete administrativo de outro titular (absorvido do ADR-013) |
 | DELETE | /v1/admin/users/del/{id}            | ROLE_ADMIN | MED (5/s)  | Hard-delete administrativo de outro titular (absorvido do ADR-013) |
 
@@ -67,13 +75,79 @@ requisição.
 
 Detalhe completo em [ADR-014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md).
 
+### Verificação de e-mail no cadastro (ADR-015)
+
+Cadastro (`POST /v1/users/register`) só seta `emailVerified=false` — **não dispara** mais
+o e-mail de confirmação automaticamente. O envio (outbox `notificationOutbox` →
+notification-service via Feign) só acontece quando explicitamente requisitado via um dos
+endpoints de reenvio abaixo.
+
+**`GET /v1/users/verify-email?token=...`** — público, pré-sessão, tier LOW (2/s) por IP no gateway
+(mesmo de `/v1/users/register`):
+
+- Token opaco (256 bits, `SecureRandom` + Base64URL) — **não é JWT**; só o hash SHA-256
+  é persistido no outbox. TTL de 15 min (`app.verification.token-ttl`).
+- Resposta genérica em caso de token inexistente/expirado/já usado (não revela o motivo
+  específico — evita oráculo de enumeração). Idempotente: clique duplicado num link já
+  confirmado é sucesso silencioso.
+- Sucesso audita `EMAIL_VERIFIED` (`AuditAction`, ator USER) na trilha LGPD.
+
+**Reenvio do e-mail de verificação** — deixou de ser público/por-e-mail; agora existem duas
+rotas autenticadas, ambas delegando a `EmailVerificationService.resendByUserId(String)`:
+
+| Método | Path                                       | Auth       | Rate Limit | Descrição |
+| ------ | -------------------------------------------- | ---------- | ---------- | --------- |
+| POST   | /v1/users/resend-verification                | ROLE_USER  | 10/s (user) | Self-service: reenvia para o próprio usuário (`userID` do JWT) |
+| POST   | /v1/admin/users/{id}/resend-verification     | ROLE_ADMIN | MED (5/s)  | Admin: reenvia para qualquer titular, por `{id}` |
+
+- Sem corpo — o titular é resolvido por `userID` do JWT (self) ou `{id}` do path (admin), nunca
+  por e-mail no body (evita o vetor de anti-enumeração por e-mail que existia antes).
+- `resendByUserId` lança `DomainEntityNotFound` (404) se o `{id}` não existir — diferente do
+  antigo `resend(email)` (ainda usado internamente, silencioso por design): aqui não há motivo de
+  anti-enumeração, pois o chamador já está autenticado (self) ou é admin (que opera por ID de uma
+  listagem existente).
+- Resposta de sucesso é `202 Accepted`; reenvio **não é auditado** em `auditLogs` (mesmo critério
+  de antes — evita ruído/oráculo de timing).
+- Rate limit **complementar por conta-alvo** (`ResendRateLimitService`, Redis, chave
+  `sha256(emailLower)`, janela fixa de 1h, default 3/h — `app.verification.resend-max-per-window`/
+  `app.verification.resend-window`), além do tier por-usuário do gateway — evita e-mail bombing.
+- Supera (`SUPERSEDED`) qualquer outbox `PENDING`/`SENT` anterior do mesmo titular antes de
+  emitir um novo token — só o mais recente é válido.
+
+**Gate de login + grace period (authorization-server):** `AuthorizationService.loadUserByUsername`
+mapeia `AuthDTO.emailVerified` para `enabled` — `emailVerified=false` bloqueia o login
+(`DisabledException`, mensagem genérica). Mitigado por janela de carência de 24h
+(`security.email-verification.grace-period`) desde `AuthDTO.registrationDate` (campo aditivo,
+nullable no lado consumidor — `null` equivale a usuário legado, sem NPE). Usuários legados
+(`emailVerified=null`) continuam tratados como verificados, sem bloqueio.
+
+**Canal interno (notification-service):** `POST /internal/notifications/email-verification`
+— protegido por `X-Internal-Token` (mesmo shared secret do ADR-006), sem Spring Security
+(`Filter` de servlet simples). Chamado só pelo user-service via Feign assíncrono
+(`@Async`, executor `notificationExecutor`) com circuit breaker Resilience4j
+(`configs.notification-service`) + `NotificationClientFallbackFactory`. **Nunca exposto pelo
+gateway.** Payload:
+
+```json
+{
+  "email": "maria@exemplo.com",
+  "name": "Maria Silva",
+  "verificationLink": "http://localhost:8081/v1/users/verify-email?token=<token-opaco>"
+}
+```
+
+Detalhe completo (decisões e alternativas consideradas) em
+[ADR-015](adr/ADR-015-verificacao-email-cadastro.md).
+
 **Leituras só de usuários ativos (ADR-001):** os endpoints de leitura ocultam usuários
 soft-deleted (`active=false`):
 
 - `GET /v1/users` lista apenas ativos (`findByActiveTrue`).
-- `GET /v1/users/{id}` e `GET /v1/users/email/{email}` retornam **404** para usuário inativo
-  (tratado como inexistente).
 - `GET /v1/users/me` retorna **404** se a própria conta estiver desativada.
+
+> **Exceção administrativa (ADR-016):** as leituras admin `GET /v1/admin/users/{id}` e
+> `GET /v1/admin/users/email/{email}` **incluem** titulares inativos (soft-deleted), coerentes com
+> a listagem `GET /v1/admin/users` — a ocultação de inativos é só da superfície pública.
 
 > Ver _Convenções_ no [CLAUDE.md](../CLAUDE.md) e [ADR-001](adr/ADR-001-leitura-somente-ativos.md).
 
@@ -90,7 +164,9 @@ soft-deleted (`active=false`):
 }
 ```
 
-**Response — `UserResponseDTO`** (não expõe `passwordHash` nem `roles`):
+**Response — `UserResponseDTO`** (não expõe `passwordHash` nem `roles`; logo após o cadastro
+`emailVerified` vem `false` e `emailVerifiedAt` vem `null` — só vira `true`/preenchido após
+`GET /v1/users/verify-email`, ADR-015):
 
 ```json
 {
@@ -102,15 +178,18 @@ soft-deleted (`active=false`):
   "consentAcceptedAt": "2026-06-08T14:32:10.123",
   "termsVersion": "v1",
   "tenantIds": null,
-  "emailVerified": true,
-  "emailVerifiedAt": "2026-06-08T14:32:10.123"
+  "emailVerified": false,
+  "emailVerifiedAt": null
 }
 ```
 
 `tenantIds` é reservado para uma feature futura de multi-tenant (sempre `null` hoje —
-`registerUser` não atribui tenant). `emailVerified`/`emailVerifiedAt` também são scaffold:
-sem fluxo de verificação de e-mail implementado, `registerUser` sempre seta
-`emailVerified=true`; `null` (registros legados) é tratado como verificado em toda leitura.
+`registerUser` não atribui tenant). `emailVerified`/`emailVerifiedAt` deixaram de ser scaffold
+inerte (ADR-015): `registerUser` seta `emailVerified=false` no cadastro, mas **não** dispara
+o envio do e-mail — o fluxo de verificação (`GET /v1/users/verify-email`) só começa quando o
+usuário (self) ou um admin chama explicitamente um dos endpoints de reenvio; `emailVerifiedAt`
+é preenchido na confirmação. `null` (registros legados, anteriores ao campo) continua tratado
+como verificado em toda leitura.
 
 ## Claims do JWT
 
@@ -147,11 +226,37 @@ O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims
   consentAcceptedAt: ISODate, // consentimento LGPD no cadastro (ADR-012); nullable p/ legados
   termsVersion: String,       // versão dos termos aceita (ex: "v1"); nullable p/ legados
   tenantIds: [String],        // reservado p/ multi-tenant futuro; sempre null hoje (sem atribuição)
-  emailVerified: Boolean,     // scaffold sem fluxo de verificação; registerUser sempre seta true;
-                               //   null (legado) tratado como true em toda leitura
-  emailVerifiedAt: ISODate    // nullable; sem fluxo de verificação implementado
+  emailVerified: Boolean,     // ADR-015: registerUser seta false no cadastro; true após confirmação
+                               //   (GET /v1/users/verify-email); null (legado) tratado como true
+  emailVerifiedAt: ISODate    // preenchido na confirmação do e-mail; nullable p/ não confirmados/legados
 }
 ```
+
+## Schema MongoDB (coleção `notificationOutbox`)
+
+Outbox sem poller (ADR-015) — criado e processado no mesmo evento que o originou (cadastro ou
+reenvio), sem `@Scheduled`/scan periódico. Índice composto `(userId, type, status)`.
+
+```js
+{
+  _id: ObjectId,
+  userId: String,           // indexado
+  type: String,              // EMAIL_VERIFICATION (único valor hoje)
+  tokenHash: String,         // SHA-256 do token opaco (unique); o token em claro nunca é persistido
+  expiresAt: ISODate,        // TTL do token (15 min default, app.verification.token-ttl)
+  status: String,            // PENDING | SENT | FAILED | CONFIRMED | SUPERSEDED
+  createdAt: ISODate,
+  lastAttemptAt: ISODate,
+  attempts: Number,
+  purgeAt: ISODate           // TTL index do Mongo (expireAfterSeconds: 0) — retenção separada
+                               //   de expiresAt (createdAt + 30 dias default, preserva histórico
+                               //   de auditoria do outbox; app.verification.outbox-retention)
+}
+```
+
+> O TTL index do Mongo atua sobre `purgeAt`, **não** sobre `expiresAt` — aplicar o TTL direto em
+> `expiresAt` apagaria registros `CONFIRMED`/`SENT` pouco depois da expiração do token, perdendo
+> o histórico do outbox. Detalhe completo em [ADR-015](adr/ADR-015-verificacao-email-cadastro.md).
 
 ## Schema MongoDB (coleção `auditLogs`)
 
@@ -164,7 +269,8 @@ Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetU
   timestamp: ISODate,        // quando a operação ocorreu
   action: String,            // REGISTER | UPDATE | SOFT_DELETE_ADMIN | HARD_DELETE_ADMIN
                              //   | SOFT_DELETE_SELF | HARD_DELETE_SELF | READ_INTERNAL_CREDENTIAL
-                             //   | READ_CROSS_SUBJECT | ROLE_GRANT | ROLE_REVOKE
+                             //   | ADMIN_READ_USER | ROLE_GRANT | ROLE_REVOKE | EMAIL_VERIFIED
+                             //   | READ_CROSS_SUBJECT (legado/deprecated, ADR-016 — não mais emitido)
   actorType: String,         // USER | ADMIN | SYSTEM
   actorUserId: String,       // null quando SYSTEM
   actorRoles: [String],      // null quando SYSTEM
@@ -197,6 +303,16 @@ TTL de 5 min, três caches distintos:
 - `deleteUser` e `deactivateUser` — **evictam** os três caches.
 
 > A escrita é manual (não declarativa) porque cada cache usa uma chave diferente — ID vs e-mail.
+
+### Outras chaves no mesmo Redis (não-cache)
+
+Além dos caches, o Redis compartilhado guarda o **epoch de revogação de token** por usuário
+(ADR-017): chave `revoke:user:{userID}` → instante (millis) da última revogação, TTL `75m`
+(`security.revocation.ttl`). Gravada pelo user-service em revogação de role / desativação /
+hard-delete (junto das evictions acima); lida pelos resource servers (user-service, gateway) e
+pelo guard de refresh do auth-server. **Comportamento:** um access token cujo `iat` precede o
+epoch é rejeitado com **401**, e o grant `refresh_token` de um titular revogado falha com
+`invalid_grant` — a revogação **força re-autenticação**. Fail-open se o Redis estiver indisponível.
 
 ## Formato de erros (RFC 7807 / ProblemDetail)
 

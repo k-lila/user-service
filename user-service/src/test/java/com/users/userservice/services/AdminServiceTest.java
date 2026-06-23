@@ -40,6 +40,7 @@ class AdminServiceTest {
     @Mock private IAuditLogRepository auditLogRepository;
     @Mock private CacheService cacheService;
     @Mock private MongoTemplate mongoTemplate;
+    @Mock private TokenRevocationService tokenRevocationService;
 
     private AdminService service;
 
@@ -48,7 +49,7 @@ class AdminServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AdminService(userRepository, auditLogRepository, cacheService, mongoTemplate);
+        service = new AdminService(userRepository, auditLogRepository, cacheService, mongoTemplate, tokenRevocationService);
     }
 
     private User buildUser(String id, String email, boolean active, Set<String> roles) {
@@ -91,6 +92,65 @@ class AdminServiceTest {
         Page<AdminUserResponseDTO> result = service.listAllUsers(null, null, null, pageable);
 
         assertEquals(Set.of("USER", "ADMIN"), result.getContent().get(0).getRoles());
+    }
+
+    // ── findById / findByEmail (leitura admin, ADR-016 — fix G1) ──────────────
+
+    @Test
+    void findById_deveRetornarDTOComRoles_quandoTitularAtivo() {
+        User user = buildUser(OTHER_ID, "outro@email.com", true, Set.of("USER", "ADMIN"));
+        when(userRepository.findById(OTHER_ID)).thenReturn(Optional.of(user));
+
+        AdminUserResponseDTO result = service.findById(OTHER_ID);
+
+        assertEquals(OTHER_ID, result.getId());
+        assertEquals(Set.of("USER", "ADMIN"), result.getRoles());
+    }
+
+    @Test
+    void findById_deveRetornarTitularInativo_semTratarComoInexistente() {
+        User inactive = buildUser(OTHER_ID, "inativo@email.com", false, Set.of("USER"));
+        when(userRepository.findById(OTHER_ID)).thenReturn(Optional.of(inactive));
+
+        AdminUserResponseDTO result = service.findById(OTHER_ID);
+
+        assertEquals(OTHER_ID, result.getId());
+        assertFalse(result.getActive());
+    }
+
+    @Test
+    void findById_deveLancar404_quandoTitularNaoExiste() {
+        when(userRepository.findById("inexistente")).thenReturn(Optional.empty());
+
+        assertThrows(DomainEntityNotFound.class, () -> service.findById("inexistente"));
+    }
+
+    @Test
+    void findByEmail_deveRetornarDTOComRoles_quandoTitularAtivo() {
+        User user = buildUser(OTHER_ID, "outro@email.com", true, Set.of("USER"));
+        when(userRepository.findByEmail("outro@email.com")).thenReturn(Optional.of(user));
+
+        AdminUserResponseDTO result = service.findByEmail("outro@email.com");
+
+        assertEquals("outro@email.com", result.getEmail());
+        assertEquals(Set.of("USER"), result.getRoles());
+    }
+
+    @Test
+    void findByEmail_deveRetornarTitularInativo_semTratarComoInexistente() {
+        User inactive = buildUser(OTHER_ID, "inativo@email.com", false, Set.of("USER"));
+        when(userRepository.findByEmail("inativo@email.com")).thenReturn(Optional.of(inactive));
+
+        AdminUserResponseDTO result = service.findByEmail("inativo@email.com");
+
+        assertFalse(result.getActive());
+    }
+
+    @Test
+    void findByEmail_deveLancar404_quandoTitularNaoExiste() {
+        when(userRepository.findByEmail("nao@existe.com")).thenReturn(Optional.empty());
+
+        assertThrows(DomainEntityNotFound.class, () -> service.findByEmail("nao@existe.com"));
     }
 
     // ── getAuditLogsByUser ───────────────────────────────────────────────────

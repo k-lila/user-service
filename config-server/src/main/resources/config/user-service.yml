@@ -25,16 +25,67 @@ spring:
         master: ${REDIS_SENTINEL_MASTER:mymaster}
         nodes: ${REDIS_SENTINEL_NODES:redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379}
         password: ${REDIS_PASSWORD}
+  # Spring Cloud CircuitBreaker + Feign (group por nome do client, group.enabled=true): a
+  # resolução é registry.getConfiguration(id) → getConfiguration(group) → default, e só
+  # enxerga `configs.*` (mesmo racional do authorization-server). O nome `notification-service`
+  # casa com o group name do @FeignClient (ADR-015).
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+        group:
+          enabled: true
 
 internal:
   api:
     token: ${INTERNAL_API_TOKEN}
+
+# Revogação ativa de token (ADR-017): epoch por usuário no Redis. O user-service grava em
+# revogação de role / desativação / hard-delete; o resource server rejeita o token cujo iat
+# precede o epoch. TTL ≥ vida máxima do refresh token (a marca se auto-limpa depois).
+security:
+  revocation:
+    enabled: ${TOKEN_REVOCATION_ENABLED:true}
+    key-prefix: ${TOKEN_REVOCATION_KEY_PREFIX:revoke:user:}
+    ttl: ${TOKEN_REVOCATION_TTL:75m}
 
 # Consentimento LGPD: versão dos termos/privacidade registrada no cadastro (aceite versionado).
 # Bump quando a política mudar (permite exigir re-consentimento). Override em prod via TERMS_VERSION.
 app:
   terms:
     version: ${TERMS_VERSION:v1}
+  # Verificação de e-mail no cadastro (ADR-015).
+  verification:
+    # TTL do token opaco de verificação.
+    token-ttl: ${EMAIL_VERIFICATION_TOKEN_TTL:15m}
+    # Base pública usada para montar o link de confirmação enviado por e-mail — aponta para
+    # o gateway (borda), não para o user-service interno.
+    base-url: ${API_BASE_URL:http://localhost:8081}
+    # Limite de reenvio por conta-alvo (Redis), complementar ao rate limit por IP do gateway.
+    resend-max-per-window: ${EMAIL_VERIFICATION_RESEND_MAX:3}
+    resend-window: ${EMAIL_VERIFICATION_RESEND_WINDOW:1h}
+    # Retenção do registro de outbox após a expiração/confirmação do token (TTL index do
+    # Mongo em purgeAt, não em expiresAt — preserva histórico de auditoria do outbox).
+    outbox-retention: ${EMAIL_VERIFICATION_OUTBOX_RETENTION:30d}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      notification-service:
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+  timelimiter:
+    configs:
+      notification-service:
+        # 10s (não 3s): contra SMTP real (ex. Gmail) o handshake/TLS/auth costuma passar de
+        # 3s — o NotificationController do notification-service bloqueia até o
+        # JavaMailSender.send() retornar, então o timeout do Feign precisa cobrir essa latência
+        # real, não só a de um Mailhog/Mailpit local.
+        timeoutDuration: 10s
 
 eureka:
   client:

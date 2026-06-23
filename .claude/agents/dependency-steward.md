@@ -55,8 +55,8 @@ que conflite com o BOM.
 
 No relatório final: `dependencies_bumped` (lista de `{ artifact, from, to, reason,
 severity }`), `breaking_changes`, `build_status` (PASS|FAIL), `needs_code_change`
-(true|false — devolve ao techlead), `needs_security_review` (true|false), e o que o
-`doc-keeper` deve sincronizar (versões no CLAUDE.md, dívida em docs/SECURITY.md).
+(true|false — devolve ao techlead), `needs_security_review` (true|false), e o que precisa
+ser sincronizado manualmente (versões no CLAUDE.md, dívida em docs/SECURITY.md).
 
 ## Restrições de comportamento
 
@@ -65,4 +65,4 @@ severity }`), `breaking_changes`, `build_status` (PASS|FAIL), `needs_code_change
 - **Nunca** atualize tudo de uma vez — um bump (ou grupo coeso) por vez, rastreável
 - Se o upgrade quebra a compilação por mudança de API da lib, **pare** e devolva ao
   `techlead` com o diagnóstico — não tente refatorar o código você mesmo
-- Registre todo bump relevante em `.claude/memory/decisions.md` (via doc-keeper)
+- Registre todo bump relevante em `.claude/memory/decisions.md`

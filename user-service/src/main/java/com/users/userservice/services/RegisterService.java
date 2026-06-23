@@ -29,16 +29,19 @@ public class RegisterService {
     private final IUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final CacheService cacheService;
+    private final TokenRevocationService tokenRevocationService;
     private final String termsVersion;
 
     public RegisterService(
             IUserRepository iUserRepository,
             PasswordEncoder passwordEncoder,
             CacheService cacheService,
+            TokenRevocationService tokenRevocationService,
             @Value("${app.terms.version:v1}") String termsVersion) {
         this.userRepository = iUserRepository;
         this.passwordEncoder = passwordEncoder;
         this.cacheService = cacheService;
+        this.tokenRevocationService = tokenRevocationService;
         this.termsVersion = termsVersion;
     }
 
@@ -60,9 +63,9 @@ public class RegisterService {
         // Consentimento LGPD registrado no cadastro (aceite versionado com timestamp).
         user.setConsentAcceptedAt(Instant.now());
         user.setTermsVersion(termsVersion);
-        // Sem fluxo de verificação de e-mail ainda — default true não bloqueia o cadastro.
-        user.setEmailVerified(true);
-        user.setEmailVerifiedAt(Instant.now());
+        // E-mail nasce não verificado (ADR-015) — só vira true após confirmação via token.
+        // O gate em AuthorizationService passa a valer de fato (com grace period de 24h).
+        user.setEmailVerified(false);
         // tenantIds fica null — atribuição de tenant é feature futura.
         User registered;
         try {
@@ -133,6 +136,8 @@ public class RegisterService {
         cacheService.evictByEmailAuth(email);
         cacheService.evictById(userID);
         userRepository.save(toDeactivate);
+        // Revogação ativa (ADR-017): conta desativada não pode seguir operando com o token em mãos.
+        tokenRevocationService.revoke(userID);
         LOGGER.info(
             "| usuário desativado | ID: {}",
             userID
@@ -150,6 +155,8 @@ public class RegisterService {
         cacheService.evictByEmailAuth(email);
         cacheService.evictById(userID);
         userRepository.delete(user.get());
+        // Revogação ativa (ADR-017): tokens vivos do titular removido são rejeitados em ≈ segundos.
+        tokenRevocationService.revoke(userID);
         LOGGER.info(
             "| usuário deletado | ID: {}",
             userID

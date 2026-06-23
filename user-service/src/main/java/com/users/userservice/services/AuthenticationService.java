@@ -43,6 +43,8 @@ public class AuthenticationService {
         authDTO.setRoles(user.get().getRoles());
         // emailVerified nulo (legado, anterior ao campo) é tratado como verificado.
         authDTO.setEmailVerified(!Boolean.FALSE.equals(user.get().getEmailVerified()));
+        // Permite o gate de grace period no authorization-server (ADR-015).
+        authDTO.setRegistrationDate(user.get().getRegistrationDate());
 
         LOGGER.info(
             "| auth | enviando credenciais | email: {}",

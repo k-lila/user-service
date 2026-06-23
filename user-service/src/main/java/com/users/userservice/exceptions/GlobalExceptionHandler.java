@@ -49,6 +49,16 @@ public class GlobalExceptionHandler {
         return pd;
     }
 
+    // Token inexistente/expirado/já usado (ADR-015) — mensagem sempre genérica (anti-enumeração),
+    // mas com status 400 correto (entrada do usuário, não erro do servidor).
+    @ExceptionHandler(InvalidVerificationTokenException.class)
+    public ProblemDetail handleInvalidVerificationToken(InvalidVerificationTokenException e) {
+        LOGGER.warn("| 400 | token de verificação inválido");
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+        pd.setTitle("Bad Request");
+        return pd;
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ProblemDetail handleValidation(MethodArgumentNotValidException e) {
         List<Map<String, String>> errors = e.getBindingResult().getFieldErrors().stream()

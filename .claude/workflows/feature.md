@@ -41,11 +41,6 @@ Consistência AC↔impl↔testes; compatibilidade (`/check-compat`); bugs latent
   escalar ao humano e parar.
 - `APPROVED` → registrar decisões/tech-debt em `.claude/memory/decisions.md`.
 
-### FASE 7 — Registro (`doc-keeper`)
-Sincroniza os docs afetados (`CLAUDE.md`, `docs/SERVICOS.md`, `docs/CONVENCOES.md`,
-`docs/SECURITY.md`, `docs/TESTES.md`, `docs/LOGS.md`, `docs/CONFIG.md`) conforme o que o
-techlead alterou.
-
 ## Regra inviolável
 Se a feature **altera contrato de API**, a revisão do `senso-critico` é obrigatória nas
 FASES 2 e 6, o `techlead` deve ter criado ADR, e `/check-compat` deve fechar sem quebras.

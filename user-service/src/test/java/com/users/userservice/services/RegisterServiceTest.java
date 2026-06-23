@@ -29,12 +29,13 @@ class RegisterServiceTest {
     @Mock private IUserRepository userRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private CacheService cacheService;
+    @Mock private TokenRevocationService tokenRevocationService;
 
     private RegisterService service;
 
     @BeforeEach
     void setUp() {
-        service = new RegisterService(userRepository, passwordEncoder, cacheService, "v1");
+        service = new RegisterService(userRepository, passwordEncoder, cacheService, tokenRevocationService, "v1");
     }
 
     private User buildUser(String id, String email, boolean active) {
@@ -307,7 +308,7 @@ class RegisterServiceTest {
     }
 
     @Test
-    void deveMarcarEmailVerificado_quandoRegistro() {
+    void deveMarcarEmailNaoVerificado_quandoRegistro() {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setName("Fulano");
         dto.setEmail("fulano@email.com");
@@ -322,8 +323,8 @@ class RegisterServiceTest {
 
         verify(userRepository).insert(captor.capture());
         User inserido = captor.getValue();
-        assertTrue(inserido.getEmailVerified());
-        assertNotNull(inserido.getEmailVerifiedAt());
+        assertFalse(inserido.getEmailVerified());
+        assertNull(inserido.getEmailVerifiedAt());
     }
 
     @Test

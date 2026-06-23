@@ -38,6 +38,36 @@ class GatewaySecurityIntegrationTest extends AbstractGatewayIntegrationTest {
     }
 
     @Test
+    void deveRetornar401_quandoRotaGenericaDeUsersSemAutenticacao() {
+        // /v1/users/me cai na rota genérica "user-service" (tokenRelay), não nas rotas públicas
+        // pré-sessão de verificação de e-mail — deve continuar exigindo sessão.
+        webTestClient.get().uri("/v1/users/me")
+                .exchange()
+                .expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void devePermitirVerifyEmailSemAutenticacao() {
+        downstream.stubFor(get(urlPathEqualTo("/v1/users/verify-email"))
+                .willReturn(aResponse().withStatus(200)));
+
+        webTestClient.get().uri("/v1/users/verify-email?token=abc")
+                .exchange()
+                .expectStatus().isOk(); // não 401
+    }
+
+    @Test
+    void deveRetornar403_quandoResendVerificationSemTokenCsrf() {
+        // resend-verification deixou de ser pré-sessão (ADR-015): hoje é self-service
+        // autenticado, coberto pela rota genérica "user-service" — exige CSRF como qualquer
+        // POST autenticado (a checagem de CSRF antecede a de autenticação na cadeia de filtros).
+        webTestClient.post().uri("/v1/users/resend-verification")
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{}")
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    @Test
     void deveEmitirCookieXsrfTokenEmRotaPublica() {
         downstream.stubFor(get(urlPathEqualTo("/oauth2/authorize"))
                 .willReturn(aResponse().withStatus(200)));

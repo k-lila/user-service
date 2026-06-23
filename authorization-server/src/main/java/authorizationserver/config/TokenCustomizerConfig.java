@@ -1,5 +1,6 @@
 package authorizationserver.config;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -7,8 +8,14 @@ import java.util.Set;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+
+import authorizationserver.services.RevocationRefreshGuard;
 
 @Configuration
 public class TokenCustomizerConfig {
@@ -17,7 +24,7 @@ public class TokenCustomizerConfig {
     private static final String ROLE_PREFIX    = "ROLE_";
 
     @Bean
-    public OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer() {
+    public OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer(RevocationRefreshGuard refreshGuard) {
         return context -> {
             if (!"access_token".equals(context.getTokenType().getValue())) {
                 return;
@@ -31,6 +38,21 @@ public class TokenCustomizerConfig {
                 .findFirst()
                 .map(a -> a.substring(USER_ID_PREFIX.length()))
                 .orElse(null);
+
+            // Revogação ativa (ADR-017): num grant refresh_token, barra a reemissão se o titular foi
+            // revogado/desativado depois da emissão do refresh token apresentado. Sem isso o gateway
+            // renovaria silenciosamente o access token, perpetuando credenciais válidas. Fora do
+            // refresh (authorization_code), o epoch é irrelevante — o login acabou de validar o estado.
+            if (AuthorizationGrantType.REFRESH_TOKEN.equals(context.getAuthorizationGrantType())) {
+                OAuth2Authorization authorization = context.getAuthorization();
+                Instant refreshIssuedAt = (authorization != null && authorization.getRefreshToken() != null)
+                    ? authorization.getRefreshToken().getToken().getIssuedAt()
+                    : null;
+                if (refreshGuard.isRevoked(userId, refreshIssuedAt)) {
+                    throw new OAuth2AuthenticationException(
+                        new OAuth2Error("invalid_grant", "O token foi revogado", null));
+                }
+            }
             List<String> roles = authentication.getAuthorities().stream()
                 .map(a -> a.getAuthority())
                 .filter(a -> a.startsWith(ROLE_PREFIX))

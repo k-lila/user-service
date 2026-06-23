@@ -11,6 +11,7 @@
 - [OAuth2 e JWT](#oauth2-e-jwt)
 - [Canal interno](#canal-interno)
 - [Consentimento LGPD](#consentimento-lgpd)
+- [Verificação de e-mail (ADR-015)](#verificação-de-e-mail-adr-015)
 - [Swagger / OpenAPI](#swagger--openapi)
 - [CORS](#cors)
 - [Borda e IP do cliente (lockout / rate limit)](#borda-e-ip-do-cliente-lockout--rate-limit)
@@ -42,7 +43,8 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | --- | --- | --- |
 | `CONFIG_SERVER_PASSWORD` | serviços Spring · prometheus | `configtree:/run/secrets/` · `basic_auth.password_file` |
 | `OAUTH_CLIENT_SECRET` | gateway · auth-server | `configtree:/run/secrets/` |
-| `INTERNAL_API_TOKEN` | user-service · auth-server | `configtree:/run/secrets/` |
+| `INTERNAL_API_TOKEN` | user-service · auth-server · notification-service | `configtree:/run/secrets/` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_AUTH` / `SMTP_STARTTLS` | notification-service | `configtree:/run/secrets/` |
 | `REDIS_PASSWORD` | redis-1/2/3 · sentinels · serviços Spring | `$(cat ...)` (runtime) · `configtree:/run/secrets/` |
 | `redis_exporter_json` | redis-exporter | `--redis.password-file` (JSON `{target: senha}`, não a senha crua) |
 | `POSTGRES_PASSWORD` | postgres · postgres-exporter | `POSTGRES_PASSWORD_FILE` (nativo) · `$(cat ...)` |
@@ -107,13 +109,29 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 
 | Variável             | Serviço(s)              | Default dev      | Observação                                                                                       |
 | -------------------- | ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------ |
-| `INTERNAL_API_TOKEN` | user-service · auth-server | — (fail-fast) | Shared secret do canal `/internal/**` (header `X-Internal-Token`). Sem default no config-server — o app **não sobe** sem ele; o compose injeta `internal-dev-token`. **Mesmo valor nos dois serviços.** |
+| `INTERNAL_API_TOKEN` | user-service · auth-server · notification-service | — (fail-fast) | Shared secret do canal `/internal/**` (header `X-Internal-Token`). Sem default no config-server — o app **não sobe** sem ele; o compose injeta `internal-dev-token`. **Mesmo valor nos três serviços** (notification-service reaproveita o secret já existente, sem token dedicado — ADR-015). |
 
 ## Consentimento LGPD
 
 | Variável         | Serviço(s)   | Default dev | Observação                                                                                                  |
 | ---------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------- |
 | `TERMS_VERSION`  | user-service | `v1`        | Versão dos termos/privacidade registrada no cadastro (`app.terms.version`, ADR-012). **Bump** quando a política mudar — permite exigir re-consentimento e prova qual versão cada titular aceitou. |
+
+## Verificação de e-mail (ADR-015)
+
+| Variável                              | Serviço(s)            | Default dev              | Observação                                                                                                  |
+| -------------------------------------- | ---------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `EMAIL_VERIFICATION_TOKEN_TTL`         | user-service           | `15m`                     | TTL do token opaco de verificação (`app.verification.token-ttl`).                                            |
+| `EMAIL_VERIFICATION_RESEND_MAX`        | user-service           | `3`                       | Limite de reenvios por conta-alvo na janela (`app.verification.resend-max-per-window`, Redis, complementar ao rate limit por IP do gateway). |
+| `EMAIL_VERIFICATION_RESEND_WINDOW`     | user-service           | `1h`                      | Janela do limite acima (`app.verification.resend-window`).                                                   |
+| `EMAIL_VERIFICATION_OUTBOX_RETENTION`  | user-service           | `30d`                     | Retenção do registro de outbox (`notificationOutbox.purgeAt`) após expiração/confirmação do token — TTL index do Mongo atua sobre `purgeAt`, não sobre `expiresAt` (preserva histórico de auditoria). |
+| `EMAIL_VERIFICATION_GRACE_PERIOD`      | authorization-server   | `24h`                     | Janela de carência do gate de login (`security.email-verification.grace-period`) — login permitido mesmo com `emailVerified=false` dentro da janela desde `registrationDate`, evitando conta permanentemente inacessível se o e-mail nunca chegar. |
+| `API_BASE_URL`                         | user-service           | `http://localhost:8081`  | Reaproveitada como base do link de confirmação (`app.verification.base-url`) — já documentada em [§ Swagger/OpenAPI](#swagger--openapi); deve apontar ao gateway (borda), não ao user-service interno. |
+| `SERVER_PORT` (notification-service)   | notification-service   | `8095`                    | Porta do serviço — nunca publicada pelo gateway nem pelo compose base; só republicada em dev via `docker-compose.override.yml`. |
+| `SMTP_HOST` / `SMTP_PORT`              | notification-service   | `localhost` / `1025`      | Host/porta do servidor SMTP (`spring.mail.host/port`). Defaults de dev compatíveis com um MailHog/Mailpit local — sem credenciais reais. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD`      | notification-service   | _(vazio)_                 | Credenciais SMTP — Docker secret, sem valor real por default (placeholder de dev). Exporte com credenciais reais antes de `gen-secrets.sh` em produção. |
+| `SMTP_AUTH` / `SMTP_STARTTLS`          | notification-service   | `false` / `false`         | Docker secret (mesmo mecanismo de `SMTP_HOST` etc.) para `spring.mail.properties.mail.smtp.auth`/`starttls.enable`. Gmail (`smtp.gmail.com:587`) exige ambos `true` — exporte antes de `gen-secrets.sh`. |
+| `APP_MAIL_FROM`                        | notification-service   | `no-reply@users.local`    | Remetente exibido nos e-mails de verificação (`app.mail.from`).                                              |
 
 ## Swagger / OpenAPI
 
@@ -149,6 +167,9 @@ Cloudflare Tunnel (ADR-010, item 1.2 RELATORIOA): o header confiável é a fonte
 | `TRUSTED_CLIENT_IP_HEADER`        | gateway · auth-server | `CF-Connecting-IP`| Header de IP confiável, **fonte primária** do particionamento por IP. A Cloudflare sobrescreve `CF-Connecting-IP`. **Esvaziar/trocar** em deploy não-Cloudflare (cai no XFF via forward-headers). |
 | `LOCKOUT_MAX_ATTEMPTS`            | auth-server           | `5`               | Falhas (conta+IP) antes do lockout.                                                                          |
 | `LOCKOUT_DURATION`                | auth-server           | `15m`             | Janela/TTL do lockout no Redis.                                                                              |
+| `TOKEN_REVOCATION_ENABLED`        | user-service · gateway · auth-server | `true` | Liga/desliga a revogação ativa de token (ADR-017). `false` torna a escrita e a checagem do epoch no-op.       |
+| `TOKEN_REVOCATION_KEY_PREFIX`     | user-service · gateway · auth-server | `revoke:user:` | Prefixo da chave do epoch de revogação no Redis. **Deve casar entre os três serviços** (fonte única compartilhada). |
+| `TOKEN_REVOCATION_TTL`            | user-service          | `75m`       | TTL do epoch de revogação (`security.revocation.ttl`) — só o user-service grava. Deve ser **≥ a vida máxima do refresh token**: depois disso não há token vivo anterior à revogação e a marca se auto-limpa. |
 
 ## Observabilidade
 

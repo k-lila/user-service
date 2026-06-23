@@ -1,0 +1,33 @@
+# Config de TESTE: faz sombra ao application.yml de produção (test-classes vem antes no
+# classpath), eliminando o import do config-server. Reúne só o necessário para os testes de
+# integração exercitarem o Feign user-service→notification-service (ADR-015) com o pipeline
+# real (circuit breaker + fallback), já que em runtime essas propriedades vêm do config-server.
+spring:
+  application:
+    name: user-service
+  cloud:
+    config:
+      enabled: false
+    openfeign:
+      circuitbreaker:
+        enabled: true
+        group:
+          enabled: true
+
+# Janela pequena (2/2/50%) para os testes de circuit breaker abrirem o circuito com poucas
+# chamadas, sem esperar a janela de produção (10/10/50%). Mesmo racional do
+# UserServiceCircuitBreakerIntegrationTest do authorization-server.
+resilience4j:
+  circuitbreaker:
+    configs:
+      notification-service:
+        slidingWindowSize: 2
+        minimumNumberOfCalls: 2
+        failureRateThreshold: 50
+        waitDurationInOpenState: 60s
+        permittedNumberOfCallsInHalfOpenState: 2
+        registerHealthIndicator: true
+  timelimiter:
+    configs:
+      notification-service:
+        timeoutDuration: 2s

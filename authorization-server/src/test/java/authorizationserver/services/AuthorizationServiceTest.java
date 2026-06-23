@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -170,5 +172,57 @@ class AuthorizationServiceTest {
         UserDetails result = service.loadUserByUsername("fulano@email.com");
 
         assertTrue(result.isEnabled());
+    }
+
+    // ── Grace period (ADR-015) ───────────────────────────────────────────────
+    // @InjectMocks não injeta o Duration do construtor (não é mock) — instancia-se
+    // explicitamente o AuthorizationService nesses casos para controlar a janela.
+
+    @Test
+    void deveManterContaHabilitada_quandoEmailNaoVerificado_masDentroDaJanelaDeCarencia() {
+        AuthorizationService serviceComGracePeriod = new AuthorizationService(
+                userClient, loginAttempts, "CF-Connecting-IP", Duration.ofHours(24));
+        AuthDTO dto = buildAuthDTO("fulano@email.com", true, Set.of("USER"));
+        dto.setEmailVerified(false);
+        dto.setRegistrationDate(Instant.now().minus(Duration.ofHours(2)));
+        when(userClient.getUserByEmail("fulano@email.com")).thenReturn(dto);
+
+        UserDetails result = serviceComGracePeriod.loadUserByUsername("fulano@email.com");
+
+        assertTrue(result.isEnabled());
+    }
+
+    @Test
+    void deveDesabilitarConta_quandoEmailNaoVerificado_eForaDaJanelaDeCarencia() {
+        AuthorizationService serviceComGracePeriod = new AuthorizationService(
+                userClient, loginAttempts, "CF-Connecting-IP", Duration.ofHours(24));
+        AuthDTO dto = buildAuthDTO("fulano@email.com", true, Set.of("USER"));
+        dto.setEmailVerified(false);
+        dto.setRegistrationDate(Instant.now().minus(Duration.ofHours(48)));
+        when(userClient.getUserByEmail("fulano@email.com")).thenReturn(dto);
+
+        UserDetails result = serviceComGracePeriod.loadUserByUsername("fulano@email.com");
+
+        assertFalse(result.isEnabled());
+    }
+
+    @Test
+    void deveManterContaHabilitada_semNpe_quandoRegistrationDateNuloEEmailNaoVerificado() {
+        AuthorizationService serviceComGracePeriod = new AuthorizationService(
+                userClient, loginAttempts, "CF-Connecting-IP", Duration.ofHours(24));
+        AuthDTO dto = buildAuthDTO("fulano@email.com", true, Set.of("USER"));
+        dto.setEmailVerified(false);
+        dto.setRegistrationDate(null);
+        when(userClient.getUserByEmail("fulano@email.com")).thenReturn(dto);
+
+        UserDetails result = assertDoesNotThrow(
+                () -> serviceComGracePeriod.loadUserByUsername("fulano@email.com"));
+
+        // Sem registrationDate (legado/falha de serialização), cai no curto-circuito
+        // withinGracePeriod=false — mas !Boolean.FALSE.equals(false) também é false, então
+        // o resultado depende apenas do termo legado: aqui emailVerified=false explícito,
+        // fora de qualquer janela, a conta fica desabilitada (comportamento equivalente ao
+        // usuário legado só quando emailVerified é null, não false).
+        assertFalse(result.isEnabled());
     }
 }

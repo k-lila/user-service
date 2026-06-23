@@ -50,6 +50,10 @@ public class SearchService {
         return UserResponseDTO.toResponseDTO(found);
     }
 
+    // Leitura por e-mail no nível de serviço, mantida como suporte ao cache usersByEmail
+    // (populado/evictado por RegisterService/EmailVerificationService). A rota HTTP pública de
+    // busca por e-mail foi removida — a leitura por e-mail virou ADMIN-only no AdminController
+    // (AdminService.findByEmail, sem cache), parte do fix do G1/IDOR (ADR-016).
     @Cacheable(value = "usersByEmail", key = "#email")
     public UserResponseDTO searchByEmail(String email) {
         Optional<User> user = userRepository.findByEmail(email);

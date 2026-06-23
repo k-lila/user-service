@@ -46,16 +46,19 @@ public class AdminService {
     private final IAuditLogRepository auditLogRepository;
     private final CacheService cacheService;
     private final MongoTemplate mongoTemplate;
+    private final TokenRevocationService tokenRevocationService;
 
     public AdminService(
             IUserRepository userRepository,
             IAuditLogRepository auditLogRepository,
             CacheService cacheService,
-            MongoTemplate mongoTemplate) {
+            MongoTemplate mongoTemplate,
+            TokenRevocationService tokenRevocationService) {
         this.userRepository = userRepository;
         this.auditLogRepository = auditLogRepository;
         this.cacheService = cacheService;
         this.mongoTemplate = mongoTemplate;
+        this.tokenRevocationService = tokenRevocationService;
     }
 
     /**
@@ -94,6 +97,36 @@ public class AdminService {
             page.getTotalElements()
         );
         return page;
+    }
+
+    /**
+     * Leitura administrativa de um titular por ID (ADR-016 — fix do G1/IDOR). Diferente da
+     * leitura pública (removida do {@code UserController}), <b>inclui inativos</b> — coerente com
+     * a listagem admin, que expõe soft-deleted. 404 ({@link DomainEntityNotFound}) só se ausente.
+     * Sem cache: evita colisão de tipo com {@code usersById} (que guarda {@code UserResponseDTO}).
+     */
+    public AdminUserResponseDTO findById(String id) {
+        User user = userRepository.findById(id)
+            .orElseThrow(() -> {
+                LOGGER.warn("| ADMIN | busca por ID | não encontrado | ID: {}", id);
+                return new DomainEntityNotFound(User.class, "ID", id);
+            });
+        LOGGER.info("| ADMIN | busca por ID | encontrado | ID: {}", user.getId());
+        return AdminUserResponseDTO.toResponseDTO(user);
+    }
+
+    /**
+     * Leitura administrativa de um titular por e-mail (ADR-016 — fix do G1/IDOR). <b>Inclui
+     * inativos</b>; 404 ({@link DomainEntityNotFound}) só se ausente. Sem cache (ver {@link #findById}).
+     */
+    public AdminUserResponseDTO findByEmail(String email) {
+        User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> {
+                LOGGER.warn("| ADMIN | busca por email | não encontrado");
+                return new DomainEntityNotFound(User.class, "Email", email);
+            });
+        LOGGER.info("| ADMIN | busca por email | encontrado | ID: {}", user.getId());
+        return AdminUserResponseDTO.toResponseDTO(user);
     }
 
     /** Trilha de auditoria de um titular específico (AC-04, AC-06). */
@@ -160,6 +193,10 @@ public class AdminService {
         cacheService.evictById(userId);
         cacheService.evictByEmail(saved.getEmail());
         cacheService.evictByEmailAuth(saved.getEmail());
+        // Revogação ativa (ADR-017): tokens já emitidos com as roles antigas são rejeitados em
+        // ≈ segundos pelos resource servers, e o refresh é bloqueado no auth-server — força
+        // re-login, onde as roles novas são re-derivadas.
+        tokenRevocationService.revoke(userId);
 
         boolean adminGranted = !hadAdmin && willHaveAdmin;
         boolean adminRevoked = hadAdmin && !willHaveAdmin;

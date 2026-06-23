@@ -25,6 +25,10 @@ services:
     ports:
       - "8090:8090"
 
+  notification-service:
+    ports:
+      - "8095:8095"
+
   # Front-channel OAuth2 direto em dev (browser → localhost:8082). Em prod, exposto
   # pelo ingress/TLS restrito a /oauth2/authorize, /login e /connect/logout.
   authorization-server:
