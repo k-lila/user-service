@@ -15,12 +15,12 @@
 ## Visão Geral do Projeto
 
 Sistema de microsserviços em Java + Spring para gerenciamento de usuários — a **v1 do blueprint
-de um sistema de usuários**, estável e pronta para produção. Autenticação, registro, perfil e
+de um sistema de usuários**, funcional e em evolução ativa. Autenticação, registro, perfil e
 controle de acesso funcionam **ponta a ponta**, e essa base é a **fundação sobre a qual novas
 camadas de domínio são construídas**. A evolução é ativa; o cuidado é que **cada nova
 implementação seja segura e compatível** com o que já existe — invariantes de design, contratos
 entre serviços e controles de segurança preservados, com os controles de qualidade (testes, gate
-de cobertura, observabilidade) sempre saudáveis.
+de cobertura, observabilidade) mantidos ativos.
 
 O front-end React (`login-interface`) usa o padrão **BFF**: o gateway é o cliente OAuth2, o SPA
 usa sessão por cookie e **não** manuseia JWT.
@@ -36,7 +36,7 @@ usa sessão por cookie e **não** manuseia JWT.
 - [docs/SECURITY.md](docs/SECURITY.md) — controles ativos e gaps de segurança conhecidos
 - [docs/ORQUESTRACAO.md](docs/ORQUESTRACAO.md) — sistema de orquestração de agentes
 - [docs/BLUEPRINT.md](docs/BLUEPRINT.md) — catálogo de infraestrutura genérica vs. código específico do domínio usuário
-- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Registrados: **ADR-001** leitura somente de ativos · **ADR-002** padrão BFF · **ADR-003** estado OAuth em PostgreSQL · **ADR-004** resiliência Feign (circuit breaker) · **ADR-005** chave JWK persistente · **ADR-006** canal interno isolado · **ADR-007** sessão Redis + cookies distintos · **ADR-008** autenticação no Redis/Sentinel · **ADR-009** base secrets-native (Docker secrets) · **ADR-010** resolução de IP do cliente confiável (CF-Connecting-IP + forward-headers) · **ADR-011** trilha de auditoria de dado pessoal (LGPD) · **ADR-012** consentimento LGPD no cadastro (aceite versionado) · **ADR-013** remoção das rotas DELETE admin-by-id do UserController + hard-delete self · **ADR-014** AdminController dedicado (listagem c/ inativos, consulta de auditoria LGPD, gestão de roles) · **ADR-015** verificação de e-mail no cadastro + notification-service · **ADR-016** leitura de PII por id/e-mail restrita a ADMIN (fix G1/IDOR) · **ADR-017** revogação ativa de token (epoch de revogação por usuário no Redis)
+- [docs/adr/](docs/adr/) — Architecture Decision Records (template em `docs/adr/TEMPLATE.md`); criados pelo `techlead` em mudanças de contrato/schema. Catálogo completo, em ordem, no próprio diretório.
 
 ---
 
@@ -106,7 +106,7 @@ infra/secrets/gen-secrets.sh   # defaults de DEV; em prod exporte cada segredo c
 docker compose up -d --build
 ```
 
-O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`. Todos os 27 serviços declaram `cpus` / `mem_limit` / `mem_reservation` (chaves de nível de serviço, não `deploy.resources`) — perfis e racional em [docs/CONFIG.md § Limites de recursos](docs/CONFIG.md#limites-de-recursos-cpu--memória).
+O `docker-compose.yml` é **base prod-safe** (publica só `gateway:8081` e `interface`); o `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas para **dev**. Para um deploy prod-like (só a borda exposta), rode `docker compose -f docker-compose.yml up` (ignora o override) com um `.env` setando as URLs públicas — ver `.env.example`. Todos os serviços declaram `cpus` / `mem_limit` / `mem_reservation` (chaves de nível de serviço, não `deploy.resources`) — perfis e racional em [docs/CONFIG.md § Limites de recursos](docs/CONFIG.md#limites-de-recursos-cpu--memória).
 
 **Segredos (base secrets-native, gap 0.3 RELATORIOA):** os segredos saem do `.env` plano para **Docker secrets** em `./secrets/` (gitignorado, gerados por `infra/secrets/gen-secrets.sh`), montados em `/run/secrets/`. Consumo: Spring via `spring.config.import=configtree:/run/secrets/` (nome do arquivo = placeholder); postgres/mongo via `*_FILE`; redis/sentinel via `$(cat ...)`; redis-exporter via `--redis.password-file` (JSON); grafana via `__FILE`; prometheus via `password_file`. O par JWK também é secret (`jwk_private`/`jwk_public`). Mecanismos e tabela em [docs/CONFIG.md § Docker secrets](docs/CONFIG.md#docker-secrets-base-secrets-native).
 
@@ -135,11 +135,11 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 ### Observabilidade
 
 - **Zipkin** — B3; sampling default dev 100% (`MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0` nos `*.yml` do config-server); reduza via env em prod (ex.: `0.1`); storage default `mem` (in-memory, traces somem no restart), parametrizável para Elasticsearch externo via `ZIPKIN_STORAGE_TYPE`/`ZIPKIN_ES_*` (ver `docs/CONFIG.md`)
-- **Prometheus** — `/actuator/prometheus`, scrape 5s; job `microservices` (discovery×2, auth-server, user-service, gateway) + job `config-server` (config-server-1/2:8888, `basic_auth` com credenciais default dev `config-client`/`config-dev-secret` — o `/actuator/prometheus` do config-server fica atrás de HTTP Basic; migrar para `password_file` em prod); 3 exporters de infra (sem `ports:` no base — prod-safe):
+- **Prometheus** — `/actuator/prometheus`, scrape 5s; job `microservices` (discovery×2, auth-server, user-service, notification-service, gateway) + job `config-server` (config-server-1/2:8888, `basic_auth` com credenciais default dev `config-client`/`config-dev-secret` — o `/actuator/prometheus` do config-server fica atrás de HTTP Basic; migrar para `password_file` em prod); 3 exporters de infra (sem `ports:` no base — prod-safe):
   - `mongodb-exporter:9216` (percona/mongodb_exporter:0.43.1) — RS via seed único `mongo-1:27017` + `replicaSet=rs0`; credencial via env (`MONGODB_URI`)
   - `postgres-exporter:9187` (prometheuscommunity/postgres-exporter:v0.16.0) — `DATA_SOURCE_NAME` para `auth-postgres:5432/authdb`
   - `redis-exporter:9121` (oliver006/redis_exporter:v1.62.0) — modo multi-target (`/scrape`): 3 data nodes (`redis-1/2/3:6379`) + 3 sentinels (`redis-sentinel-1/2/3:26379`); relabel `__address__`→`instance` (sem colisão)
-- **Grafana** — 5 dashboards pré-provisionados (`dashboardHTTP.json` — HTTP de borda; `dashboardJVM.json` — heap/non-heap/GC/threads/CPU, template var `application` com os 5 serviços via `label_values(jvm_memory_used_bytes, application)`; `dashboardMongo.json` — estado do RS/conexões/opcounters/memória/rede; `dashboardPostgres.json` — up/conexões/transações/deadlocks/cache hit ratio/tamanho; `dashboardRedis.json` — nós up/memória/hit ratio/comandos/Sentinel); todos referenciam o datasource por nome `"Prometheus"` (consistente com o provider `file` do provisioning)
+- **Grafana** — dashboards pré-provisionados (`dashboardHTTP.json` — HTTP de borda; `dashboardJVM.json` — heap/non-heap/GC/threads/CPU, template var `application` com cada serviço Spring instrumentado via `label_values(jvm_memory_used_bytes, application)`; `dashboardMongo.json` — estado do RS/conexões/opcounters/memória/rede; `dashboardPostgres.json` — up/conexões/transações/deadlocks/cache hit ratio/tamanho; `dashboardRedis.json` — nós up/memória/hit ratio/comandos/Sentinel); todos referenciam o datasource por nome `"Prometheus"` (consistente com o provider `file` do provisioning)
 - **SLOs** — 50ms / 100ms / 200ms / 500ms / 1s / 2s
 
 ---
@@ -251,9 +251,9 @@ Detalhe e racional em [docs/CONVENCOES.md](docs/CONVENCOES.md); decisões formai
 
 ## Qualidade e Verificação
 
-A garantia de que o sistema continua saudável vem de testes + gate de cobertura + CI. Estratégia completa em [docs/TESTES.md](docs/TESTES.md) e [docs/LOGS.md](docs/LOGS.md).
+A garantia de que o sistema permanece íntegro a cada mudança vem de testes + gate de cobertura + CI. Estratégia completa em [docs/TESTES.md](docs/TESTES.md) e [docs/LOGS.md](docs/LOGS.md).
 
-- **Testes (466):** 227 unitários (Mockito/reativos, incl. `AdminServiceTest` com `findById`/`findByEmail`, `EmailVerificationService`/`NotificationDispatchService`/`ResendRateLimitService` e `EmailService`/`InternalTokenFilter` do notification-service; revogação ativa ADR-017 — `TokenRevocationServiceTest`/`RevocationTokenValidatorTest` no user-service, `RevocationRefreshGuardTest`+`TokenCustomizerConfigTest` no auth-server, `RevocationWebFilterTest` no gateway) + 105 controller (`@WebMvcTest` — 51 `UserControllerTest` + 5 `InternalUserControllerTest` + 44 `AdminControllerTest` + 5 `NotificationControllerTest`) + 94 integração (user-service: Mongo+Redis, incl. `AdminFlowIntegrationTest` — c/ epoch de revogação no Redis real — e `EmailVerificationFlowIntegrationTest`; auth-server: Postgres+Redis+WireMock, fluxo OAuth2 + grace period + bloqueio de refresh revogado; gateway: Redis+WireMock via `WebTestClient`, roteamento/rate-limit/CSRF + BFF ponta a ponta + `GatewayAdminRouteIntegrationTest`; config-server: `MockMvc` p/ HTTP Basic) + 40 front-end (Vitest+RTL+MSW, threshold 80%). notification-service é stateless — sem testes de integração próprios.
+- **Testes:** suíte multi-camada — unitários (Mockito/reativos), de controller (`@WebMvcTest`), de integração (Testcontainers: Mongo/Redis/Postgres + WireMock) e de front-end (Vitest+RTL+MSW). Contagem por módulo e inventário de classes em [docs/TESTES.md](docs/TESTES.md). notification-service é stateless — sem testes de integração próprios.
 - **Gate de cobertura JaCoCo:** roda na fase `verify` (regra `check`, piso **70%** LINE/BUNDLE nos 4 módulos de domínio — user-service/auth-server/gateway/notification-service; config-server/discovery-server são report-only). Classes novas/alteradas: alvo **80%**. Ver [docs/TESTES.md § Cobertura (JaCoCo)](docs/TESTES.md).
 - **CI** (`.github/workflows/ci.yml`): a cada push/PR roda `mvn verify` por módulo (matrix `backend`, que dispara o gate) + `npm run coverage` no front (job `frontend`) + validação da topologia base (`compose-validate`). A `main` exige todos os checks verdes para merge (branch protection) — detalhes na seção _Integração Contínua (CI)_ do [README.md](README.md).
 - **Logs:** SLF4J parametrizado (`{}`), formato em pipe (`| [VERBO] | ação | campo: valor`), níveis INFO/WARN/ERROR/DEBUG convencionados, `traceId`/`spanId` via B3, PII mascarada (`LogUtils.maskEmail()`).
@@ -269,7 +269,7 @@ Controles ativos e dívida aceita detalhados em [docs/SECURITY.md](docs/SECURITY
 ## Orquestração de Agentes
 
 Mudanças de domínio (feature/bugfix/hotfix/novo serviço/atualização de dependências) passam por
-um time de **7 subagentes** (`.claude/agents/`) conduzido pelo thread principal — protocolo,
+um time de **subagentes** (`.claude/agents/`) conduzido pelo thread principal — protocolo,
 papéis e regras invioláveis em [docs/ORQUESTRACAO.md](docs/ORQUESTRACAO.md). Resumo do pipeline:
 `product-manager → senso-critico → techlead → qa-tester → [security-reviewer] → senso-critico`
 (o `security-reviewer` é condicional à superfície de segurança; o `dependency-steward`

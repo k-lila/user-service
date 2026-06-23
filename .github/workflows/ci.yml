@@ -29,6 +29,7 @@ jobs:
           - authorization-server
           - user-service
           - gateway
+          - notification-service
     steps:
       - uses: actions/checkout@v4
 
