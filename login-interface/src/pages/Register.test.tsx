@@ -7,6 +7,7 @@ import { server } from '../test/server'
 import { makeQueryClient } from '../test/utils'
 import { Register } from './Register'
 
+// ADR-019: destino de fallback é / (não /login — pertence ao IdP).
 function renderRegisterRoute() {
   return render(
     <QueryClientProvider client={makeQueryClient()}>
@@ -14,7 +15,7 @@ function renderRegisterRoute() {
         <Routes>
           <Route path="/register" element={<Register />} />
           <Route path="/dashboard" element={<div>DASHBOARD</div>} />
-          <Route path="/login" element={<div>LOGIN</div>} />
+          <Route path="/" element={<div>LOGIN</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>

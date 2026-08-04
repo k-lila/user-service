@@ -105,21 +105,148 @@ docker compose -f docker-compose.yml up -d --build   # ignora o override
 # URLs públicas via .env — ver o bloco comentado no .env.example
 ```
 
-### 2b. Deploy na própria máquina via Cloudflare Tunnel
+### 2b. Deploy na própria máquina via Cloudflare Tunnel (domínio fixo)
+
+**Named tunnel + domínio próprio.** O túnel entrega em `interface:80` (o nginx do SPA), que faz
+proxy same-origin ao gateway — browser e API na **mesma origem**, e nem o gateway nem o
+authorization-server ficam alcançáveis de fora. `${PUBLIC_ORIGIN}` designa a origem pública
+(ex.: `https://app.exemplo.com`) e `${PUBLIC_HOST}` o hostname sem esquema; os valores reais vivem
+só no `.env` (gitignorado).
+
+#### Pré-requisitos na Cloudflare (uma vez, fora do repositório)
+
+O túnel é **locally-managed**: criado pela CLI, não pelo painel. O Zero Trust — onde ficariam o
+token e os *public hostnames* — exige cadastro de cartão de crédito mesmo no plano free, então o
+roteamento da borda vive em [`infra/cloudflared/config.yml`](infra/cloudflared/config.yml),
+versionado.
+
+**1. Delegar o domínio à Cloudflare** (pode levar horas — comece por aqui). No painel do
+registrador, troque os servidores DNS pelos dois nameservers que a Cloudflare atribuiu e **não
+publique registros DS** (DNSSEC desligado; se a zona ficar assinada pelo registrador enquanto as
+respostas vêm da Cloudflare, o domínio inteiro dá `SERVFAIL`). Verifique antes de seguir:
 
 ```bash
-# 1. Boot com placeholder (satisfaz o fail-fast das envs ${TUNNEL_ORIGIN:?})
-export TUNNEL_ORIGIN=https://placeholder.trycloudflare.com
-docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
-
-# 2. Ler a URL pública REAL nos logs do cloudflared
-docker compose -f docker-compose.yml -f docker-compose.deploy.yml logs cloudflared
-
-# 3. Re-subir SÓ os serviços de app com --no-deps (não recria o cloudflared → URL estável)
-export TUNNEL_ORIGIN=https://<sub>.trycloudflare.com
-docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --no-deps \
-  gateway authorization-server user-service
+dig NS <dominio> @1.1.1.1 +short   # deve retornar os nameservers da Cloudflare
+dig DS <dominio> @1.1.1.1 +short   # deve sair VAZIO (DNSSEC desligado)
 ```
+
+> **Use um resolver público (`@1.1.1.1`), não o do sistema:** o resolver local guarda a delegação
+> antiga por até uma hora e devolve os nameservers anteriores mesmo com a troca já publicada —
+> `sudo resolvectl flush-caches` resolve. E **não** consulte o servidor do TLD (`@a.dns.br`) com
+> `+short`: ele responde com um *referral*, que vai na seção AUTHORITY, e `+short` imprime só a
+> ANSWER — a saída sai vazia mesmo estando tudo certo. Para checar direto na fonte, rode
+> `dig NS <dominio> @a.dns.br` sem `+short` e leia a AUTHORITY SECTION.
+
+**2. Criar o túnel pela CLI.** Rode o container **como root** (`--user 0:0`) e devolva a posse dos
+arquivos no fim. Ver a armadilha de permissão logo abaixo:
+
+```bash
+mkdir -p ~/.cloudflared
+CFD='docker run --rm --user 0:0 -e HOME=/home/nonroot -v '"$HOME"'/.cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:latest'
+
+docker run --rm -it --user 0:0 -e HOME=/home/nonroot \
+  -v "$HOME/.cloudflared:/home/nonroot/.cloudflared" \
+  cloudflare/cloudflared:latest tunnel login       # autorize o domínio no browser
+
+eval $CFD tunnel create user-service               # ANOTE o UUID impresso
+eval $CFD tunnel route dns user-service <PUBLIC_HOST>
+
+sudo chown -R "$(id -u):$(id -g)" ~/.cloudflared   # gen-secrets.sh precisa ler o JSON
+```
+
+O `create` grava `~/.cloudflared/<UUID>.json` (o *credentials-file*) e o `route dns` cria o
+`CNAME` proxied de `${PUBLIC_HOST}` para o túnel.
+
+> **Por que root, e por que `--user "$(id -u):$(id -g)"` NÃO funciona:** na imagem distroless,
+> `/home/nonroot` é `drwx------` do uid **65532**. Rodando com qualquer outro uid não-root o
+> processo não consegue sequer atravessar esse diretório, e o `login` morre com
+> `open /home/nonroot/.cloudflared: permission denied` — **independentemente** de quem seja o dono
+> do diretório montado do host, e sem `chown` que resolva. Pior: `tunnel list` engole esse erro e
+> reporta apenas "cert.pem não encontrado", o que despista o diagnóstico. Rodar como root
+> atravessa e escreve; o `chown` final devolve os arquivos ao seu usuário. (Se preferir não usar
+> root: omita `--user`, deixe o uid padrão 65532 da imagem e faça
+> `sudo chown -R 65532:65532 ~/.cloudflared` antes — mas você vai precisar do `chown` de volta
+> depois, de qualquer jeito.)
+
+**3. Alimentar o `.env` e os segredos** com o que o passo 2 produziu: `TUNNEL_ID=<UUID>` no `.env`
+e o JSON no Docker secret (comando completo no passo 2 da subida, abaixo). **Assegure-se de que
+`PUBLIC_HOST` seja idêntico ao hostname de `PUBLIC_ORIGIN` sem o `https://`** — o serviço
+`assert-env` verifica isso automaticamente e aborta a subida se divergirem (mensagem clara),
+mas é melhor corrigir antes do que depender do fail-fast em `docker compose up`.
+
+> **Swagger:** o controle previsto era o **Cloudflare Access** (e-mail único + OTP) sobre
+> `${PUBLIC_HOST}/swagger-ui/*` e `/v3/api-docs/*` — mas o Access faz parte do Zero Trust e está
+> bloqueado pela mesma exigência de cartão. Desde [ADR-020](docs/adr/ADR-020-swagger-atras-da-sessao.md)
+> isso deixou de importar: as duas rotas **exigem a sessão OAuth2 do próprio BFF** (anônimo leva 302
+> para o login em `/swagger-ui/**` e 401 em `/v3/api-docs/**`). Se o Access for habilitado um dia,
+> **não** o aplique em `/v1/**` — são XHR do SPA e quebrariam.
+
+#### Subida (a ordem é obrigatória)
+
+Regenerar segredos → `down -v` → `up`. Subir antes de regenerar cria os volumes com as senhas
+antigas (`POSTGRES_PASSWORD`/`MONGO_PASSWORD` só são aplicadas na **primeira** inicialização do
+volume) e obriga a repetir o ciclo.
+
+```bash
+# 1. Zerar os volumes. Necessário porque os redirect URIs do gateway-client são semeados no
+#    Postgres e o seed é IDEMPOTENTE, sem reconciliação — trocar de domínio não atualiza nada.
+docker compose down -v
+
+# 2. Regenerar TODOS os segredos com valores fortes (os defaults do gen-secrets.sh são públicos)
+CONFIG_SERVER_PASSWORD=$(openssl rand -hex 32) \
+REDIS_PASSWORD=$(openssl rand -hex 32) \
+OAUTH_CLIENT_SECRET=$(openssl rand -hex 32) \
+INTERNAL_API_TOKEN=$(openssl rand -hex 32) \
+POSTGRES_PASSWORD=$(openssl rand -hex 32) \
+MONGO_PASSWORD=$(openssl rand -hex 32) \
+GRAFANA_ADMIN_PASSWORD=$(openssl rand -hex 32) \
+CLOUDFLARE_TUNNEL_CREDENTIALS=~/.cloudflared/<UUID>.json \
+  infra/secrets/gen-secrets.sh
+
+# 3. Alinhar MONGO_PASSWORD no .env ao secret gerado — o mongodb-exporter lê do env (resíduo 0.3).
+#    Se divergir, o exporter fica fora do ar em silêncio. Setar também PUBLIC_ORIGIN e TUNNEL_ID.
+
+# 4. Subir — up ÚNICO (o roteiro de 3 passos com placeholder existia só por causa da URL efêmera)
+export PUBLIC_ORIGIN=https://app.exemplo.com   # ou defina no .env
+export TUNNEL_ID=<UUID do passo 2 dos pré-requisitos>   # ou defina no .env
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
+```
+
+> O `gen-secrets.sh` regenera o par JWK a cada execução — a chave de dev, que assinou tokens
+> locais, é substituída automaticamente no passo 2.
+
+#### Verificação
+
+```bash
+curl -I ${PUBLIC_ORIGIN}                                    # CSP, HSTS, Referrer-Policy presentes
+curl ${PUBLIC_ORIGIN}/internal/users/email/x@y.z            # 404/403 — canal interno inalcançável
+docker compose ps                                           # todos healthy
+docker compose logs cloudflared | grep -i "Registered tunnel connection"   # 4 conexões
+```
+
+> `${PUBLIC_ORIGIN}/swagger-ui/*` exige sessão (ADR-020): anônimo recebe 302 para o login, e
+> `/v3/api-docs/*` recebe 401. Faça um `curl` anônimo nos dois para confirmar o gate — se algum
+> responder 200 sem cookie, o `permitAll()` do gateway regrediu.
+
+E o fluxo completo no browser: registro → login → `/dashboard` → logout → retorno a
+`${PUBLIC_ORIGIN}/`. Checklist integral em [docs/DOMINIO.md](docs/DOMINIO.md) § 4.
+
+**Observabilidade neste deploy.** Grafana, Prometheus e Zipkin **não são públicos** e não têm regra
+de ingress no túnel — `${PUBLIC_ORIGIN}/grafana` cai no `try_files` do SPA, não no Grafana. O
+Grafana fica em `http://localhost:3000` **apenas nesta máquina** (publicado em `127.0.0.1` pelo
+`docker-compose.deploy.yml`); Prometheus e Zipkin não são publicados de forma alguma no deploy —
+alcance-os pela rede interna Docker se precisar. O motivo de não expor: o Grafana tem só
+usuário/senha, sem lockout, sem rate limit e sem MFA, ao contrário do resto do sistema. Para
+consultar de outro dispositivo sem abrir superfície pública, use uma malha privada (Tailscale/
+WireGuard) em vez de rotear o túnel até ele — racional completo em `.claude/memory/decisions.md`.
+
+> ⚠️ **O `down -v` do passo 1 não se repete depois de haver dados reais.** A partir daí, trocar de
+> domínio exige `UPDATE` direcionado no Postgres ou um seed reconciliador.
+>
+> ⚠️ **Não abra este deploy para cadastro de terceiros.** Sem SMTP real o e-mail de verificação não
+> sai e a conta fica inacessível após as 24h de grace period ([ADR-015](docs/adr/ADR-015-verificacao-email-cadastro.md));
+> sem as páginas `/terms` e `/privacy`, o consentimento do [ADR-012](docs/adr/ADR-012-consentimento-lgpd-cadastro.md)
+> é colhido sobre texto ilegível. O ambiente é para teste pelo próprio operador.
 
 ---
 
@@ -131,9 +258,16 @@ docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --no-dep
 | Swagger UI    | http://localhost:8081/swagger-ui/index.html                                      |
 | Front-end     | http://localhost:5173                                                            |
 | Eureka        | http://localhost:9091 · http://localhost:9092                                    |
-| Zipkin        | http://localhost:9411                                                            |
-| Prometheus    | http://localhost:9090                                                            |
-| Grafana       | http://localhost:3000 (user do `.env`, senha do secret `GRAFANA_ADMIN_PASSWORD`) |
+| Zipkin        | http://localhost:9411 🔒                                                          |
+| Prometheus    | http://localhost:9090 🔒                                                          |
+| Grafana       | http://localhost:3000 🔒 (user do `.env`, senha do secret `GRAFANA_ADMIN_PASSWORD`) |
+
+> 🔒 **Só a partir desta máquina.** As três portas de observabilidade são publicadas presas ao
+> loopback (`127.0.0.1:PORTA:PORTA` no `docker-compose.override.yml`), então `localhost` funciona
+> aqui e conexões de qualquer outro host da rede são recusadas. Nenhuma delas tem lockout, rate
+> limit ou MFA — Prometheus e Zipkin não têm autenticação nenhuma —, e Prometheus/Zipkin revelam
+> métricas, traces, hostnames internos e topologia. Trocar por `- "3000:3000"` (sem o IP) republica
+> em `0.0.0.0` e devolve o acesso à LAN inteira.
 
 ---
 

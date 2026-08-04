@@ -35,17 +35,43 @@ services:
     ports:
       - "8082:8082"
 
+  # Observabilidade: publicada SÓ NO LOOPBACK, também em dev.
+  #
+  # Sem o `127.0.0.1:` explícito, o Docker publica em 0.0.0.0 — era o estado anterior, e
+  # significava que qualquer dispositivo da rede local alcançava Grafana, Prometheus e Zipkin.
+  # Nenhum dos três tem lockout, rate limit ou MFA (Grafana só tem usuário/senha; Prometheus e
+  # Zipkin não têm autenticação nenhuma), e os dois últimos expõem métricas e traces com URLs,
+  # hostnames internos e topologia do sistema. Presos ao loopback, respondem a `localhost` na
+  # própria máquina e recusam conexão de qualquer outro host.
+  #
+  # ASSIMETRIA DELIBERADA: só a observabilidade vai para loopback. gateway, interface,
+  # authorization-server, user-service, notification-service, config-lb e os discovery-servers
+  # continuam em 0.0.0.0 porque são exatamente as portas que um teste manual a partir de outro
+  # dispositivo (celular no SPA, cliente HTTP externo) pode legitimamente querer alcançar em dev.
   zipkin:
     ports:
-      - "9411:9411"
+      - "127.0.0.1:9411:9411"
 
   prometheus:
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
 
   grafana:
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
-  # interface: não republicado aqui — a porta do host vem de WEB_HOST_PORT no base
-  # (default 5173 em dev). Listas de ports: são concatenadas no merge, não substituídas.
+  # gateway e interface: portas movidas da base para cá (G10 / ADR-019).
+  # Na base prod-safe nenhuma das duas é publicada no host — só o cloudflared
+  # alcança a rede interna. Listas de ports: são concatenadas no merge, então
+  # a remoção da base (e não só a adição aqui) é obrigatória para não duplicar.
+
+  gateway:
+    ports:
+      - "8081:8081"
+
+  interface:
+    # WEB_HOST_PORT: porta do host da borda pública (mapeia para :80 do container).
+    # Dev usa o default 5173; sob Cloudflare Tunnel a porta do host é irrelevante
+    # (o cloudflared alcança interface:80 pela rede interna Docker).
+    ports:
+      - "${WEB_HOST_PORT:-5173}:80"

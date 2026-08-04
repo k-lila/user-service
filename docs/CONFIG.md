@@ -14,6 +14,7 @@
 - [Verificação de e-mail (ADR-015)](#verificação-de-e-mail-adr-015)
 - [Swagger / OpenAPI](#swagger--openapi)
 - [CORS](#cors)
+- [Deploy público (Cloudflare Tunnel)](#deploy-público-cloudflare-tunnel--docker-composedeployyml)
 - [Borda e IP do cliente (lockout / rate limit)](#borda-e-ip-do-cliente-lockout--rate-limit)
 - [Observabilidade](#observabilidade)
 - [Front-end](#front-end)
@@ -52,6 +53,9 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | `MONGODB_URI` | user-service | `configtree:/run/secrets/` |
 | `jwk_private` / `jwk_public` | authorization-server | `JWK_PRIVATE_KEY=file:/run/secrets/jwk_private` (gerado por `infra/jwk/gen-keys.sh`) |
 | `GRAFANA_ADMIN_PASSWORD` | grafana | `GF_SECURITY_ADMIN_PASSWORD__FILE` |
+| `CLOUDFLARE_TUNNEL_CREDENTIALS` | cloudflared (só no overlay `docker-compose.deploy.yml`) | `credentials-file:` dentro de `infra/cloudflared/config.yml` |
+
+> **`CLOUDFLARE_TUNNEL_CREDENTIALS` é o único secret sem default de dev, e o único que é *copiado* em vez de gerado.** É o JSON emitido por `cloudflared tunnel create` (contém `AccountTag`, `TunnelID` e `TunnelSecret`), que fica em `~/.cloudflared/<UUID>.json`; aponte a variável para esse caminho e o `gen-secrets.sh` copia o arquivo. Se a variável não vier do ambiente, o script grava um arquivo **vazio** e o `cloudflared` recusa a subida — comportamento desejado (melhor que um túnel que não roteia nada); se vier apontando para um caminho inexistente, o script **falha na hora**. A base e o dev ignoram esse arquivo. O segredo é referenciado de dentro do `config.yml` (e não por flag) porque a imagem do `cloudflared` é distroless — sem shell, `$(cat ...)` não funcionaria — e o arquivo o mantém fora da listagem de env do container.
 
 > **No `configtree`, o nome do arquivo é o *placeholder* da property** (ex.: `OAUTH_CLIENT_SECRET` → `${OAUTH_CLIENT_SECRET}`). Arquivos gerados com `printf '%s'` (sem newline final) e `chmod 644` (consumidores rodam não-root; em Compose não-Swarm o modo do host é preservado) — ver ADR-009.
 >
@@ -90,7 +94,7 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | Variável                   | Serviço(s)            | Default dev                                          | Observação                                                                                  |
 | -------------------------- | --------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `AUTH_ISSUER_URI`          | user-service · gateway | `http://localhost:8082`                              | `issuer-uri` para validação do JWT (resource server). Hostname **interno** (back-channel).  |
-| `AUTH_ISSUER`              | authorization-server  | `http://localhost:8082`                              | Issuer que o próprio auth-server anuncia.                                                    |
+| `AUTH_ISSUER`              | authorization-server  | `http://localhost:8082`                              | Issuer que o próprio auth-server anuncia. Externalizável, mas o valor **interno** (`http://authorization-server:8082` no compose) é o correto mesmo sob domínio público: tem de casar com o `AUTH_ISSUER_URI` dos resource servers, que validam o JWT pela rede Docker. |
 | `JWK_PRIVATE_KEY`          | authorization-server  | `classpath:keys/app.key`                             | Chave privada RSA (PEM). A chave **não é mais versionada** (gap 0.1, [ADR-005](adr/ADR-005-chave-jwk-persistente.md)): gerada fora do repo por `infra/jwk/gen-keys.sh`. No compose secrets-native = `file:/run/secrets/jwk_private` (secret `jwk_private`). Em dev manual, `gen-keys.sh` escreve no classpath. |
 | `JWK_PUBLIC_KEY`           | authorization-server  | `classpath:keys/app.pub`                             | Chave pública RSA (PEM). Idem — secret `jwk_public` no compose (`file:/run/secrets/jwk_public`). |
 | `JWK_KEY_ID`               | authorization-server  | `user-service-key`                                   | `kid` estável da chave de assinatura.                                                        |
@@ -140,11 +144,12 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | `AUTH_URL`                   | gateway · user-service | `http://localhost:8082/oauth2/authorize`                | Authorize URL exibida no Swagger (`OpenAPIConfig`).   |
 | `AUTH_TOKEN`                 | gateway · user-service | `http://localhost:8082/oauth2/token`                    | Token URL exibida no Swagger (`OpenAPIConfig`).       |
 | `API_BASE_URL`               | user-service           | `http://localhost:8081`                                 | Base URL anunciada no OpenAPI do user-service.        |
-| `OAUTH2SWAGGER_REDIRECT_URL` | gateway                | `http://localhost:8081/swagger-ui/oauth2-redirect.html` | `oauth2-redirect-url` do Swagger UI (`gateway.yml`).³ |
 
-> ³ Nome consumido pelo `gateway.yml` é `OAUTH2SWAGGER_REDIRECT_URL`. As chaves `OAUTH_GATEWAY_CLIENT` e `OAUTH_SWAGGER_REDIRECT_URL` que aparecem no `docker-compose.yml` **não são lidas** por nenhum serviço.
+> ³ **`OAUTH2SWAGGER_REDIRECT_URL` foi REMOVIDA** (2026-08-04, [ADR-020](adr/ADR-020-swagger-atras-da-sessao.md)): alimentava `springdoc.swagger-ui.oauth2-redirect-url`, que saiu junto com todo o bloco `springdoc.swagger-ui.oauth` do `gateway.yml` — o `oauth.client-secret` dali era materializado pelo springdoc como um `ui.initOAuth({...})` literal dentro de `/swagger-ui/swagger-initializer.js` e **publicava o client secret** para qualquer visitante. Nenhum serviço lê mais essa env; ela saiu do `docker-compose.yml` e do `docker-compose.deploy.yml`. Junta-se a `OAUTH_GATEWAY_CLIENT` e `OAUTH_SWAGGER_REDIRECT_URL`, removidas antes pelo mesmo critério (env que serviço nenhum lê). **Não reintroduzir.**
 >
-> **Deploy via Cloudflare Tunnel (`docker-compose.deploy.yml`):** o overlay define `API_BASE_URL` **e** `AUTH_URL` **no user-service** (`${TUNNEL_ORIGIN}` / `${TUNNEL_ORIGIN}/oauth2/authorize`) — sem isso o `servers[]` do doc OpenAPI cai no default `localhost:8081` e o "Try it out" do Swagger dispara para `localhost` (mixed content na página HTTPS do túnel). `AUTH_TOKEN` permanece no default (`localhost:8082`) → o botão **Authorize** redireciona mas o OAuth2 não fecha no quick tunnel (URL efêmera). Todas as envs de borda derivam de `${TUNNEL_ORIGIN}`.
+> **Deploy via Cloudflare Tunnel (`docker-compose.deploy.yml`):** todas as envs de borda derivam de `${PUBLIC_ORIGIN}`. `AUTH_URL`/`AUTH_TOKEN` **permanecem** e alimentam só o securityScheme do doc OpenAPI (`OpenAPIConfig`) — quem os usa é o browser na página do Swagger, não o back-channel do BFF. O overlay os define nos **dois** serviços que os leem (gateway **e** user-service), mais `API_BASE_URL` no user-service (sem ele o `servers[]` cai em `localhost:8081` e o "Try it out" dispara mixed content a partir da página HTTPS). O botão **Authorize** deixou de completar o fluxo (ADR-020) — sob o BFF o "Try it out" autentica pelo cookie `SESSION` e o `tokenRelay()` da rota, sem token no browser.
+>
+> Para o Swagger existir na origem pública, o `login-interface/nginx.conf` precisa dos `location /swagger-ui` e `/v3/api-docs` (sob hostname único o gateway não é alcançável direto). Ambos ficam atrás do **Cloudflare Access**.
 
 ## CORS
 
@@ -154,6 +159,25 @@ CORS na borda + configurável por ambiente. Cada serviço lê a property `cors.a
 | --------------------------- | -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `CORS_ALLOWED_ORIGINS`      | gateway              | `http://localhost:5173`  | Origens (CSV) do **SPA** permitidas pela borda. Em prod, a origem pública real do SPA. Logada no startup do gateway. |
 | `CORS_ALLOWED_ORIGINS_AUTH` | authorization-server | `http://localhost:8081`  | Origem (CSV) do **Swagger-UI** permitida no auth-server — o Swagger é cliente OAuth2 no browser e faz fetch cross-origin a `/oauth2/token`. Em prod, a origem pública do Swagger/borda. Compose usa `${VAR:-default}`. |
+
+## Deploy público (Cloudflare Tunnel — `docker-compose.deploy.yml`)
+
+O overlay de deploy é dirigido por **uma única variável**: a origem pública. Sob a topologia de
+**hostname único** (o túnel entrega em `interface:80`, o nginx do SPA, que faz proxy same-origin ao
+gateway), todas as URLs de front-channel derivam dela. Roteiro de subida no [README § 2b](../README.md).
+
+| Variável        | Onde é lida                        | Default | Observação                                                                                       |
+| --------------- | ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `PUBLIC_ORIGIN` | `docker-compose.deploy.yml` (interpolação) | — (fail-fast) | Esquema + host, **sem barra final** (ex.: `https://app.exemplo.com`). Deriva `CORS_ALLOWED_ORIGINS`, `CORS_ALLOWED_ORIGINS_AUTH`, `OAUTH_AUTHORIZATION_URI`, `OAUTH_REDIRECT_URI`, `OAUTH_END_SESSION_URI`, `POST_LOGOUT_REDIRECT_URI`, `API_BASE_URL`, `AUTH_URL`, `AUTH_TOKEN`, `OAUTH_CLIENT_REDIRECT_URIS` e `OAUTH_CLIENT_POST_LOGOUT_URIS`. Sem ela o overlay não sobe (`${PUBLIC_ORIGIN:?}`). |
+| `PUBLIC_HOST`   | ninguém (documental)               | —       | O mesmo valor sem o esquema. Existe para o `cloudflared tunnel route dns` (o `CNAME` do hostname público). Mantenha em sincronia com `PUBLIC_ORIGIN`. |
+| `TUNNEL_ID`     | `docker-compose.deploy.yml` (interpolação) | — (fail-fast) | UUID impresso por `cloudflared tunnel create`, passado como argumento do `run`. Mora no `.env` — e não no `infra/cloudflared/config.yml` — porque o compose interpola `${VAR}` no `command` mas **não** dentro de um YAML montado, e o repositório não carrega identificadores do deploy real. Sem ela o overlay não sobe (`${TUNNEL_ID:?}`). |
+
+> **`AUTH_ISSUER` e `AUTH_ISSUER_URI` continuam internos** — o JWT é validado pela rede Docker, não
+> pela origem pública. Só `OAUTH_AUTHORIZATION_URI`, `OAUTH_END_SESSION_URI` e as URLs do Swagger
+> são front-channel (navegadas pelo browser) e por isso apontam ao domínio.
+>
+> **Trocar `PUBLIC_ORIGIN` não reconcilia o `gateway-client`:** os redirect URIs são semeados no
+> Postgres e o seed é idempotente (`findByClientId` → `save` só se ausente). Ver [SECURITY.md](SECURITY.md).
 
 ## Borda e IP do cliente (lockout / rate limit)
 
@@ -165,6 +189,7 @@ Cloudflare Tunnel (ADR-010, item 1.2 RELATORIOA): o header confiável é a fonte
 | --------------------------------- | --------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------- |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | gateway · auth-server | `framework`       | Faz o `remoteAddress`/`getRemoteAddr()` refletir o `X-Forwarded-For` sanitizado pela borda (fallback do IP). Default `framework` na **base** do config-server (antes só no overlay de deploy); seguro sem proxy. |
 | `TRUSTED_CLIENT_IP_HEADER`        | gateway · auth-server | `CF-Connecting-IP`| Header de IP confiável, **fonte primária** do particionamento por IP. A Cloudflare sobrescreve `CF-Connecting-IP`. **Esvaziar/trocar** em deploy não-Cloudflare (cai no XFF via forward-headers). |
+| `GATEWAY_TRUSTED_PROXIES`         | gateway               | `10\..*\|172\.(1[6-9]\|2[0-9]\|3[01])\..*\|192\.168\..*` | Regex (avaliado com `Pattern.matches`, ancorado) contra o IP do peer imediato. Registra `XForwardedHeadersFilter` e `ForwardedHeadersFilter` no SCG 5.0.0 (sem esta propriedade, nenhum dos dois filtros é ativado — regressão SCG 5.0.0, ADR-019). Default: RFC1918 amplo (machine-agnostic). **Seguro apenas com G10 fechado** (portas do gateway/interface removidas da base do compose). |
 | `LOCKOUT_MAX_ATTEMPTS`            | auth-server           | `5`               | Falhas (conta+IP) antes do lockout.                                                                          |
 | `LOCKOUT_DURATION`                | auth-server           | `15m`             | Janela/TTL do lockout no Redis.                                                                              |
 | `TOKEN_REVOCATION_ENABLED`        | user-service · gateway · auth-server | `true` | Liga/desliga a revogação ativa de token (ADR-017). `false` torna a escrita e a checagem do epoch no-op.       |
@@ -211,7 +236,7 @@ Consumidas pelos próprios containers de banco na inicialização, não pelos se
 | `POSTGRES_PASSWORD`           | `auth-postgres`        | `auth_1234321`  |                                                    |
 | `MONGO_INITDB_ROOT_USERNAME`  | `mongo-1`              | `user_service`  | Só no nó primário; secundários recebem por replicação. |
 | `MONGO_INITDB_ROOT_PASSWORD`  | `mongo-1`              | `user_1234321`  |                                                    |
-| `WEB_HOST_PORT`               | `interface`            | `5173`          | Porta do **host** da borda pública (mapeia para `:80` do container). Dev usa `5173`; prod tipicamente `80`. |
+| `WEB_HOST_PORT`               | `interface`            | `5173`          | Porta do **host** da borda pública (mapeia para `:80` do container). Dev usa `5173`; prod tipicamente `80`. Declarada no `docker-compose.override.yml` — na base prod-safe a interface **não é publicada** no host (G10/ADR-019). |
 
 ## Limites de recursos (CPU / memória)
 

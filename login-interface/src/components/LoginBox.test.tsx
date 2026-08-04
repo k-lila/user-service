@@ -7,11 +7,12 @@ import { login } from '../api/authClient'
 
 vi.mock('../api/authClient', () => ({ login: vi.fn() }))
 
+// ADR-019: LoginBox mora em / (não /login — o path /login pertence ao IdP).
 function renderLoginBox() {
   return render(
-    <MemoryRouter initialEntries={['/login']}>
+    <MemoryRouter initialEntries={['/']}>
       <Routes>
-        <Route path="/login" element={<LoginBox />} />
+        <Route path="/" element={<LoginBox />} />
         <Route path="/register" element={<div>REGISTER PAGE</div>} />
       </Routes>
     </MemoryRouter>

@@ -4,6 +4,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,37 @@ class RateLimitIntegrationTest extends AbstractGatewayIntegrationTest {
 
         assertThat(rejeitadas)
                 .as("verify-email deve cair no mesmo tier LOW de /v1/users/register")
+                .isGreaterThan(0);
+    }
+
+    /**
+     * AC-09 (ADR-019): rota auth-login (/login) usa redisRateLimiterMed (5 rps, burst 10)
+     * com ipKeyResolver. Uma rajada concentrada do mesmo IP deve exceder o burst e receber 429.
+     *
+     * Nota de implementação: o teste usa GET /login por simplicidade — GET é o método natural
+     * do browser ao carregar o formulário de login e não requer payload de formulário. GET e
+     * POST da rota auth-login compartilham o mesmo balde Redis, portanto o teste verifica que
+     * o rate limiter MED está corretamente configurado para o path. POST /login foi isentado
+     * do CSRF do gateway no BUG-001 (ADR-019) e também aciona o mesmo balde.
+     */
+    @Test
+    void deveRetornar429_quandoEstourarLimiteMedDeAuthLogin() {
+        downstream.stubFor(get(urlPathEqualTo("/login"))
+                .willReturn(aResponse().withStatus(200).withBody("<form></form>")));
+
+        int rejeitadas = 0;
+        for (int i = 0; i < 30; i++) {
+            int status = webTestClient.get().uri("/login")
+                    .header("CF-Connecting-IP", "203.0.113.52")
+                    .exchange()
+                    .returnResult(Void.class).getStatus().value();
+            if (status == 429) {
+                rejeitadas++;
+            }
+        }
+
+        assertThat(rejeitadas)
+                .as("rajada de 30 req GET /login do mesmo IP deve exceder o burst (10) do tier MED")
                 .isGreaterThan(0);
     }
 }

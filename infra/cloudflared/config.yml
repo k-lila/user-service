@@ -1,0 +1,27 @@
+# Ingress rules do named tunnel — VERSIONADAS.
+#
+# Fecha a dívida consciente "ingress rules do túnel em estado não-versionado" registrada em
+# docs/SECURITY.md (o remédio previsto lá era exatamente este: config file com `credentials-file`
+# + `ingress:` em YAML).
+#
+# POR QUE O MODO MUDOU. O painel Zero Trust — onde o named tunnel por token e seus public
+# hostnames eram criados — exige cadastro de cartão de crédito mesmo no plano free. O operador não
+# vai cadastrar. O modo *locally-managed* (`cloudflared tunnel create` pela CLI) não passa pelo
+# dashboard: a autenticação é o credentials-file JSON emitido pelo `create`, e o roteamento da
+# borda é ESTE arquivo. Roteiro de criação no README § 2b.
+#
+# SIGILO (docs/DOMINIO.md): o domínio real NÃO aparece neste repositório — os valores concretos
+# vivem só no .env (gitignorado). É por isso que a única regra é o catch-all, sem `hostname:`, e
+# que o ID do túnel não está aqui (vem de `run ${TUNNEL_ID}` no docker-compose.deploy.yml).
+# Não há perda prática de roteamento: só chega a este túnel o hostname cujo CNAME aponta para ele
+# (`cloudflared tunnel route dns`), e há um só.
+
+credentials-file: /run/secrets/CLOUDFLARE_TUNNEL_CREDENTIALS
+
+# Destino: interface:80 (o nginx do SPA), NÃO gateway:8081 — topologia de hostname único
+# (ADR-018). O nginx já faz o proxy same-origin de 9 paths ao gateway — /v1/users, /v1/admin,
+# /oauth2, /login (prefixo: subsume /login?error e /login/oauth2/**), /default-ui.css (match
+# exato), /logout, /connect/, /swagger-ui e /v3/api-docs —, o que mantém browser e API na mesma
+# origem e deixa gateway e authorization-server inalcançáveis de fora.
+ingress:
+  - service: http://interface:80

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
+import type { AxiosError } from 'axios'
 import { useRegister } from '../hooks/useRegister'
 
 export const RegisterBox = () => {
@@ -61,7 +62,15 @@ export const RegisterBox = () => {
           </span>
         </label>
         {mutation.isError && (
-          <p className="text-red-500 text-center text-sm">Dados inválidos!</p>
+          // AC-10/11/12: mensagem diferenciada por código HTTP (AxiosError).
+          // 409 = e-mail já cadastrado; 429 = rate limit atingido; demais = fallback genérico.
+          <p className="text-red-500 text-center text-sm">
+            {(mutation.error as AxiosError)?.response?.status === 409
+              ? 'E-mail já cadastrado.'
+              : (mutation.error as AxiosError)?.response?.status === 429
+                ? 'Muitas tentativas. Tente novamente mais tarde.'
+                : 'Dados inválidos!'}
+          </p>
         )}
         <button
           className="mx-2 px-3 py-2 rounded text-white cursor-pointer bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
@@ -73,7 +82,7 @@ export const RegisterBox = () => {
         <button
           className="mx-2 px-3 py-2 rounded text-white cursor-pointer bg-blue-600 hover:bg-blue-700"
           type="button"
-          onClick={() => navigate('/login')}
+          onClick={() => navigate('/')}
         >
           Voltar
         </button>

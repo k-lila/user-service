@@ -9,6 +9,7 @@
 #   - redis / sentinel → command/healthcheck leem o arquivo
 #   - grafana          → GF_SECURITY_ADMIN_PASSWORD__FILE
 #   - prometheus       → basic_auth.password_file
+#   - cloudflared      → credentials-file no infra/cloudflared/config.yml (overlay de deploy)
 #
 # DEV : rode UMA vez antes do `docker compose up`. Gera DEFAULTS DE DESENVOLVIMENTO.
 # PROD: rode com cada segredo exportado no ambiente (valores fortes), ex.:
@@ -42,6 +43,13 @@ SMTP_USERNAME="${SMTP_USERNAME:-}"
 SMTP_PASSWORD="${SMTP_PASSWORD:-}"
 SMTP_AUTH="${SMTP_AUTH:-false}"
 SMTP_STARTTLS="${SMTP_STARTTLS:-false}"
+# Credenciais do named tunnel da Cloudflare (docker-compose.deploy.yml), modo LOCALLY-MANAGED.
+# Não é um valor gerável: é o JSON emitido por `cloudflared tunnel create` em
+# ~/.cloudflared/<UUID>.json. Aponte esta variável para esse caminho e o script COPIA o arquivo
+# para ./secrets/. DELIBERADAMENTE sem default de dev — vazio é o comportamento correto: o
+# cloudflared recusa a subida com credentials-file vazio (fail-fast), em vez de subir um túnel que
+# não roteia para lugar nenhum. Só o overlay de deploy consome; a base e o dev ignoram.
+CLOUDFLARE_TUNNEL_CREDENTIALS="${CLOUDFLARE_TUNNEL_CREDENTIALS:-}"
 
 # printf '%s' (sem \n final): o configtree do Spring e o `cat` do redis usam o conteúdo
 # literal — um newline final entraria na senha e quebraria a autenticação.
@@ -67,6 +75,20 @@ write SMTP_USERNAME          "$SMTP_USERNAME"
 write SMTP_PASSWORD          "$SMTP_PASSWORD"
 write SMTP_AUTH              "$SMTP_AUTH"
 write SMTP_STARTTLS          "$SMTP_STARTTLS"
+# Credenciais do túnel: COPIADAS de ~/.cloudflared/<UUID>.json, não geradas. Ausente = arquivo
+# vazio (fail-fast do cloudflared); caminho informado mas inexistente = erro aqui, porque nesse
+# caso o operador quis configurar o túnel e errou o caminho — falhar em silêncio só adiaria o
+# diagnóstico para a subida.
+if [ -n "$CLOUDFLARE_TUNNEL_CREDENTIALS" ]; then
+  [ -f "$CLOUDFLARE_TUNNEL_CREDENTIALS" ] || {
+    echo "erro: CLOUDFLARE_TUNNEL_CREDENTIALS aponta para arquivo inexistente: $CLOUDFLARE_TUNNEL_CREDENTIALS" >&2
+    exit 1
+  }
+  cp "$CLOUDFLARE_TUNNEL_CREDENTIALS" "$SECRETS_DIR/CLOUDFLARE_TUNNEL_CREDENTIALS"
+  chmod 644 "$SECRETS_DIR/CLOUDFLARE_TUNNEL_CREDENTIALS"
+else
+  write CLOUDFLARE_TUNNEL_CREDENTIALS ""
+fi
 # URI completa do Mongo: o user-service resolve ${MONGODB_URI} via configtree.
 write MONGODB_URI "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin"
 

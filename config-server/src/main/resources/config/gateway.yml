@@ -38,6 +38,35 @@ spring:
         initial-interval: 1000
         multiplier: 1.5
         max-interval: 5000
+    gateway:
+      server:
+        webflux:
+          # Regressão SCG 5.0.0 (ADR-019): sem esta propriedade, XForwardedHeadersFilter E
+          # ForwardedHeadersFilter não são registrados — o auth-server não recebe
+          # X-Forwarded-Host/Proto e constrói Location com o hostname interno do container.
+          # Valor: regex compilado por TrustedProxies.from(String), avaliado com Pattern.matches
+          # (match total, ancorado) contra o IP do peer imediato. RFC1918 amplo: machine-agnostic
+          # (a subnet Docker não é fixa). Seguro apenas com G10 fechado (portas do host removidas
+          # da base do compose). Interdependência documentada no ADR-019.
+          trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:10\..*|172\.(1[6-9]|2[0-9]|3[01])\..*|192\.168\..*}
+          x-forwarded:
+            # Habilita só host + proto (mínimo para o auth-server reconstruir a URL correta).
+            # X-Forwarded-For desabilitado: sua proliferação criaria ambiguidade com
+            # CF-Connecting-IP (fonte primária do rate limit e lockout por ADR-010).
+            # port e prefix desabilitados: sem uso downstream.
+            # append: false em host e proto: o nginx já envia X-Forwarded-Proto: https;
+            # com append:true o filtro acrescentaria ao header existente (resultado: "https, http").
+            # Com append:false, sobrescreve com o valor derivado do header recebido.
+            for-enabled: false
+            for-append: false
+            host-enabled: true
+            host-append: false
+            port-enabled: false
+            port-append: false
+            proto-enabled: true
+            proto-append: false
+            prefix-enabled: false
+            prefix-append: false
 
   security:
     oauth2:
@@ -100,12 +129,15 @@ springdoc:
     urls:
       - name: user-service
         url: /v3/api-docs/user
-
-    oauth:
-      client-id: ${OAUTH_CLIENT_ID:gateway-client}
-      client-secret: ${OAUTH_CLIENT_SECRET}
-      use-pkce-with-authorization-code-grant: true
-    oauth2-redirect-url: ${OAUTH2SWAGGER_REDIRECT_URL:http://localhost:8081/swagger-ui/oauth2-redirect.html}
+    # SEM bloco `oauth:` — DELIBERADO (ADR-020). O springdoc materializa essas propriedades como
+    # um ui.initOAuth({...}) LITERAL dentro de /swagger-ui/swagger-initializer.js, servido ao
+    # browser: `oauth.client-secret` publicava o segredo do cliente confidencial do BFF em texto
+    # plano para qualquer visitante. E era supérfluo desde sempre — sob o BFF a página do Swagger
+    # já exige sessão (SecurityConfig) e o "Try it out" dispara XHR same-origin com o cookie
+    # SESSION, que a rota user-service converte em Bearer via tokenRelay(). O botão Authorize é
+    # redundante. Não reintroduzir: `gateway-client` usa client_secret_basic/post, então nem a
+    # variante "client-id + PKCE, sem secret" funciona (o token endpoint responde invalid_client).
+    # `oauth2-redirect-url` saiu junto — só servia ao callback desse botão.
 
 management:
   # Actuator numa porta de management interna (não publicada no host): o ponto de

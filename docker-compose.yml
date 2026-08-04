@@ -410,10 +410,11 @@ services:
       # CONFIG_SERVER_PASSWORD, OAUTH_CLIENT_SECRET, INTERNAL_API_TOKEN, REDIS_PASSWORD, AUTH_DB_PASSWORD.
       <<: *spring-app-env
       SERVER_PORT: 8082
-      OAUTH_GATEWAY_CLIENT: ${OAUTH_GATEWAY_CLIENT:-http://localhost:8081/login/oauth2/code/gateway-client}
-      OAUTH_SWAGGER_REDIRECT_URL: ${OAUTH_SWAGGER_REDIRECT_URL:-http://localhost:8081/swagger-ui/oauth2-redirect.html}
       CORS_ALLOWED_ORIGINS_AUTH: ${CORS_ALLOWED_ORIGINS_AUTH:-http://localhost:8081}
-      AUTH_ISSUER: http://authorization-server:8082
+      # Issuer do JWT. Externalizado, mas o default INTERNO é o valor correto em praticamente todo
+      # cenário: tem de casar com o AUTH_ISSUER_URI dos resource servers (gateway e user-service),
+      # que validam o token pela rede Docker. Sob Cloudflare Tunnel ele NÃO vira a origem pública.
+      AUTH_ISSUER: ${AUTH_ISSUER:-http://authorization-server:8082}
       # redirectUri/postLogoutRedirectUri semeados no gateway-client (OAuth2ClientConfig).
       # Em prod, aponte para o domínio público real (CSV). Trocar exige re-seed do
       # gateway-client no Postgres — o seed é idempotente, não reconcilia cliente existente.
@@ -519,8 +520,9 @@ services:
   gateway:
     build: ./gateway
     <<: *res-app
-    ports:
-      - "8081:8081"
+    # ports: movido para docker-compose.override.yml (G10 / ADR-019).
+    # Na base prod-safe o gateway NÃO é publicado no host — apenas o nginx do SPA
+    # (via cloudflared) alcança gateway:8081 pela rede interna Docker.
     depends_on:
       discovery-server-1:
         condition: service_healthy
@@ -543,7 +545,9 @@ services:
       SERVER_PORT: 8081
       AUTH_ISSUER_URI: http://authorization-server:8082
       OAUTH_AUTHORIZATION_URI: ${OAUTH_AUTHORIZATION_URI:-http://localhost:8082/oauth2/authorize}
-      OAUTH2SWAGGER_REDIRECT_URL: ${OAUTH2SWAGGER_REDIRECT_URL:-http://localhost:8081/swagger-ui/oauth2-redirect.html}
+      # OAUTH2SWAGGER_REDIRECT_URL removida (ADR-020): alimentava springdoc.swagger-ui
+      # .oauth2-redirect-url, que saiu junto com o bloco `oauth` do gateway.yml — nenhum
+      # serviço a lê mais. O Swagger autentica pela sessão do BFF, sem botão Authorize.
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       OAUTH_CLIENT_ID: gateway-client
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-http://localhost:5173/login/oauth2/code/gateway-client}
@@ -571,11 +575,9 @@ services:
       args:
         VITE_API_URL: ""
     <<: *res-tiny
-    # Borda pública (SPA + proxy BFF). Porta do host por env (listas de ports: são concatenadas
-    # entre base/override, então não dá para "remapear" via override): dev usa o default 5173
-    # (URL documentada); prod seta WEB_HOST_PORT (ex.: 80, atrás do TLS/ingress — G1).
-    ports:
-      - "${WEB_HOST_PORT:-5173}:80"
+    # ports: movido para docker-compose.override.yml (G10 / ADR-019).
+    # Na base prod-safe a interface NÃO é publicada no host — o cloudflared alcança
+    # interface:80 pela rede interna Docker. Em dev o override republica via WEB_HOST_PORT.
 
   # ──────────────────────────────────────────────
   # Observabilidade (métricas)

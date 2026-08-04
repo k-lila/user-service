@@ -1,41 +1,99 @@
 # docker-compose.deploy.yml — overlay de DEPLOY na própria máquina via Cloudflare Tunnel.
 #
-# Onda atual: QUICK TUNNEL efêmero (*.trycloudflare.com) — VALIDA a mecânica de borda
-# (TLS da Cloudflare, cookies Secure, forward-headers, roteamento). NÃO cruza a barra de
-# "deploy legítimo para usuário real": a URL muda a cada boot, então o fluxo OAuth2 ponta a
-# ponta (redirect URIs semeados no Postgres) não fecha — isso só com named tunnel + domínio.
+# NAMED TUNNEL + DOMÍNIO FIXO. A origem pública é estável (${PUBLIC_ORIGIN}), então o fluxo
+# OAuth2/BFF fecha ponta a ponta: os redirect URIs semeados no Postgres casam com a URL real,
+# coisa que o quick tunnel efêmero (*.trycloudflare.com) nunca permitiu.
 #
-#   Subir (a URL do quick tunnel é efêmera: a Cloudflare atribui um hostname NOVO a cada
-#   (re)start do processo cloudflared. Logo, o 2º up NÃO pode recriar o cloudflared — senão
-#   a URL muda e invalida o TUNNEL_ORIGIN que você acabou de ler. Como o cloudflared tem
-#   depends_on: gateway, um `up` que recria o gateway arrastaria o cloudflared junto):
-#     1) Boot inicial com placeholder (só p/ satisfazer o fail-fast das envs ${TUNNEL_ORIGIN:?};
-#        o cloudflared registra a URL real independentemente do valor do placeholder):
-#        export TUNNEL_ORIGIN=https://placeholder.trycloudflare.com
-#        docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
-#     2) Ler a URL pública REAL nos logs do cloudflared:
-#        docker compose -f docker-compose.yml -f docker-compose.deploy.yml logs cloudflared
-#     3) Re-subir SÓ os serviços que consomem a origem, com --no-deps (deixa o cloudflared
-#        intocado → a URL permanece estável durante a sessão):
-#        export TUNNEL_ORIGIN=https://<sub>.trycloudflare.com
-#        docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --no-deps \
-#          gateway authorization-server user-service
+# TOPOLOGIA — hostname único apontando para o nginx do SPA:
+#   Cloudflare (TLS) → cloudflared → interface:80 (nginx) → gateway:8081 → serviços internos
+# O túnel aponta para `interface`, NÃO para o gateway. O nginx do SPA já faz proxy same-origin de
+# /v1/users, /v1/admin, /oauth2, /login/oauth2, /logout, /connect e /swagger-ui para o gateway.
+# Consequências: browser e API na MESMA origem (CORS deixa de ser exercitado na prática), os
+# cookies SESSION/XSRF-TOKEN/AUTHSESSION ficam todos escopados no mesmo host com SameSite=Lax
+# natural, e nem o gateway nem o auth-server ficam diretamente alcançáveis de fora.
 #
-# O que esta onda cobre (estado de deploy/segurança consolidado em docs/SECURITY.md):
-#   - TLS de borda: a Cloudflare termina TLS; cloudflared fala HTTP interno com o gateway.
+#   Subir (up ÚNICO — o roteiro de 3 passos com placeholder existia só por causa da URL efêmera):
+#     export PUBLIC_ORIGIN=https://app.exemplo.com     # ou defina no .env
+#     docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
+#
+# PRÉ-REQUISITOS (fora deste repositório — ver README § 2b):
+#   1. Domínio na Cloudflare com nameservers propagados.
+#   2. Named tunnel criado pela CLI (`cloudflared tunnel create`), em modo LOCALLY-MANAGED; o JSON
+#      de credenciais (~/.cloudflared/<UUID>.json) vira o secret ./secrets/CLOUDFLARE_TUNNEL_CREDENTIALS
+#      (via CLOUDFLARE_TUNNEL_CREDENTIALS=~/.cloudflared/<UUID>.json infra/secrets/gen-secrets.sh).
+#   3. CNAME do hostname público criado com `cloudflared tunnel route dns <túnel> ${PUBLIC_HOST}`.
+#   4. Cloudflare Access cobrindo ${PUBLIC_HOST}/swagger-ui/* e /v3/api-docs/* (política de e-mail
+#      único + OTP). NÃO aplicar Access em /v1/** — são XHR do SPA e quebrariam.
+#      ATENÇÃO: o Access faz parte do Zero Trust e hoje está BLOQUEADO (o painel exige cartão de
+#      crédito, que o operador não vai cadastrar). Enquanto isso, /swagger-ui/* e /v3/api-docs/*
+#      ficam públicos — ver docs/SECURITY.md.
+#
+# MODO LOCALLY-MANAGED (era: token do dashboard). O Zero Trust exige cartão de crédito mesmo no
+# plano free, então o túnel passou a ser criado pela CLI e as ingress rules vivem em
+# infra/cloudflared/config.yml, VERSIONADAS — o que fecha a antiga dívida "roteamento da borda em
+# estado não-versionado". O ID do túnel vem de ${TUNNEL_ID} (.env) por sigilo do domínio, e a
+# autenticação é o credentials-file JSON em vez do token.
+#
+# O que esta onda cobre (estado consolidado em docs/SECURITY.md):
+#   - TLS de borda real e estável: a Cloudflare termina TLS; cloudflared fala HTTP interno.
 #     APP_COOKIE_SECURE + SERVER_FORWARD_HEADERS_STRATEGY ligados (cookies Secure + IP real).
-#   - CORS/URLs OAuth (front-channel) apontando para a origem pública do túnel.
-# (JWK já tratado fora do compose; segredos via Docker secrets — ver docs/SECURITY.md.)
+#   - URLs OAuth de front-channel e origens de CORS apontando para a origem pública fixa.
+# (JWK e demais segredos via Docker secrets — ver docs/SECURITY.md.)
+
+secrets:
+  # Credenciais do named tunnel — o JSON emitido por `cloudflared tunnel create` (contém
+  # AccountTag, TunnelID e TunnelSecret). Sem default de dev no gen-secrets.sh: arquivo vazio faz o
+  # cloudflared recusar a subida, que é o comportamento desejado (melhor que um túnel que não
+  # roteia nada).
+  CLOUDFLARE_TUNNEL_CREDENTIALS:
+    file: ./secrets/CLOUDFLARE_TUNNEL_CREDENTIALS
 
 services:
-  # Quick tunnel efêmero: conecta à Cloudflare e roteia a borda pública → gateway:8081,
-  # sem abrir porta no roteador. Imprime a URL (*.trycloudflare.com) nos próprios logs.
+  # Asserção de coerência PUBLIC_ORIGIN ↔ PUBLIC_HOST (ADR-019).
+  # Converte a instrução "mantenha os dois em sincronia" do .env.example em INVARIANTE FORÇADA:
+  # falha antes de qualquer serviço atender tráfego, sem depender de memória do operador —
+  # foi justamente um passo manual esquecido que causou o defeito original (Elo 1).
+  # O gateway declara depends_on: condition: service_completed_successfully, então não sobe
+  # se assert-env sair com código 1.
+  # NÃO está na base do compose → não afeta dev, não quebra o compose-validate do CI.
+  assert-env:
+    image: alpine:3
+    environment:
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:?defina PUBLIC_ORIGIN no .env (ex: https://app.exemplo.com)}"
+      PUBLIC_HOST: "${PUBLIC_HOST:?defina PUBLIC_HOST no .env (ex: app.exemplo.com)}"
+    command: >-
+      sh -c 'expected=$$(echo "$$PUBLIC_ORIGIN" | sed "s|^https\?://||" | sed "s|/.*||");
+      if [ "$$expected" != "$$PUBLIC_HOST" ]; then
+        echo "[ERRO] Incoerencia de dominio: PUBLIC_ORIGIN=$$PUBLIC_ORIGIN implica hostname=$$expected, mas PUBLIC_HOST=$$PUBLIC_HOST. Corrija o .env antes de subir a stack.";
+        exit 1;
+      fi;
+      echo "[OK] PUBLIC_ORIGIN e PUBLIC_HOST coerentes ($$PUBLIC_HOST)."'
+
+  # Named tunnel locally-managed: conecta à Cloudflare com o credentials-file e roteia o que chega
+  # pelo túnel para interface:80, sem abrir porta no roteador. As ingress rules vêm do
+  # infra/cloudflared/config.yml montado abaixo — daí a ausência de --url aqui.
   cloudflared:
     image: cloudflare/cloudflared:latest
     cpus: 0.25
     mem_limit: 128m
-    command: tunnel --no-autoupdate --url http://gateway:8081
+    # O credentials-file é referenciado DE DENTRO do config.yml (não por flag): a imagem é
+    # distroless, sem shell, e manter o segredo em arquivo o mantém fora da listagem de env do
+    # container (docker inspect / ps -e). O ID do túnel é argumento posicional do `run` porque o
+    # compose interpola aqui, mas não dentro do YAML montado — e assim o domínio/UUID reais ficam
+    # no .env, fora do repositório (sigilo, docs/DOMINIO.md).
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?defina TUNNEL_ID com o UUID impresso por `cloudflared tunnel create` (ver README § 2b)}
+    volumes:
+      - ./infra/cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+    secrets:
+      - CLOUDFLARE_TUNNEL_CREDENTIALS
     depends_on:
+      # O túnel entrega em interface:80 — este é o destino real. O nginx do SPA não tem
+      # healthcheck e resolve o upstream de forma lazy (resolver 127.0.0.11), então basta o
+      # service_started.
+      interface:
+        condition: service_started
+      # Mantido na cadeia só para ordem de subida: não adianta abrir a borda pública antes de
+      # o gateway estar pronto para atender o que o nginx encaminha.
       gateway:
         condition: service_healthy
     restart: unless-stopped
@@ -45,39 +103,82 @@ services:
   # CF-Connecting-IP (Cloudflare) — fonte confiável do rate-limit/lockout por IP (ADR-010);
   # forward-headers=framework é o fallback.
   gateway:
+    depends_on:
+      assert-env:
+        condition: service_completed_successfully
     environment:
       APP_COOKIE_SECURE: "true"
       SERVER_FORWARD_HEADERS_STRATEGY: framework
-      # Origem pública do túnel (ex.: https://abc-def.trycloudflare.com). Front-channel OAuth
-      # passa pelo gateway, que faz proxy de /oauth2/** e /login → authorization-server.
-      CORS_ALLOWED_ORIGINS: ${TUNNEL_ORIGIN:?defina TUNNEL_ORIGIN com a URL do quick tunnel (ver cabeçalho)}
-      OAUTH_AUTHORIZATION_URI: ${TUNNEL_ORIGIN}/oauth2/authorize
-      OAUTH_REDIRECT_URI: ${TUNNEL_ORIGIN}/login/oauth2/code/gateway-client
-      OAUTH_END_SESSION_URI: ${TUNNEL_ORIGIN}/connect/logout
-      POST_LOGOUT_REDIRECT_URI: ${TUNNEL_ORIGIN}/
-      API_BASE_URL: ${TUNNEL_ORIGIN}
-      # AUTH_TOKEN/issuer-uri permanecem internos (back-channel do BFF) — não vão para o túnel.
+      # Origem pública fixa do domínio (ex.: https://app.exemplo.com). Front-channel OAuth passa
+      # pelo nginx do SPA → gateway, que faz proxy de /oauth2/**, /login e /connect/** ao
+      # authorization-server.
+      CORS_ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:?defina PUBLIC_ORIGIN com a origem pública do domínio (ex. https://app.exemplo.com)}
+      OAUTH_AUTHORIZATION_URI: ${PUBLIC_ORIGIN}/oauth2/authorize
+      OAUTH_REDIRECT_URI: ${PUBLIC_ORIGIN}/login/oauth2/code/gateway-client
+      # RP-Initiated Logout: sob hostname único o end_session_endpoint tem de ser alcançável pela
+      # origem pública — daí a rota /connect/** no GatewayRouter (ADR-018).
+      OAUTH_END_SESSION_URI: ${PUBLIC_ORIGIN}/connect/logout
+      POST_LOGOUT_REDIRECT_URI: ${PUBLIC_ORIGIN}/
+      API_BASE_URL: ${PUBLIC_ORIGIN}
+      # AUTH_URL/AUTH_TOKEN alimentam SÓ o securityScheme OAuth2 do doc OpenAPI (OpenAPIConfig) —
+      # é o browser, na página do Swagger, que os usa. O back-channel do BFF (issuer-uri/token-uri
+      # do spring.security.oauth2.client) permanece interno e NÃO vai para o túnel.
+      AUTH_URL: ${PUBLIC_ORIGIN}/oauth2/authorize
+      AUTH_TOKEN: ${PUBLIC_ORIGIN}/oauth2/token
+      # OAUTH2SWAGGER_REDIRECT_URL removida (ADR-020): existia só para o callback do botão
+      # Authorize do Swagger, que deixou de existir junto com o bloco `oauth` do springdoc —
+      # era ele que publicava o client secret no swagger-initializer.js. Sob o BFF a página do
+      # Swagger exige sessão e o "Try it out" já autentica pelo cookie SESSION + tokenRelay.
 
   # Front-channel do auth-server atrás da borda (cookie AUTHSESSION Secure + IP real no lockout).
+  # AUTH_ISSUER continua interno (http://authorization-server:8082): o issuer tem de casar com o
+  # AUTH_ISSUER_URI dos resource servers, que validam o JWT pela rede interna.
   authorization-server:
     environment:
       APP_COOKIE_SECURE: "true"
       SERVER_FORWARD_HEADERS_STRATEGY: framework
-      CORS_ALLOWED_ORIGINS_AUTH: ${TUNNEL_ORIGIN}
-      # redirect/post-logout do gateway-client semeados no Postgres. Com quick tunnel a URL é
-      # efêmera e o seed é idempotente (não reconcilia) → o LOGIN COMPLETO não fecha nesta onda;
-      # validamos a mecânica do túnel, não o fluxo OAuth2 ponta a ponta (ver docs/SECURITY.md).
-      OAUTH_CLIENT_REDIRECT_URIS: ${TUNNEL_ORIGIN}/login/oauth2/code/gateway-client
-      OAUTH_CLIENT_POST_LOGOUT_URIS: ${TUNNEL_ORIGIN}/
-      OAUTH_GATEWAY_CLIENT: ${TUNNEL_ORIGIN}/login/oauth2/code/gateway-client
+      CORS_ALLOWED_ORIGINS_AUTH: ${PUBLIC_ORIGIN}
+      # redirect/post-logout do gateway-client semeados no Postgres. Com origem FIXA estes valores
+      # param de mudar e o login fecha ponta a ponta. ATENÇÃO: o seed é idempotente e NÃO
+      # reconcilia — trocar de domínio com o client já persistido exige `down -v` (só enquanto não
+      # houver dados reais) ou UPDATE direcionado. Ver docs/SECURITY.md.
+      OAUTH_CLIENT_REDIRECT_URIS: ${PUBLIC_ORIGIN}/login/oauth2/code/gateway-client,${PUBLIC_ORIGIN}/swagger-ui/oauth2-redirect.html
+      OAUTH_CLIENT_POST_LOGOUT_URIS: ${PUBLIC_ORIGIN}/
 
   # O doc OpenAPI exibido pelo Swagger-UI (servido pelo gateway, mas agregando /v3/api-docs/user)
-  # é gerado pelo user-service. Sem API_BASE_URL apontando para o túnel, o campo servers[] cai no
-  # default http://localhost:8081 e o "Try it out" dispara para localhost → mixed content (página
-  # HTTPS → request HTTP) e "Failed to fetch". Apontar para a origem pública torna a chamada
-  # same-origin com a página do Swagger.
+  # é gerado pelo user-service. Sem API_BASE_URL apontando para a origem pública, o campo servers[]
+  # cai no default http://localhost:8081 e o "Try it out" dispara para localhost → mixed content
+  # (página HTTPS → request HTTP) e "Failed to fetch". AUTH_URL/AUTH_TOKEN idem para o fluxo
+  # Authorize a partir deste doc.
   user-service:
     environment:
-      API_BASE_URL: ${TUNNEL_ORIGIN}
-      # authorizationUrl do securityScheme OAuth2 do doc → front-channel (browser) pela borda.
-      AUTH_URL: ${TUNNEL_ORIGIN}/oauth2/authorize
+      API_BASE_URL: ${PUBLIC_ORIGIN}
+      AUTH_URL: ${PUBLIC_ORIGIN}/oauth2/authorize
+      AUTH_TOKEN: ${PUBLIC_ORIGIN}/oauth2/token
+
+  # Grafana alcançável pelo operador NA PRÓPRIA MÁQUINA do deploy, e em lugar nenhum além dela.
+  #
+  # POR QUE NÃO EXPOR PUBLICAMENTE. O Grafana é o componente com a autenticação mais fraca do
+  # ecossistema: usuário/senha e nada mais — sem lockout (o LoginAttemptService é do auth-server),
+  # sem rate limit (o token bucket é do gateway), sem MFA. Publicá-lo colocaria na internet
+  # justamente a peça que não tem os controles que todo o resto tem. As alternativas avaliadas
+  # (SSO OIDC; subpath atrás da sessão do BFF; hostname próprio no túnel) estão registradas em
+  # .claude/memory/decisions.md.
+  #
+  # 127.0.0.1: NÃO É DECORATIVO. Sem o IP, `- "3000:3000"` publica em 0.0.0.0 e o serviço passa a
+  # responder para toda a LAN. Preso ao loopback, o Docker cria a regra de iptables só na interface
+  # de loopback: responde a `curl http://localhost:3000` na máquina e recusa conexão de qualquer
+  # outro host.
+  #
+  # ORTOGONAL AO TÚNEL. Publicar porta no host não cria rota pública: quem decide o que entra pelo
+  # túnel é o ingress de infra/cloudflared/config.yml, que roteia só para interface:80. Esta linha
+  # não torna o Grafana alcançável de fora — e removê-la também não o protegeria do túnel.
+  #
+  # ARMADILHA DE MERGE. Listas de `ports:` são CONCATENADAS entre arquivos, não substituídas. Aqui
+  # não há duplicação porque a base não declara `ports` para o grafana (docker-compose.yml, seção
+  # grafana). Mas somar este overlay ao docker-compose.override.yml — que também publica a 3000 —
+  # produz bind duplicado na mesma porta e falha na subida. O comando documentado do deploy
+  # (-f docker-compose.yml -f docker-compose.deploy.yml) já exclui o override; mantenha assim.
+  grafana:
+    ports:
+      - "127.0.0.1:3000:3000"
