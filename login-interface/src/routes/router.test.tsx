@@ -19,7 +19,9 @@ function renderAt(path: string) {
 describe('Router (integração)', () => {
   afterEach(() => window.history.pushState({}, '', '/'))
 
-  it('"/" redireciona para /login (mostra o LoginBox quando não autenticado)', async () => {
+  // ADR-019: / renderiza <Login/> diretamente (sem Navigate intermediário).
+  // O path /login pertence agora ao IdP — não existe mais no React Router.
+  it('"/" renderiza <Login/> diretamente quando não autenticado', async () => {
     server.use(
       http.get('/v1/users/me', () => new HttpResponse(null, { status: 401 }))
     )
@@ -34,7 +36,7 @@ describe('Router (integração)', () => {
     expect(await screen.findByText('Ana Souza')).toBeInTheDocument()
   })
 
-  it('/dashboard sem sessão (401) redireciona para /login', async () => {
+  it('/dashboard sem sessão (401) redireciona para / (renderiza LoginBox)', async () => {
     server.use(
       http.get('/v1/users/me', () => new HttpResponse(null, { status: 401 }))
     )

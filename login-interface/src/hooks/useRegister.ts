@@ -6,9 +6,10 @@ export const useRegister = () => {
   const navigate = useNavigate()
   return useMutation({
     mutationFn: register,
-    // Registro não autentica: leva ao login para o fluxo OAuth2.
+    // Registro não autentica: leva a / onde <Login/> inicia o fluxo OAuth2.
+    // ADR-019: /login pertence ao IdP; / é o novo lar do LoginBox.
     onSuccess: () => {
-      navigate('/login')
+      navigate('/')
     },
   })
 }

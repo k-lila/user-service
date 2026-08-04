@@ -12,15 +12,31 @@ evoluir o sistema, **preserve estas invariantes**: quebrá-las reintroduz bugs j
   para o user-service (`GET /internal/users/email/{email}`). O domínio de usuário pertence a um
   único serviço; o auth-server é cliente, nunca dono dos dados.
 
-## Endpoint interno isolado (ADR-006)
+## Endpoints internos isolados (ADR-006)
 
-- `/internal/users/email/{email}` **não está no gateway nem no Swagger** — é o canal exclusivo
-  auth-server ↔ user-service.
-- Protegido por shared secret **`X-Internal-Token`**: `InternalTokenFilter` valida no
-  user-service; `FeignConfig` injeta no auth-server. Acesso direto à porta 8090 **sem o header
-  → 403**.
-- **Invariante:** nunca exponha esse endpoint pelo gateway nem documente no Swagger; ele
-  presume rede interna confiável + o shared secret.
+Dois canais internos existem hoje: `/internal/users/email/{email}` (auth-server → user-service) e
+`/internal/notifications/email-verification` (user-service → notification-service, ADR-015).
+
+- **Nenhum está no gateway nem no Swagger.**
+- Protegidos pelo shared secret **`X-Internal-Token`**: `InternalTokenFilter` valida em ambos os
+  serviços receptores (comparação em tempo constante com `MessageDigest.isEqual`); `FeignConfig`
+  injeta no chamador. Acesso direto às portas 8090/8095 **sem o header → 403**.
+- **Invariante:** nunca exponha esses endpoints pelo gateway nem documente no Swagger; eles
+  presumem rede interna confiável + o shared secret.
+
+**Como cumprir a parte "nem no Swagger" — depende de o serviço publicar OpenAPI (ADR-021):**
+
+| Situação | Mecanismo | Exemplo |
+| --- | --- | --- |
+| O serviço **publica** doc (o gateway agrega seu `/v3/api-docs`) | anotar a rota interna com `@Hidden` | `InternalUserController` (user-service) |
+| O serviço **não publica** doc | **não ter a dependência springdoc no `pom.xml`** | `NotificationController` (notification-service) |
+
+> **Desligar por propriedade não basta** — foi assim que a invariante ficou violada até 2026-08-04.
+> O `notification-service` tinha `springdoc.swagger-ui.enabled: false` no YAML servido, mas
+> `/v3/api-docs` continuava ativo e publicando a especificação do canal interno. E mesmo
+> `springdoc.api-docs.enabled: false` seria garantia **condicional**: a config vem do config-server
+> com `optional:configserver:` e evapora se ele estiver fora no boot. Ausência de dependência é
+> garantia de classpath — não depende de nada em runtime.
 
 ## DELETE com semânticas distintas e intencionais (ADR-001, ADR-013)
 
@@ -30,8 +46,10 @@ evoluir o sistema, **preserve estas invariantes**: quebrá-las reintroduz bugs j
 | `DELETE /v1/users/delete/me`  | USER  | hard-delete (`deleteUser`)                      |
 
 - **Invariante:** as duas rotas são distintas de propósito — o soft-delete preserva o registro
-  (e os endpoints de leitura retornam só ativos, ADR-001). Não unifique nem troque a semântica
-  sem ADR.
+  (e os endpoints de leitura da superfície pública retornam só ativos, ADR-001: hoje
+  `searchById`/`searchByEmail`, já que a listagem pública foi removida pelo ADR-021). A listagem
+  administrativa `GET /v1/admin/users` **inclui** inativos de propósito — a ocultação sempre foi
+  regra da superfície pública, não da administrativa. Não unifique nem troque a semântica sem ADR.
 - **Operações administrativas removidas deste controller (ADR-013):** as rotas
   `DELETE /v1/users/{id}` (soft-delete ADMIN sobre outro titular) e `DELETE /v1/users/del/{id}`
   (hard-delete ADMIN) foram retiradas do `UserController`. Foram absorvidas pelo `AdminController`

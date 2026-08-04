@@ -34,7 +34,20 @@ export const ProfileBox = () => {
             <p className="text-gray-500 text-sm">Data</p>
             <p className="text-lg">{user.registrationDate}</p>
           </div>
+          <div>
+            <p className="text-gray-500 text-sm">Verificado</p>
+            <p className="text-lg">{user.emailVerified ? 'Sim' : 'Não'}</p>
+          </div>
         </div>
+        {/* ADR-020: /swagger-ui exige a sessão OAuth2 do BFF — quem está aqui já a tem. */}
+        <a
+          href="/swagger-ui/index.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block mt-6 text-center px-3 py-2 rounded text-white bg-blue-600 hover:bg-blue-700"
+        >
+          Swagger UI
+        </a>
       </div>
     </div>
   )

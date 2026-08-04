@@ -130,6 +130,20 @@ resilience4j:
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
         registerHealthIndicator: true
+        # 404 é RESULTADO DE NEGÓCIO, não falha de infraestrutura (ADR-021): o user-service
+        # responde 404 quando o titular não existe ou está inativo. Sem esta linha, um punhado de
+        # logins com e-mail digitado errado abria o circuito (10 chamadas, 50% de threshold) e
+        # derrubava o login de TODOS por 10s — DoS por typo.
+        #
+        # ATENÇÃO: `ignoreExceptions` só tira o 404 da CONTABILIDADE do circuito. Ele NÃO impede o
+        # fallback de ser invocado — o getAndApplyFallback do Spring Cloud captura Throwable sem
+        # filtro. Quem distingue 404 de outage é o `instanceof` no UserClientFallbackFactory, e as
+        # duas coisas são interdependentes: remover uma sem a outra reintroduz um dos dois bugs.
+        #
+        # O `$` de classe interna é inerte em YAML (só `${` interessa ao Spring) e o ClassUtils
+        # .forName resolve o nome direto — não precisa de aspas.
+        ignoreExceptions:
+          - feign.FeignException$NotFound
   timelimiter:
     configs:
       user-service:

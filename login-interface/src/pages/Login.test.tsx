@@ -7,12 +7,13 @@ import { server } from '../test/server'
 import { makeQueryClient } from '../test/utils'
 import { Login } from './Login'
 
+// ADR-019: página Login mora em / (não /login — o path /login pertence ao IdP).
 function renderLoginRoute() {
   return render(
     <QueryClientProvider client={makeQueryClient()}>
-      <MemoryRouter initialEntries={['/login']}>
+      <MemoryRouter initialEntries={['/']}>
         <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route path="/" element={<Login />} />
           <Route path="/dashboard" element={<div>DASHBOARD</div>} />
           <Route path="/register" element={<div>REGISTER</div>} />
         </Routes>

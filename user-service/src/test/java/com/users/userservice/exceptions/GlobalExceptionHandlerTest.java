@@ -11,6 +11,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 
 class GlobalExceptionHandlerTest {
@@ -71,6 +72,19 @@ class GlobalExceptionHandlerTest {
         AccessDeniedException ex = new AccessDeniedException("negado");
 
         assertThrows(AccessDeniedException.class, () -> handler.handleAccessDenied(ex));
+    }
+
+    // ADR-021: sem este handler a exceção cai no catch-all Exception (500 + log ERROR), porque
+    // este advice não estende ResponseEntityExceptionHandler e o ExceptionHandlerExceptionResolver
+    // roda antes do DefaultHandlerExceptionResolver.
+    @Test
+    void deveRetornar405_quandoMetodoNaoSuportado() {
+        ProblemDetail pd = handler.handleMethodNotSupported(
+                new HttpRequestMethodNotSupportedException("GET", List.of("PUT")));
+
+        assertEquals(HttpStatus.METHOD_NOT_ALLOWED.value(), pd.getStatus());
+        assertEquals("Method Not Allowed", pd.getTitle());
+        assertEquals("Método não suportado", pd.getDetail());
     }
 
     @Test

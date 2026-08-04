@@ -84,9 +84,28 @@ class AdminFlowIntegrationTest extends AbstractIntegrationTest {
                 .singleElement()
                 .satisfies(dto -> assertThat(dto.getActive()).isFalse());
 
-        // ADR-001: a listagem pública continua excluindo o inativo, isolada da rota admin.
-        Page<UserResponseDTO> paginaPublica = searchService.searchAll(PageRequest.of(0, 10));
-        assertThat(paginaPublica.getTotalElements()).isEqualTo(1);
+        // A contraparte "listagem pública exclui o inativo" saiu daqui: a listagem pública
+        // deixou de existir (ADR-021). A listagem administrativa é a única, e inclui inativos.
+    }
+
+    // Paginação — migrada do UserFlowIntegrationTest junto com a remoção de searchAll (ADR-021).
+    // A única listagem restante é esta; a cobertura de página vazia e de limite de página tem de
+    // acompanhá-la, senão some da suíte.
+    @Test
+    void devePaginarCorretamente_naListagemAdministrativa() {
+        Page<AdminUserResponseDTO> vazia = adminService.listAllUsers(null, null, null, PageRequest.of(0, 10));
+        assertThat(vazia.isEmpty()).isTrue();
+
+        registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
+        registerService.registerUser(buildDTO("Ciclano", "ciclano@email.com", "senha456"));
+        registerService.registerUser(buildDTO("Beltrano", "beltrano@email.com", "senha789"));
+
+        Page<AdminUserResponseDTO> segundaPagina =
+                adminService.listAllUsers(null, null, null, PageRequest.of(1, 2));
+
+        assertThat(segundaPagina.getTotalElements()).isEqualTo(3);
+        assertThat(segundaPagina.getNumberOfElements()).isEqualTo(1);
+        assertThat(segundaPagina.getNumber()).isEqualTo(1);
     }
 
     @Test

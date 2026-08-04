@@ -12,7 +12,8 @@ vi.mock('react-router', async (importOriginal) => {
 })
 
 describe('useRegister', () => {
-  it('navega para /login no sucesso (registro não autentica)', async () => {
+  // ADR-019: após registro bem-sucedido navega para / (não /login — o path pertence ao IdP).
+  it('navega para / no sucesso (registro não autentica)', async () => {
     const { result } = renderHook(() => useRegister(), {
       wrapper: queryWrapper(),
     })
@@ -20,7 +21,7 @@ describe('useRegister', () => {
     result.current.mutate({ name: 'A', email: 'a@b.com', password: 'x', termsAccepted: true })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(navigateMock).toHaveBeenCalledWith('/login')
+    expect(navigateMock).toHaveBeenCalledWith('/')
   })
 
   it('expõe isError quando o registro falha', async () => {
@@ -37,6 +38,6 @@ describe('useRegister', () => {
     result.current.mutate({ name: 'A', email: 'a@b.com', password: 'x', termsAccepted: true })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
-    expect(navigateMock).not.toHaveBeenCalledWith('/login')
+    expect(navigateMock).not.toHaveBeenCalledWith('/')
   })
 })

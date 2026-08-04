@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
@@ -46,11 +47,27 @@ public class AuthorizationService implements UserDetailsService {
         AuthDTO user;
         try {
             user = userClient.getUserByEmail(email);
-        } catch (UsernameNotFoundException e) {
-            // Propaga sem reembrulhar: vem do fallback (user-service indisponível /
-            // circuit breaker aberto) ou de "não encontrado". O DaoAuthenticationProvider
-            // trata como credenciais inválidas (mensagem genérica) e devolve o usuário ao
-            // login — em vez de escalar a 500 como o antigo catch (Exception) fazia.
+        } catch (AuthenticationException e) {
+            // Propaga sem reembrulhar. AMBOS os casos chegam aqui pelo fallback do circuit breaker
+            // (UserClientFallbackFactory), que é quem os distingue — o Feign entrega 404 de negócio
+            // e indisponibilidade real pelo mesmo caminho:
+            //
+            //  - UsernameNotFoundException: o fallback a lança quando a causa é FeignException
+            //    .NotFound, ou seja, o user-service devolveu 404 (titular inexistente OU inativo).
+            //    O DaoAuthenticationProvider a converte em BadCredentialsException → evento
+            //    publicado → CONTA no lockout. Correto: é indistinguível de tentativa de
+            //    adivinhação, e manter o atrito contra enumeração de e-mails importa.
+            //
+            //  - UserServiceUnavailableException (ADR-021): indisponibilidade real (500, 503,
+            //    timeout, conexão recusada, circuito aberto). É InternalAuthenticationService-
+            //    Exception, repropagada intacta e sem evento publicado — NÃO conta no lockout.
+            //    Um outage não pode bloquear a conta de um usuário legítimo por 15 min.
+            //
+            // O catch TEM de ser AuthenticationException (e não UsernameNotFoundException): a
+            // segunda não é subtipo da primeira, cairia no catch (Exception) abaixo e seria
+            // convertida de volta em UsernameNotFoundException — reintroduzindo o bug inteiro,
+            // com todos os testes existentes passando. Guard: AuthorizationServiceTest
+            // .deveNaoConverterEmUsernameNotFound_quandoUserServiceIndisponivel.
             throw e;
         } catch (Exception e) {
             // Só o inesperado (ex.: erro de (de)serialização) cai aqui. Loga o detalhe
@@ -63,6 +80,10 @@ public class AuthorizationService implements UserDetailsService {
             );
             throw new UsernameNotFoundException("Não foi possível autenticar o usuário");
         }
+        // Defesa em profundidade: pelo caminho Feign este branch é inalcançável, porque o
+        // user-service devolve 404 (não 200 com corpo nulo/inativo) para titular inexistente ou
+        // inativo, e o 404 é resolvido no fallback acima. Mantido para o caso de o contrato do
+        // canal interno mudar — sem isso, um corpo inesperado viraria NPE mais adiante.
         if (user == null || !user.getActive()) {
             LOGGER.warn("| auth | inexistente ou inativo | email: {}", LogUtils.maskEmail(email));
             throw new UsernameNotFoundException("Usuário inexistente ou inativo: " + email);

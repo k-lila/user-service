@@ -11,13 +11,14 @@ import org.springframework.web.bind.annotation.RestController;
 import com.users.notificationservice.dtos.EmailVerificationRequestDTO;
 import com.users.notificationservice.services.EmailService;
 
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 
 // Canal interno (/internal/**), protegido por X-Internal-Token (InternalTokenFilter) e
 // nunca exposto pelo gateway — só o user-service chama esta rota (ADR-006/ADR-015).
-@Tag(name = "Notificações internas", description = "Canal interno de envio de e-mail")
+//
+// SEM @Tag/@Operation, e sem springdoc no classpath (ADR-021): documentar este canal violaria a
+// invariante do ADR-006. O serviço não publica OpenAPI algum — diferente do user-service, cujo
+// /v3/api-docs é legítimo (o gateway o agrega) e onde o canal interno é escondido com @Hidden.
 @RestController
 @RequestMapping(value = "/internal/notifications")
 public class NotificationController {
@@ -29,7 +30,6 @@ public class NotificationController {
         this.emailService = emailService;
     }
 
-    @Operation(summary = "Envia e-mail de verificação de cadastro")
     @PostMapping("/email-verification")
     public ResponseEntity<Void> sendEmailVerification(@RequestBody @Valid EmailVerificationRequestDTO request) {
         LOGGER.info("| POST | enviar verificação de e-mail");

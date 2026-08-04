@@ -5,8 +5,6 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import com.users.userservice.domain.User;
@@ -23,19 +21,11 @@ public class SearchService {
         this.userRepository = iUserRepository;
     }
 
-    public Page<UserResponseDTO> searchAll(Pageable pageable) {
-        // Só usuários ativos: soft-deleted (active=false) ficam ocultos nas leituras. Ver ADR-001.
-        Page<UserResponseDTO> mapped = userRepository.findByActiveTrue(pageable).map((user) -> {
-            return UserResponseDTO.toResponseDTO(user);
-        });
-        LOGGER.info(
-            "| página encontrada | {}x{} | total (usuários): {}",
-            pageable.getPageSize(),
-            pageable.getPageNumber(),
-            mapped.getTotalElements()
-        );
-        return mapped;
-    }
+    // searchAll(Pageable) foi REMOVIDO junto da rota GET /v1/users (ADR-021) — não havia outro
+    // consumidor. Diferente de searchByEmail abaixo, não sustentava cache algum: mantê-lo seria
+    // código morto. A listagem de titulares vive só em AdminService.listAllUsers (MongoTemplate,
+    // ADMIN-only). A invariante do ADR-001 (leitura só de ativos) sobrevive nos dois métodos
+    // abaixo.
 
     @Cacheable(value = "usersById", key = "#userID")
     public UserResponseDTO searchById(String userID) {

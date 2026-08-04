@@ -7,6 +7,7 @@ import { server } from '../test/server'
 import { makeQueryClient } from '../test/utils'
 import { ProtectedLayout } from './ProtectedLayout'
 
+// ADR-019: ProtectedLayout redireciona para / (não /login — pertence ao IdP).
 function renderProtected() {
   return render(
     <QueryClientProvider client={makeQueryClient()}>
@@ -15,7 +16,7 @@ function renderProtected() {
           <Route element={<ProtectedLayout />}>
             <Route path="/dashboard" element={<div>PROTECTED CONTENT</div>} />
           </Route>
-          <Route path="/login" element={<div>LOGIN PAGE</div>} />
+          <Route path="/" element={<div>LOGIN PAGE</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -33,7 +34,7 @@ describe('ProtectedLayout', () => {
     expect(await screen.findByText('PROTECTED CONTENT')).toBeInTheDocument()
   })
 
-  it('redireciona para /login quando não autenticado (401)', async () => {
+  it('redireciona para / quando não autenticado (401)', async () => {
     server.use(
       http.get('/v1/users/me', () => new HttpResponse(null, { status: 401 }))
     )

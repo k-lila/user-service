@@ -10,8 +10,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.test.annotation.DirtiesContext;
 
 import com.users.userservice.domain.User;
@@ -141,18 +139,10 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertThrows(DomainEntityNotFound.class, () -> searchService.searchByEmail("fulano@email.com"));
     }
 
-    // ADR-001
-    @Test
-    void deveExcluirUsuariosInativos_daListagem() {
-        registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
-        UserResponseDTO paraInativar = registerService.registerUser(
-                buildDTO("Ciclano", "ciclano@email.com", "senha456"));
-        registerService.deactivateUser(paraInativar.getId());
-
-        Page<UserResponseDTO> pagina = searchService.searchAll(PageRequest.of(0, 10));
-
-        assertEquals(1, pagina.getTotalElements());
-    }
+    // A cláusula do ADR-001 sobre LISTAGEM saiu daqui junto de searchAll (ADR-021): não há mais
+    // listagem na superfície USER. A invariante "leitura só de ativos" sobrevive em
+    // searchById/searchByEmail, cobertos acima; a paginação migrou para AdminFlowIntegrationTest,
+    // onde vive a única listagem restante (AdminService.listAllUsers, ADMIN-only).
 
     @Test
     void deveDeletarUsuario_quandoIdExiste() {
@@ -180,24 +170,6 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
     void deveLancarDomainEntityNotFound_quandoIdInexistenteNaAtualizacao() {
         assertThrows(DomainEntityNotFound.class, () ->
                 registerService.updateUser(buildDTO("Novo", "novo@email.com", null), "id-inexistente"));
-    }
-
-    @Test
-    void deveRetornarPaginaComUsuarios_quandoExistemRegistros() {
-        registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
-        registerService.registerUser(buildDTO("Ciclano", "ciclano@email.com", "senha456"));
-
-        Page<UserResponseDTO> pagina = searchService.searchAll(PageRequest.of(0, 10));
-
-        assertEquals(2, pagina.getTotalElements());
-        assertFalse(pagina.isEmpty());
-    }
-
-    @Test
-    void deveRetornarPaginaVazia_quandoNenhumUsuarioCadastrado() {
-        Page<UserResponseDTO> pagina = searchService.searchAll(PageRequest.of(0, 10));
-
-        assertTrue(pagina.isEmpty());
     }
 
     // lacuna 3
@@ -261,17 +233,4 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
                 registerService.updateUser(buildDTO("Fulano", "ciclano@email.com", null), userA.getId()));
     }
 
-    // lacuna 9
-    @Test
-    void deveRetornarPaginaCorreta_quandoPaginacaoVariada() {
-        registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
-        registerService.registerUser(buildDTO("Ciclano", "ciclano@email.com", "senha456"));
-        registerService.registerUser(buildDTO("Beltrano", "beltrano@email.com", "senha789"));
-
-        Page<UserResponseDTO> pagina = searchService.searchAll(PageRequest.of(1, 2));
-
-        assertEquals(3, pagina.getTotalElements());
-        assertEquals(1, pagina.getNumberOfElements());
-        assertEquals(1, pagina.getNumber());
-    }
 }

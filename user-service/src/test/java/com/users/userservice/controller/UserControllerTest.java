@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -192,28 +191,29 @@ class UserControllerTest {
         verifyNoInteractions(registerService);
     }
 
-    // ── GET /users ───────────────────────────────────────────────────────────
+    // ── GET /users — rota REMOVIDA (ADR-021) ─────────────────────────────────
+    // Era a listagem de toda a base ativa para qualquer ROLE_USER: o resíduo do G1 que o
+    // ADR-016 não viu. Os testes de 200/403 foram removidos com ela; os dois abaixo são
+    // guards de não-regressão.
 
+    // 405 e NÃO 500: o path segue mapeado para PUT, e o GlobalExceptionHandler é um
+    // @RestControllerAdvice puro cujo catch-all Exception engoliria a
+    // HttpRequestMethodNotSupportedException. Se este teste virar 500, o handler dedicado
+    // sumiu. Se virar 200, a rota foi reintroduzida — o vazamento de PII voltou.
     @Test
-    void searchAll_deveRetornar200_quandoTokenComRoleUser() throws Exception {
-        when(searchService.searchAll(any())).thenReturn(new PageImpl<>(List.of(buildResponse())));
-
+    void searchAll_deveRetornar405_quandoRotaRemovida() throws Exception {
         mockMvc.perform(get("/v1/users")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
-                .andExpect(status().isOk());
+                .andExpect(status().isMethodNotAllowed());
+
+        verifyNoInteractions(searchService);
     }
 
+    // A borda continua exigindo autenticação antes de chegar ao dispatcher.
     @Test
-    void searchAll_deveRetornar401_quandoSemToken() throws Exception {
+    void getUsers_deveRetornar401_quandoSemToken() throws Exception {
         mockMvc.perform(get("/v1/users"))
                 .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void searchAll_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
-        mockMvc.perform(get("/v1/users")
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
-                .andExpect(status().isForbidden());
     }
 
     // ── PUT /users ───────────────────────────────────────────────────────────
@@ -443,13 +443,6 @@ class UserControllerTest {
     void getCurrentUser_deveRetornar403_quandoTokenSemRoleUser() throws Exception {
         mockMvc.perform(get("/v1/users/me")
                 .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OTHER"))))
-                .andExpect(status().isForbidden());
-    }
-
-    @Test
-    void searchAll_deveRetornar403_quandoTokenComApenasRoleAdmin() throws Exception {
-        mockMvc.perform(get("/v1/users")
-                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
                 .andExpect(status().isForbidden());
     }
 

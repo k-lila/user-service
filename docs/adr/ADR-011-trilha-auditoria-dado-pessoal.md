@@ -5,6 +5,16 @@
 - **Serviço alvo:** user-service
 - **Tarefa relacionada:** RELATORIOA item 1.4 (audit log de acesso a dado pessoal)
 
+> **Atualização (2026-08-04):** `READ_CROSS_SUBJECT` está `@Deprecated` e **não é mais emitido**
+> desde o [[ADR-016]] — a leitura de PII de terceiro virou ADMIN-only e passou a ser auditada como
+> `ADMIN_READ_USER`. **Não remover o valor do enum:** ele é necessário para desserializar os
+> registros históricos já gravados em `auditLogs`. A leitura pública que o emitia deixou de
+> existir por completo com o [[ADR-021]].
+>
+> Dívida ainda aberta: **a listagem administrativa (`GET /v1/admin/users`) não é auditada**. Com a
+> listagem pública removida, ela é a única superfície que devolve PII de vários titulares de uma
+> vez, e não deixa rastro na trilha.
+
 ## Contexto
 
 Como controlador de dados pessoais (LGPD), o sistema precisa registrar *quem acessou/alterou/apagou

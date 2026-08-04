@@ -18,7 +18,6 @@
 | ------ | ----------------------- | ---------- | --------------- |
 | POST   | /v1/users/register      | Nenhuma    | 2 req/s (IP)    |
 | GET    | /v1/users/verify-email  | Nenhuma    | 2 req/s (IP)    |
-| GET    | /v1/users               | ROLE_USER  | 10 req/s (user) |
 | GET    | /v1/users/me            | ROLE_USER  | 10 req/s (user) |
 | PUT    | /v1/users               | ROLE_USER  | 10 req/s (user) |
 | POST   | /v1/users/resend-verification | ROLE_USER | 10 req/s (user) |
@@ -36,8 +35,14 @@
 >
 > As leituras `GET /v1/users/{id}` e `GET /v1/users/email/{email}` também foram removidas deste
 > controller público (eram `ROLE_USER`, sem checagem de titularidade → IDOR de PII) e reabertas como
-> ADMIN-only no `AdminController` (ADR-016 — fecha o G1). A leitura do próprio dado permanece em
+> ADMIN-only no `AdminController` (ADR-016). A leitura do próprio dado permanece em
 > `GET /v1/users/me`.
+>
+> **`GET /v1/users` (listagem) foi removida (ADR-021)** — devolvia `Page<UserResponseDTO>` de toda
+> a base ativa a qualquer `ROLE_USER`, sem auditoria: era o resíduo do G1 que o ADR-016 não viu.
+> A rota agora responde **405** (o path segue mapeado para `PUT`). Não há listagem na superfície
+> `USER`: um usuário lê apenas o próprio dado. A listagem existe só como
+> `GET /v1/admin/users` (ADMIN, com filtros, incluindo inativos).
 
 ### Endpoints administrativos (`/v1/admin/**`)
 
@@ -103,9 +108,10 @@ rotas autenticadas, ambas delegando a `EmailVerificationService.resendByUserId(S
 - Sem corpo — o titular é resolvido por `userID` do JWT (self) ou `{id}` do path (admin), nunca
   por e-mail no body (evita o vetor de anti-enumeração por e-mail que existia antes).
 - `resendByUserId` lança `DomainEntityNotFound` (404) se o `{id}` não existir — diferente do
-  antigo `resend(email)` (ainda usado internamente, silencioso por design): aqui não há motivo de
-  anti-enumeração, pois o chamador já está autenticado (self) ou é admin (que opera por ID de uma
-  listagem existente).
+  antigo `resend(email)`, que era silencioso por design: aqui não há motivo de anti-enumeração,
+  pois o chamador já está autenticado (self) ou é admin (que opera por ID de uma listagem
+  existente). **`resend(String email)` não tem nenhum chamador em produção** desde essa migração —
+  os únicos call-sites são testes. É código morto, não um caminho interno vivo.
 - Resposta de sucesso é `202 Accepted`; reenvio **não é auditado** em `auditLogs` (mesmo critério
   de antes — evita ruído/oráculo de timing).
 - Rate limit **complementar por conta-alvo** (`ResendRateLimitService`, Redis, chave
@@ -142,8 +148,11 @@ Detalhe completo (decisões e alternativas consideradas) em
 **Leituras só de usuários ativos (ADR-001):** os endpoints de leitura ocultam usuários
 soft-deleted (`active=false`):
 
-- `GET /v1/users` lista apenas ativos (`findByActiveTrue`).
 - `GET /v1/users/me` retorna **404** se a própria conta estiver desativada.
+- `SearchService.searchById`/`searchByEmail` tratam o soft-deleted como inexistente.
+
+> A cláusula que se aplicava à listagem (`GET /v1/users` → `findByActiveTrue`) ficou sem objeto:
+> os três — rota, método de serviço e método de repositório — foram removidos pelo ADR-021.
 
 > **Exceção administrativa (ADR-016):** as leituras admin `GET /v1/admin/users/{id}` e
 > `GET /v1/admin/users/email/{email}` **incluem** titulares inativos (soft-deleted), coerentes com
@@ -173,9 +182,9 @@ soft-deleted (`active=false`):
   "id": "665f1c2e8a3b4c0012abcd34",
   "name": "Maria Silva",
   "email": "maria@exemplo.com",
-  "registrationDate": "2026-06-08T14:32:10.123",
+  "registrationDate": "2026-06-08T14:32:10.123Z",
   "active": true,
-  "consentAcceptedAt": "2026-06-08T14:32:10.123",
+  "consentAcceptedAt": "2026-06-08T14:32:10.123Z",
   "termsVersion": "v1",
   "tenantIds": null,
   "emailVerified": false,
@@ -301,6 +310,9 @@ TTL de 5 min, três caches distintos:
 
 - `updateUser` — atualiza `usersById` e `usersByEmail` (novo e-mail) e **evicta** o e-mail antigo em `usersByEmail` e `authByEmail`.
 - `deleteUser` e `deactivateUser` — **evictam** os três caches.
+- `AdminService.updateUserRoles` — **evicta** os três caches (as roles entram no `authByEmail`).
+- `EmailVerificationService.confirm` — **evicta** os três caches ao confirmar o e-mail
+  (`emailVerified` muda e o auth-server lê esse campo para decidir `enabled`).
 
 > A escrita é manual (não declarativa) porque cada cache usa uma chave diferente — ID vs e-mail.
 
@@ -331,8 +343,11 @@ Todos os erros retornam `Content-Type: application/problem+json` com o schema ab
 | ------ | ----------------------- | --------------------------------------------------------------- |
 | 400    | `Bad Request`           | Argumento inválido (`IllegalArgumentException`)                 |
 | 400    | `Validation Failed`     | Bean Validation (`@Valid`) — inclui propriedade extra `errors`  |
+| 400    | `Bad Request`           | Token de verificação inválido/expirado/já usado (`InvalidVerificationTokenException`) — mensagem genérica, anti-enumeração |
 | 404    | `Not Found`             | Entidade não encontrada (`DomainEntityNotFound`)                |
+| 405    | `Method Not Allowed`    | Método não suportado no path — `detail` fixo: `"Método não suportado"` (ADR-021; sem este handler todo 405 virava 500) |
 | 409    | `Conflict`              | E-mail já cadastrado — `detail` fixo: `"Email already registered"` |
+| 409    | `Conflict`              | Auto-revogação de `ADMIN` pelo próprio ator (`SelfRoleRevocationException`) — `detail` **dinâmico** |
 | 500    | `Internal Server Error` | Erro não tratado — `detail` fixo: `"Erro interno"`             |
 
 **Resposta 400 de validação — propriedade extra `errors`:**

@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -75,6 +76,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public void handleAccessDenied(AccessDeniedException e) {
         throw e;
+    }
+
+    // Método não suportado no path → 405, não 500 (ADR-021). Sem este handler a exceção cai no
+    // catch-all Exception abaixo: este @RestControllerAdvice não estende
+    // ResponseEntityExceptionHandler, e o ExceptionHandlerExceptionResolver roda ANTES do
+    // DefaultHandlerExceptionResolver — então quem responderia 405 nunca é alcançado. O sintoma
+    // é 500 + log ERROR a cada probe/scanner que acerte um path existente com o verbo errado
+    // (ex.: GET /v1/users, cuja rota foi removida mas segue mapeada para PUT).
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ProblemDetail handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        LOGGER.warn("| 405 | método não suportado | {}", e.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(
+            HttpStatus.METHOD_NOT_ALLOWED, "Método não suportado");
+        pd.setTitle("Method Not Allowed");
+        return pd;
     }
 
     @ExceptionHandler(Exception.class)

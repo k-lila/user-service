@@ -5,6 +5,23 @@
 - **Serviço alvo:** notification-service (novo) | user-service | authorization-server | gateway
 - **Tarefa relacionada:** TASK-NOTIFICATION-SERVICE
 
+> **Correções de registro (2026-08-04, auditoria doc↔código).** A decisão abaixo permanece
+> vigente; três afirmações do texto não correspondiam ao código:
+> - **Timeout do circuit breaker do notification-service é `10s`, não `3s`.** O valor real está em
+>   `config-server/.../config/user-service.yml` (`resilience4j.timelimiter.configs.notification-service`),
+>   com comentário explícito justificando "10s (não 3s)" — o envio de e-mail é assíncrono e
+>   tolera latência de SMTP. Onde o texto diz "timeout 3s", leia-se 10s.
+> - **`EmailVerificationService.resend(String email)` não é "usado internamente".** Não tem
+>   nenhum chamador em produção desde que o reenvio migrou para `resendByUserId` — os únicos
+>   call-sites são testes. É código morto, não caminho vivo silencioso.
+> - **`registrationDate=null` não equivale a "usuário legado".** Com `emailVerified=false`
+>   explícito e `registrationDate=null`, o resultado é `enabled=false` (conta bloqueada, sem
+>   grace period); o legado de verdade é `emailVerified=null`, que resulta em `enabled=true`. Os
+>   dois casos têm desfechos opostos — relevante no cenário de deploy misto descrito adiante.
+>
+> Ver também [[ADR-021]]: a dependência springdoc foi removida do notification-service, porque
+> `/v3/api-docs` publicava a especificação do canal interno criado por este ADR.
+
 ## Contexto
 
 O domínio `User` já tinha os campos `emailVerified`/`emailVerifiedAt` (scaffold, ver

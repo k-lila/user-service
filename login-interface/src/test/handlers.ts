@@ -6,6 +6,7 @@ export const fakeUser: UserResponse = {
   name: 'Ana Souza',
   email: 'ana@example.com',
   registrationDate: '2026-06-13',
+  emailVerified: true,
 }
 
 // Handlers default = "feliz". Cada teste sobrescreve com server.use(...) para
