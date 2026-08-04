@@ -16,8 +16,32 @@ spring:
       mail:
         smtp:
           auth: ${SMTP_AUTH:false}
+          # starttls (587, TLS oportunista) e ssl (465, TLS implícito) são MUTUAMENTE
+          # EXCLUSIVOS — são duas topologias de conexão, não dois níveis de rigor:
+          #   587 → starttls.enable=true  + ssl.enable=false
+          #   465 → starttls.enable=false + ssl.enable=true
+          # Sem ssl.enable a porta 465 é inutilizável: o Jakarta Mail abriria um socket em
+          # texto plano contra uma porta que espera handshake TLS imediato, e a conexão
+          # morre. Não há validação em código — ligar os dois é incoerente e é
+          # responsabilidade de quem preenche os secrets.
           starttls:
             enable: ${SMTP_STARTTLS:false}
+          ssl:
+            enable: ${SMTP_SSL_ENABLE:false}
+          # Timeouts de socket, em ms. O default do Jakarta Mail é INFINITO, e o
+          # NotificationController bloqueia até JavaMailSender.send() retornar — sem estes
+          # três um SMTP travado segura a thread do Tomcat para sempre, vazando o pool até
+          # o serviço parar de responder (inclusive ao healthcheck). O timelimiter de 10s
+          # do Feign (user-service.yml) NÃO cobre este lado: ele libera o chamador, que
+          # aliás já estava livre — a chamada é @Async.
+          # 10s e não menos: contra SMTP real o handshake TLS + AUTH passa de 3s (mesmo
+          # racional registrado no timelimiter do user-service), então um orçamento
+          # apertado abortaria envio legítimo. Sem declaração no compose de propósito — o
+          # default vale automaticamente em qualquer deploy; só entram em `environment:`
+          # se alguém quiser afinar.
+          connectiontimeout: ${SMTP_CONNECTION_TIMEOUT:10000}
+          timeout: ${SMTP_READ_TIMEOUT:10000}
+          writetimeout: ${SMTP_WRITE_TIMEOUT:10000}
 
 # Remetente exibido nos e-mails de verificação. Override em prod via APP_MAIL_FROM.
 app:

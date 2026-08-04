@@ -40,12 +40,29 @@ infra/secrets/gen-secrets.sh        # defaults de DEV
 REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen-secrets.sh   # prod
 ```
 
+> **Ao adicionar um secret novo à tabela abaixo** (o último foi `SMTP_SSL_ENABLE`): declarar o
+> arquivo no compose o torna **obrigatório** — o `up` falha se ele não existir em `./secrets/`,
+> e **o CI não pega**, porque o job `compose-validate` roda `docker compose config -q`, que
+> valida a topologia mas **não** checa existência de arquivo de secret (é justamente o que
+> permite o CI passar hoje sem `./secrets/`). O erro só aparece na subida.
+>
+> **Não re-rode o `gen-secrets.sh` para acrescentar um secret a um deploy existente.** O script
+> não reconcilia nada: sobrescreve `./secrets/` inteiro e, além de trocar por defaults de dev toda
+> senha não exportada, **regera o par JWK** (o `gen-keys.sh` roda `openssl genpkey` sempre). A
+> chave de assinatura muda, todo access/refresh token em circulação deixa de ser verificável e
+> todos os usuários logados caem. É por isso que o roteiro do [README § 2b](../README.md) termina
+> em `down -v` + `up` — ele descarta o estado junto. Para só acrescentar o arquivo que falta:
+>
+> ```bash
+> printf '%s' false > secrets/SMTP_SSL_ENABLE && chmod 644 secrets/SMTP_SSL_ENABLE
+> ```
+
 | Arquivo em `./secrets/` | Consumidor(es) | Mecanismo de leitura |
 | --- | --- | --- |
 | `CONFIG_SERVER_PASSWORD` | serviços Spring · prometheus | `configtree:/run/secrets/` · `basic_auth.password_file` |
 | `OAUTH_CLIENT_SECRET` | gateway · auth-server | `configtree:/run/secrets/` |
 | `INTERNAL_API_TOKEN` | user-service · auth-server · notification-service | `configtree:/run/secrets/` |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_AUTH` / `SMTP_STARTTLS` | notification-service | `configtree:/run/secrets/` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_AUTH` / `SMTP_STARTTLS` / `SMTP_SSL_ENABLE` | notification-service | `configtree:/run/secrets/` |
 | `REDIS_PASSWORD` | redis-1/2/3 · sentinels · serviços Spring | `$(cat ...)` (runtime) · `configtree:/run/secrets/` |
 | `redis_exporter_json` | redis-exporter | `--redis.password-file` (JSON `{target: senha}`, não a senha crua) |
 | `POSTGRES_PASSWORD` | postgres · postgres-exporter | `POSTGRES_PASSWORD_FILE` (nativo) · `$(cat ...)` |
@@ -146,7 +163,9 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | `SERVER_PORT` (notification-service)   | notification-service   | `8095`                    | Porta do serviço — nunca publicada pelo gateway nem pelo compose base; só republicada em dev via `docker-compose.override.yml`. |
 | `SMTP_HOST` / `SMTP_PORT`              | notification-service   | `localhost` / `1025`      | Host/porta do servidor SMTP (`spring.mail.host/port`). Defaults de dev compatíveis com um MailHog/Mailpit local — sem credenciais reais. |
 | `SMTP_USERNAME` / `SMTP_PASSWORD`      | notification-service   | _(vazio)_                 | Credenciais SMTP — Docker secret, sem valor real por default (placeholder de dev). Exporte com credenciais reais antes de `gen-secrets.sh` em produção. |
-| `SMTP_AUTH` / `SMTP_STARTTLS`          | notification-service   | `false` / `false`         | Docker secret (mesmo mecanismo de `SMTP_HOST` etc.) para `spring.mail.properties.mail.smtp.auth`/`starttls.enable`. Gmail (`smtp.gmail.com:587`) exige ambos `true` — exporte antes de `gen-secrets.sh`. |
+| `SMTP_AUTH` / `SMTP_STARTTLS`          | notification-service   | `false` / `false`         | Docker secret (mesmo mecanismo de `SMTP_HOST` etc.) para `spring.mail.properties.mail.smtp.auth`/`starttls.enable`. Provedor na porta **587** exige ambos `true` — exporte antes de `gen-secrets.sh`. |
+| `SMTP_SSL_ENABLE`                      | notification-service   | `false`                   | Docker secret para `spring.mail.properties.mail.smtp.ssl.enable` — TLS **implícito** (porta **465**). **Mutuamente exclusivo com `SMTP_STARTTLS`**: são duas topologias de conexão, não dois níveis de rigor. `587` → `SMTP_STARTTLS=true` + `SMTP_SSL_ENABLE=false`; `465` → `SMTP_STARTTLS=false` + `SMTP_SSL_ENABLE=true`. Sem este flag a porta 465 é inutilizável (socket em texto plano contra porta que espera handshake TLS imediato). Não há validação em código — ligar os dois é incoerente. |
+| `SMTP_CONNECTION_TIMEOUT` / `SMTP_READ_TIMEOUT` / `SMTP_WRITE_TIMEOUT` | notification-service | `10000` (ms cada)         | **Não são Docker secrets** — têm default no config-server e não são declarados no compose; só entram em `environment:` se alguém quiser afinar. Mapeiam `mail.smtp.connectiontimeout`/`timeout`/`writetimeout`. Existem porque o default do Jakarta Mail é **infinito** e o `NotificationController` bloqueia até `JavaMailSender.send()` retornar: sem eles um SMTP travado segura a thread do Tomcat para sempre. O `timelimiter` de 10s do Feign **não** cobre este lado (libera o chamador, que já estava livre — a chamada é `@Async`). `10000` e não menos porque o handshake TLS + AUTH contra SMTP real passa de 3s. |
 | `APP_MAIL_FROM`                        | notification-service   | `no-reply@users.local`    | Remetente exibido nos e-mails de verificação (`app.mail.from`).                                              |
 
 ## Swagger / OpenAPI

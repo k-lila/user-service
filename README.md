@@ -256,11 +256,12 @@ e que o `CF-Connecting-IP` alimenta o rate limit (um 429 após várias tentativa
 confirma o particionamento por IP).
 
 **Observabilidade neste deploy.** Grafana, Prometheus e Zipkin **não são públicos** e não têm regra
-de ingress no túnel — `${PUBLIC_ORIGIN}/grafana` cai no `try_files` do SPA, não no Grafana. O
-Grafana fica em `http://localhost:3000` **apenas nesta máquina** (publicado em `127.0.0.1` pelo
-`docker-compose.deploy.yml`); Prometheus e Zipkin não são publicados de forma alguma no deploy —
-alcance-os pela rede interna Docker se precisar. O motivo de não expor: o Grafana tem só
-usuário/senha, sem lockout, sem rate limit e sem MFA, ao contrário do resto do sistema. Para
+de ingress no túnel — `${PUBLIC_ORIGIN}/grafana` cai no `try_files` do SPA, não no Grafana. Os três
+respondem **apenas nesta máquina**, publicados em `127.0.0.1` pelo `docker-compose.deploy.yml`:
+Grafana em `http://localhost:3000`, Prometheus em `http://localhost:9090` e Zipkin em
+`http://localhost:9411`. O motivo de não expor: o Grafana tem só usuário/senha, sem lockout, sem
+rate limit e sem MFA, e Prometheus e Zipkin não têm autenticação alguma, ao contrário do resto do
+sistema. Para
 consultar de outro dispositivo sem abrir superfície pública, use uma malha privada (Tailscale/
 WireGuard) em vez de rotear o túnel até ele — racional completo em `.claude/memory/decisions.md`.
 

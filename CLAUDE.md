@@ -133,8 +133,8 @@ Variáveis de ambiente: ver [docs/CONFIG.md](docs/CONFIG.md). Em dev manual do B
 | Front-end     | http://localhost:5173                       |
 
 🔒 **Só a partir da própria máquina.** As três portas de observabilidade são publicadas presas ao
-loopback (`127.0.0.1:PORTA:PORTA` no `docker-compose.override.yml`; no deploy, só o Grafana, via
-`docker-compose.deploy.yml`). Nenhuma tem lockout, rate limit ou MFA — Prometheus e Zipkin não têm
+loopback (`127.0.0.1:PORTA:PORTA`), tanto em dev (`docker-compose.override.yml`) quanto no deploy
+(`docker-compose.deploy.yml`). Nenhuma tem lockout, rate limit ou MFA — Prometheus e Zipkin não têm
 autenticação alguma — e não há regra de ingress para elas no túnel. Republicar sem o IP (`- "3000:3000"`)
 devolve o acesso à LAN inteira. Ver [docs/SECURITY.md](docs/SECURITY.md).
 

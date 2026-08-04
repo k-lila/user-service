@@ -31,8 +31,8 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   nunca publicadas); expor um serviço direto reintroduz o spoofing. Deploy não-Cloudflare deve
   esvaziar/trocar `TRUSTED_CLIENT_IP_HEADER` e garantir que a borda **substitua** (não anexe) o XFF.
 - **Observabilidade presa ao loopback:** Grafana, Prometheus e Zipkin são publicados como
-  `127.0.0.1:PORTA:PORTA` — em dev (`docker-compose.override.yml`) e no deploy
-  (`docker-compose.deploy.yml`, só o Grafana). O bind explícito **é o controle**: sem o IP, o Docker
+  `127.0.0.1:PORTA:PORTA` — os três, tanto em dev (`docker-compose.override.yml`) quanto no deploy
+  (`docker-compose.deploy.yml`). O bind explícito **é o controle**: sem o IP, o Docker
   publica em `0.0.0.0` e os três passam a responder para toda a rede local. Nenhum deles tem
   lockout, rate limit ou MFA — Prometheus e Zipkin não têm autenticação **nenhuma** — e os dois
   expõem métricas, traces, hostnames internos e topologia. Também **não** há regra de ingress para
@@ -334,9 +334,10 @@ Cloudflare (TLS) → cloudflared → interface:80 (nginx) → gateway:8081 → s
   cujo `CNAME` aponta para ele. `TUNNEL_ID` e `PUBLIC_ORIGIN` vivem no `.env`.
 - **Observabilidade fora da borda pública:** Grafana, Prometheus e Zipkin **não têm regra de
   ingress** no túnel — `${PUBLIC_ORIGIN}/grafana` cai no `try_files` do SPA, não no Grafana, e o
-  nginx não faz proxy de nenhum path de observabilidade. No deploy, o único com porta publicada no
-  host é o Grafana, em `127.0.0.1:3000` (acesso do operador na própria máquina); Prometheus e Zipkin
-  ficam só na rede interna Docker. Decisão e alternativas descartadas em `.claude/memory/decisions.md`.
+  nginx não faz proxy de nenhum path de observabilidade. No deploy, os três são publicados **só no
+  loopback** — Grafana em `127.0.0.1:3000`, Prometheus em `127.0.0.1:9090`, Zipkin em
+  `127.0.0.1:9411` — acesso do operador na própria máquina do deploy e de mais nenhum host.
+  Decisão e alternativas descartadas em `.claude/memory/decisions.md`.
   **Fato a não redescobrir:** o `cloudflared` **não interpola variáveis de ambiente** no `config.yml`
   — uma regra `hostname: ${VAR}` vira hostname literal e nunca casa, caindo no catch-all. Expor algo
   por hostname próprio exigiria o domínio literal no repo (contra a política de sigilo) ou um

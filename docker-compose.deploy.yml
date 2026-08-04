@@ -156,14 +156,16 @@ services:
       AUTH_URL: ${PUBLIC_ORIGIN}/oauth2/authorize
       AUTH_TOKEN: ${PUBLIC_ORIGIN}/oauth2/token
 
-  # Grafana alcançável pelo operador NA PRÓPRIA MÁQUINA do deploy, e em lugar nenhum além dela.
+  # Observabilidade alcançável pelo operador NA PRÓPRIA MÁQUINA do deploy, e em lugar nenhum além
+  # dela. Simétrico ao docker-compose.override.yml (dev): os três em loopback, nos dois cenários.
   #
-  # POR QUE NÃO EXPOR PUBLICAMENTE. O Grafana é o componente com a autenticação mais fraca do
-  # ecossistema: usuário/senha e nada mais — sem lockout (o LoginAttemptService é do auth-server),
-  # sem rate limit (o token bucket é do gateway), sem MFA. Publicá-lo colocaria na internet
-  # justamente a peça que não tem os controles que todo o resto tem. As alternativas avaliadas
-  # (SSO OIDC; subpath atrás da sessão do BFF; hostname próprio no túnel) estão registradas em
-  # .claude/memory/decisions.md.
+  # POR QUE NÃO EXPOR PUBLICAMENTE. São os componentes com a autenticação mais fraca do ecossistema:
+  # o Grafana tem usuário/senha e nada mais — sem lockout (o LoginAttemptService é do auth-server),
+  # sem rate limit (o token bucket é do gateway), sem MFA — e Prometheus e Zipkin não têm
+  # autenticação NENHUMA, além de expor métricas, traces, hostnames internos e a topologia do
+  # sistema. Publicá-los colocaria na internet justamente as peças que não têm os controles que todo
+  # o resto tem. As alternativas avaliadas (SSO OIDC; subpath atrás da sessão do BFF; hostname
+  # próprio no túnel) estão registradas em .claude/memory/decisions.md.
   #
   # 127.0.0.1: NÃO É DECORATIVO. Sem o IP, `- "3000:3000"` publica em 0.0.0.0 e o serviço passa a
   # responder para toda a LAN. Preso ao loopback, o Docker cria a regra de iptables só na interface
@@ -171,14 +173,27 @@ services:
   # outro host.
   #
   # ORTOGONAL AO TÚNEL. Publicar porta no host não cria rota pública: quem decide o que entra pelo
-  # túnel é o ingress de infra/cloudflared/config.yml, que roteia só para interface:80. Esta linha
-  # não torna o Grafana alcançável de fora — e removê-la também não o protegeria do túnel.
+  # túnel é o ingress de infra/cloudflared/config.yml, que roteia só para interface:80. Estas linhas
+  # não tornam os três alcançáveis de fora — e removê-las também não os protegeria do túnel.
   #
-  # ARMADILHA DE MERGE. Listas de `ports:` são CONCATENADAS entre arquivos, não substituídas. Aqui
-  # não há duplicação porque a base não declara `ports` para o grafana (docker-compose.yml, seção
-  # grafana). Mas somar este overlay ao docker-compose.override.yml — que também publica a 3000 —
-  # produz bind duplicado na mesma porta e falha na subida. O comando documentado do deploy
-  # (-f docker-compose.yml -f docker-compose.deploy.yml) já exclui o override; mantenha assim.
+  # MERGE COM O OVERRIDE. Listas de `ports:` são MESCLADAS entre arquivos, não substituídas — o
+  # Compose v2 deduplica pela chave (host_ip/published/target/protocol). Como o
+  # docker-compose.override.yml publica EXATAMENTE os mesmos três mapeamentos, somá-lo a este
+  # overlay hoje é inócuo: as entradas coincidem e colapsam em uma só (verificado com
+  # `docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.deploy.yml config`).
+  # O risco não é bind duplicado, é DIVERGÊNCIA: se o override voltar a `- "3000:3000"` (sem o IP),
+  # as chaves param de coincidir, as duas entradas sobrevivem ao merge e a de 0.0.0.0 republica na
+  # LAN — o loopback daqui não "vence" a outra. O comando documentado do deploy
+  # (-f docker-compose.yml -f docker-compose.deploy.yml) já exclui o override; mantenha assim, e
+  # mantenha os dois arquivos com o mesmo `127.0.0.1:` caso alguém os combine.
+  zipkin:
+    ports:
+      - "127.0.0.1:9411:9411"
+
+  prometheus:
+    ports:
+      - "127.0.0.1:9090:9090"
+
   grafana:
     ports:
       - "127.0.0.1:3000:3000"
