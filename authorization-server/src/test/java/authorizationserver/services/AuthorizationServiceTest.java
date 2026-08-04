@@ -13,11 +13,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
 import authorizationserver.clients.IUserClient;
+import authorizationserver.clients.UserServiceUnavailableException;
 import authorizationserver.dtos.AuthDTO;
 
 @ExtendWith(MockitoExtension.class)
@@ -207,7 +209,7 @@ class AuthorizationServiceTest {
     }
 
     @Test
-    void deveManterContaHabilitada_semNpe_quandoRegistrationDateNuloEEmailNaoVerificado() {
+    void deveDesabilitarConta_semNpe_quandoRegistrationDateNuloEEmailNaoVerificado() {
         AuthorizationService serviceComGracePeriod = new AuthorizationService(
                 userClient, loginAttempts, "CF-Connecting-IP", Duration.ofHours(24));
         AuthDTO dto = buildAuthDTO("fulano@email.com", true, Set.of("USER"));
@@ -224,5 +226,29 @@ class AuthorizationServiceTest {
         // fora de qualquer janela, a conta fica desabilitada (comportamento equivalente ao
         // usuário legado só quando emailVerified é null, não false).
         assertFalse(result.isEnabled());
+    }
+
+    // ── ADR-021: indisponibilidade do user-service não vira "credencial inválida" ────────────
+    //
+    // GUARD DO FIX. Sem ele, trocar só o UserClientFallbackFactory e esquecer o catch do
+    // AuthorizationService deixa TODOS os outros testes passando com o bug de pé: a
+    // UserServiceUnavailableException não é subtipo de UsernameNotFoundException, cairia no
+    // catch (Exception) e voltaria a ser convertida — realimentando o lockout.
+    @Test
+    void deveNaoConverterEmUsernameNotFound_quandoUserServiceIndisponivel() {
+        when(userClient.getUserByEmail("fulano@email.com"))
+                .thenThrow(new UserServiceUnavailableException("user-service unavailable"));
+
+        UserServiceUnavailableException lancada = assertThrows(
+                UserServiceUnavailableException.class,
+                () -> service.loadUserByUsername("fulano@email.com"));
+
+        // O tipo tem de sobreviver intacto até o provider: é o que impede a publicação do
+        // AuthenticationFailureBadCredentialsEvent que alimentaria o LoginAttemptListener.
+        assertInstanceOf(InternalAuthenticationServiceException.class, lancada);
+        // Não há assert de "não é UsernameNotFoundException": as duas hierarquias são disjuntas,
+        // e o compilador rejeita o instanceof como tipo impossível — garantia mais forte que
+        // uma asserção em runtime. Se alguém religar a conversão, é este assertThrows que quebra.
+        verifyNoInteractions(loginAttempts);
     }
 }

@@ -31,7 +31,11 @@ public class EmailService {
         message.setSubject("Confirme seu e-mail");
         message.setText(
             "Olá " + request.getName() + ",\n\n"
-            + "Confirme seu cadastro acessando o link abaixo (válido por 15 minutos):\n"
+            // Sem prazo numérico de propósito: o TTL real é app.email-verification.token-ttl no
+            // user-service (configurável por env) e este serviço não o conhece — o DTO não o
+            // carrega. Cravar "15 minutos" aqui faz o e-mail mentir assim que a env mudar.
+            // Carregar o TTL no DTO seria mudança de contrato Feign, com ADR próprio.
+            + "Confirme seu cadastro acessando o link abaixo (o link expira em pouco tempo):\n"
             + request.getVerificationLink() + "\n\n"
             + "Se você não se cadastrou, ignore este e-mail."
         );

@@ -3,17 +3,21 @@ package authorizationserver.clients;
 import static org.junit.jupiter.api.Assertions.*;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
+/**
+ * ADR-021: o fallback lança {@link UserServiceUnavailableException}, NÃO
+ * {@code UsernameNotFoundException}. Trocar de volta faz um outage do user-service alimentar o
+ * contador de lockout e bloquear contas legítimas por 15 min.
+ */
 class UserClientFallbackFactoryTest {
 
     private final UserClientFallbackFactory factory = new UserClientFallbackFactory();
 
     @Test
-    void deveLancarUsernameNotFoundException_quandoFallbackAcionado() {
+    void deveLancarUserServiceUnavailable_quandoFallbackAcionado() {
         IUserClient fallback = factory.create(new RuntimeException("connection refused"));
 
-        assertThrows(UsernameNotFoundException.class,
+        assertThrows(UserServiceUnavailableException.class,
                 () -> fallback.getUserByEmail("fulano@email.com"));
     }
 
@@ -23,36 +27,36 @@ class UserClientFallbackFactoryTest {
     }
 
     @Test
-    void deveLancarUsernameNotFoundException_comEmailNulo() {
+    void deveLancarUserServiceUnavailable_comEmailNulo() {
         IUserClient fallback = factory.create(new RuntimeException("timeout"));
 
-        assertThrows(UsernameNotFoundException.class,
+        assertThrows(UserServiceUnavailableException.class,
                 () -> fallback.getUserByEmail(null));
     }
 
     @Test
-    void deveLancarUsernameNotFoundException_comEmailSemArroba() {
+    void deveLancarUserServiceUnavailable_comEmailSemArroba() {
         IUserClient fallback = factory.create(new RuntimeException("timeout"));
 
-        assertThrows(UsernameNotFoundException.class,
+        assertThrows(UserServiceUnavailableException.class,
                 () -> fallback.getUserByEmail("naotemarroba"));
     }
 
     @Test
-    void deveLancarUsernameNotFoundException_comEmailLocalCurto() {
+    void deveLancarUserServiceUnavailable_comEmailLocalCurto() {
         // email com parte local de 1 char — substring(0, min(2, at)) não estoura
         IUserClient fallback = factory.create(new RuntimeException("timeout"));
 
-        assertThrows(UsernameNotFoundException.class,
+        assertThrows(UserServiceUnavailableException.class,
                 () -> fallback.getUserByEmail("a@dominio.com"));
     }
 
     @Test
-    void deveLancarUsernameNotFoundException_quandoCausaSemMensagem() {
+    void deveLancarUserServiceUnavailable_quandoCausaSemMensagem() {
         // cause.getMessage() retorna null — SLF4J loga "null" sem estourar
         IUserClient fallback = factory.create(new RuntimeException());
 
-        assertThrows(UsernameNotFoundException.class,
+        assertThrows(UserServiceUnavailableException.class,
                 () -> fallback.getUserByEmail("fulano@email.com"));
     }
 }

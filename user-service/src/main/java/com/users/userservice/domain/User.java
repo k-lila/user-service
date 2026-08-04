@@ -61,8 +61,10 @@ public class User {
     @Schema(description = "IDs dos tenants aos quais o usuário pertence", nullable = true)
     private List<String> tenantIds;
 
-    // Nullable: sem fluxo de verificação implementado ainda — null é tratado como
-    // verificado (true) em toda a leitura, igual ao padrão do consentAcceptedAt legado.
+    // Nullable: null (legado, anterior ao campo) é tratado como verificado (true) em toda a
+    // leitura, igual ao padrão do consentAcceptedAt legado. O campo NÃO é mais scaffold — o
+    // fluxo de verificação existe desde o ADR-015 (EmailVerificationService) e o alimenta de
+    // fato no cadastro (false) e na confirmação (true + emailVerifiedAt).
     @Schema(description = "Indica se o e-mail foi verificado", nullable = true)
     private Boolean emailVerified;
 

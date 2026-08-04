@@ -5,7 +5,6 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -15,10 +14,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cache.CacheManager;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 
 import com.users.userservice.domain.User;
 import com.users.userservice.dtos.UserResponseDTO;
@@ -48,14 +43,8 @@ class SearchServiceTest {
         return u;
     }
 
-    @Test
-    void deveRetornarPaginaVazia_quandoNaoExistemRegistros() {
-        when(userRepository.findByActiveTrue(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
-
-        Page<UserResponseDTO> result = service.searchAll(PageRequest.of(0, 10));
-
-        assertTrue(result.isEmpty());
-    }
+    // Os testes de searchAll saíram junto do método (ADR-021). A paginação sobrevive só na
+    // superfície ADMIN — coberta por AdminServiceTest/AdminFlowIntegrationTest.
 
     @Test
     void deveRetornarUsuario_quandoIdValido() {
@@ -127,18 +116,4 @@ class SearchServiceTest {
         assertTrue(result.getActive());
     }
 
-    @Test
-    void deveMapearCamposDosUsuariosNaPagina_quandoBuscaTodos() {
-        User user = buildUser("id-1", "fulano@email.com");
-
-        when(userRepository.findByActiveTrue(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(user)));
-
-        Page<UserResponseDTO> result = service.searchAll(PageRequest.of(0, 10));
-
-        UserResponseDTO dto = result.getContent().get(0);
-        assertEquals("id-1", dto.getId());
-        assertEquals("Fulano", dto.getName());
-        assertEquals("fulano@email.com", dto.getEmail());
-        assertTrue(dto.getActive());
-    }
 }

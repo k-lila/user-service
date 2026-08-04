@@ -78,13 +78,13 @@
 			<scope>test</scope>
 		</dependency>
 
-		<!-- Source: https://mvnrepository.com/artifact/org.springdoc/springdoc-openapi-starter-webmvc-ui -->
-		<dependency>
-			<groupId>org.springdoc</groupId>
-			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-			<version>3.0.0</version>
-			<scope>compile</scope>
-		</dependency>
+		<!-- springdoc REMOVIDO DELIBERADAMENTE (ADR-021). Este serviço expõe apenas o canal
+		     interno /internal/** (ADR-006), que por invariante nunca é documentado em Swagger.
+		     Com a dependência presente, /v3/api-docs servia a especificação desse canal a quem
+		     alcançasse a porta 8095 — o InternalTokenFilter cobre só /internal/*. Desligar
+		     springdoc.api-docs.enabled por YAML NÃO bastaria: o application.yml importa a config
+		     com `optional:configserver:`, então a propriedade evapora se o config-server estiver
+		     fora no boot. Sem a dependência, a garantia é de classpath. NÃO reintroduzir. -->
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

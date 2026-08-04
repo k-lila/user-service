@@ -37,9 +37,10 @@ logging:
   pattern:
     level: "%5p [${spring.application.name:},traceId=%X{traceId:-},spanId=%X{spanId:-}]"
 
-springdoc:
-  swagger-ui:
-    enabled: false
+# Sem bloco `springdoc:` — a dependência foi removida do pom (ADR-021). O bloco anterior
+# desligava só a swagger-ui, deixando /v3/api-docs servindo a especificação do canal interno.
+# Não readicionar: config aqui é condicional (o serviço importa com `optional:configserver:`),
+# a ausência da dependência não é.
 
 management:
   tracing:

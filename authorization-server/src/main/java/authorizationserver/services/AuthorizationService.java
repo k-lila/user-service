@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
@@ -46,11 +47,23 @@ public class AuthorizationService implements UserDetailsService {
         AuthDTO user;
         try {
             user = userClient.getUserByEmail(email);
-        } catch (UsernameNotFoundException e) {
-            // Propaga sem reembrulhar: vem do fallback (user-service indisponível /
-            // circuit breaker aberto) ou de "não encontrado". O DaoAuthenticationProvider
-            // trata como credenciais inválidas (mensagem genérica) e devolve o usuário ao
-            // login — em vez de escalar a 500 como o antigo catch (Exception) fazia.
+        } catch (AuthenticationException e) {
+            // Propaga sem reembrulhar. Cobre DOIS casos, com desfechos deliberadamente distintos:
+            //
+            //  - UsernameNotFoundException ("não encontrado"): o DaoAuthenticationProvider a trata
+            //    como credenciais inválidas (mensagem genérica) e devolve o usuário ao login, em
+            //    vez de escalar a 500 como o antigo catch (Exception) fazia. Conta para o lockout,
+            //    que é o correto — é indistinguível de tentativa de adivinhação.
+            //
+            //  - UserServiceUnavailableException (fallback do circuit breaker, ADR-021): é
+            //    InternalAuthenticationServiceException, repropagada intacta e sem evento
+            //    publicado — NÃO conta para o lockout. Um outage não pode bloquear conta legítima.
+            //
+            // O catch TEM de ser AuthenticationException (e não UsernameNotFoundException): a
+            // segunda não é subtipo da primeira, cairia no catch (Exception) abaixo e seria
+            // convertida de volta em UsernameNotFoundException — reintroduzindo o bug inteiro,
+            // com todos os testes existentes passando. Guard: AuthorizationServiceTest
+            // .deveNaoConverterEmUsernameNotFound_quandoUserServiceIndisponivel.
             throw e;
         } catch (Exception e) {
             // Só o inesperado (ex.: erro de (de)serialização) cai aqui. Loga o detalhe

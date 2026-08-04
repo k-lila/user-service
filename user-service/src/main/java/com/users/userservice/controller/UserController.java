@@ -2,8 +2,6 @@ package com.users.userservice.controller;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -88,18 +86,11 @@ public class UserController {
         return ResponseEntity.accepted().build();
     }
 
-    @Operation(summary = "Lista todos os usuários")
-    @GetMapping
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<Page<UserResponseDTO>> searchAll(Pageable pageable) {
-        LOGGER.info(
-            "| GET | buscar todos | página: {}x{}",
-            pageable.getPageSize(),
-            pageable.getPageNumber()
-        );
-        Page<UserResponseDTO> users = searchService.searchAll(pageable);
-        return ResponseEntity.ok(users);
-    }
+    // GET /v1/users (listagem de toda a base ativa) foi REMOVIDO — ADR-021. Devolvia PII de
+    // todos os titulares ativos a qualquer ROLE_USER, sem auditoria: era o resíduo do G1 que o
+    // ADR-016 não viu ao remover as leituras por id/e-mail. Um USER lê só o próprio dado (/me);
+    // a listagem existe apenas como ADMIN em GET /v1/admin/users (ADR-014), com filtros e
+    // incluindo inativos. NÃO reintroduzir aqui.
 
     @Operation(summary = "Modificar um usuário")
     @PutMapping

@@ -1,6 +1,7 @@
 package authorizationserver.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -25,10 +26,14 @@ import com.github.tomakehurst.wiremock.client.WireMock;
  * {@code waitDurationInOpenState=60s} o mantém aberto durante o teste (a classe base reseta
  * o registry entre testes); TimeLimiter de 2s (produção usa 3s).
  *
- * <p>O fallback lança {@code UsernameNotFoundException}; o {@code AuthorizationService}
- * converte a falha de comunicação em erro de autenticação → na borda HTTP o form login
- * redireciona para {@code /login?error} (falha controlada, sem 5xx e sem travar no delay
- * do downstream).
+ * <p>O fallback lança {@code UserServiceUnavailableException} (ADR-021), que estende
+ * {@code InternalAuthenticationServiceException} e o {@code AuthorizationService} propaga sem
+ * reembrulhar → na borda HTTP o form login redireciona para {@code /login?error} (falha
+ * controlada, sem 5xx e sem travar no delay do downstream). Antes do ADR-021 o fallback lançava
+ * {@code UsernameNotFoundException}, que o {@code DaoAuthenticationProvider} convertia em
+ * {@code BadCredentialsException} — e o {@code LoginAttemptListener} contava a falha, fazendo um
+ * outage bloquear contas legítimas por 15 min. É o que
+ * {@link #naoDeveBloquearConta_apos5FalhasDuranteOutage()} cobre.
  */
 class UserServiceCircuitBreakerIntegrationTest extends AbstractAuthIntegrationTest {
 
@@ -39,6 +44,9 @@ class UserServiceCircuitBreakerIntegrationTest extends AbstractAuthIntegrationTe
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private authorizationserver.services.LoginAttemptService loginAttempts;
 
     @Test
     void deveFalharLoginDeFormaControlada_quandoUserServiceRetorna500() throws Exception {
@@ -107,6 +115,38 @@ class UserServiceCircuitBreakerIntegrationTest extends AbstractAuthIntegrationTe
                 "com o circuito aberto, nenhuma chamada nova deve chegar ao user-service");
         assertTrue(duracao.compareTo(TIMEOUT_CONFIGURADO) < 0,
                 "com o circuito aberto o fallback deve responder antes do timeout; durou " + duracao);
+    }
+
+    /**
+     * ADR-021 — o teste de cruzamento lockout × circuit breaker: a prova do bug e do fix.
+     *
+     * <p>Antes do fix este teste FALHAVA. O fallback lançava {@code UsernameNotFoundException},
+     * o {@code DaoAuthenticationProvider} a convertia em {@code BadCredentialsException}, o
+     * publisher emitia {@code AuthenticationFailureBadCredentialsEvent} e o
+     * {@code LoginAttemptListener} incrementava — cinco tentativas durante um outage bloqueavam
+     * a conta por 15 min (max-attempts=5 no yml de teste). Um incidente de infraestrutura virava
+     * negação de serviço para o usuário legítimo.
+     *
+     * <p>Assere sobre o {@code LoginAttemptService} diretamente, e não sobre um login bem-sucedido
+     * depois: o circuito abre com 2 falhas e {@code waitDurationInOpenState=60s} o mantém aberto
+     * até o fim do teste, então não há como restaurar o downstream e autenticar aqui.
+     */
+    @Test
+    void naoDeveBloquearConta_apos5FalhasDuranteOutage() throws Exception {
+        // ARRANGE — downstream fora do ar durante toda a sequência
+        String email = "cb.outage@test.com";
+        stubUserServiceCom500();
+
+        // ACT — 6 tentativas, uma acima do max-attempts=5 do yml de teste
+        for (int i = 0; i < 6; i++) {
+            assertEquals("/login?error", login(email), "tentativa " + (i + 1) + " deve falhar controlada");
+        }
+
+        // ASSERT — nenhuma delas pode ter contado como credencial inválida.
+        // O IP é o do MockMvc (127.0.0.1), o mesmo que o ClientIpResolver enxerga sem o header
+        // confiável — é o par (conta, IP) que o lockout particiona.
+        assertFalse(loginAttempts.isBlocked(email, "127.0.0.1"),
+                "indisponibilidade do user-service não pode alimentar o lockout (ADR-021)");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
