@@ -82,5 +82,26 @@ coverage/
 # Chaves de assinatura JWT (gap 0.1 RELATORIOA): geradas fora do repo via
 # infra/jwk/gen-keys.sh. Nunca versionar a chave de assinatura.
 authorization-server/src/main/resources/keys/
+# Material de chave em QUALQUER ponto da árvore: a regra acima cobre só o
+# DIR_SAIDA default do gen-keys.sh, que é parametrizável (app.key/app.pub).
+# Nenhum arquivo versionado hoje casa estes padrões — o keyfile de dev do Mongo
+# (infra/mongo/keyfile) não tem extensão e segue rastreado de propósito.
+*.key
+*.pem
+*.p12
+*.jks
 # Secrets de deploy (Docker secrets montados em runtime).
 /secrets/
+
+# Estado local do Claude Code. O restante de .claude/ (agents, memory, skills,
+# workflows) é versionado de propósito — só estes não são. Estavam cobertos
+# apenas por ~/.config/git/ignore e .git/info/exclude, que são por-máquina e
+# por-clone: num clone novo o settings.local.json apareceria como untracked.
+.claude/settings.local.json
+.claude/scheduled_tasks.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+.claude/checkpoints/
+.claude/mailbox/
+.claude/routines/.state/
+.claude/agent-registry.json
