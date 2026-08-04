@@ -68,18 +68,30 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | `SERVER_PORT`       | todos                  | por serviço¹                    | Porta HTTP do serviço.                                                |
 | `CONFIG_SERVER_URL` | todos (exceto config)  | —                               | `spring.config.import=optional:configserver:...`. Compose: `http://config-lb:8888` (nginx LB na frente de `config-server-1` e `config-server-2`). |
 | `CONFIG_SERVER_USERNAME` | config-server · clientes | `config-client`             | Usuário do Basic auth do config-server. No config-server vira `spring.security.user.name`; nos clientes, `spring.cloud.config.username`. |
-| `CONFIG_SERVER_PASSWORD` | config-server · clientes | `config-dev-secret`         | Senha do Basic auth. **Cuidado:** o compose passa `${CONFIG_SERVER_PASSWORD}` **sem `:-default`** → se faltar no `.env`, o container recebe a var vazia (não cai no default do `application.yml`) e o config-server **falha na subida**. O `.env.example` lista ambas. |
+| `CONFIG_SERVER_PASSWORD` | config-server · clientes | `config-dev-secret`         | Senha do Basic auth. **É Docker secret, não variável de ambiente** — montada em `/run/secrets/CONFIG_SERVER_PASSWORD` e resolvida pelo configtree; o `prometheus.yml` a lê por `password_file`. Por isso **não** está no `.env.example` (que lista só `CONFIG_SERVER_USERNAME`). Quem o compose passa sem `:-default` é o **`CONFIG_SERVER_USERNAME`**: se faltar no `.env`, o container recebe a var vazia (não cai no default do `application.yml`). |
 | `EUREKA_URI`        | todos (exceto discovery) | `http://localhost:9091/eureka` | `defaultZone` do Eureka. Compose: lista CSV com ambas as instâncias HA (`http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka`). |
 | `EUREKA_PEER_URL`   | discovery-server       | `http://localhost:9091/eureka`  | URL do **peer** Eureka (a outra instância). Cada nó aponta para o outro. |
 | `EUREKA_HOSTNAME`   | discovery-server       | `localhost`                     | Hostname que a instância anuncia ao peer. Compose: `discovery-server-1` / `discovery-server-2`. |
 
-> ¹ Defaults de porta: gateway `8081`, authorization-server `8082`, user-service `8090`, discovery-server `9091`, config-server `8888`.
+> ¹ Defaults de porta: gateway `8081`, authorization-server `8082`, user-service `8090`, **notification-service `8095`**, discovery-server `9091`/`9092`, config-server `8888`.
+>
+> **Porta de management:** só o **gateway** separa o actuator (`management.server.port: 8181`, hardcoded no `gateway.yml`, não publicada no host — o Prometheus raspa `gateway:8181` pela rede interna). Todos os demais servem `/actuator/**` na porta principal — ver gap **G14** em [SECURITY.md](SECURITY.md).
+
+### Variáveis de plataforma (fáceis de esquecer)
+
+| Variável | Serviço(s) | Default | Observação |
+| --- | --- | --- | --- |
+| `SPRING_CONFIG_IMPORT` | todos os Spring | — | **É o que liga todo o mecanismo de segredos.** O compose a injeta (âncora `x-spring-config`) com `configtree:/run/secrets/` + `optional:configserver:${CONFIG_SERVER_URL}`. Removê-la desativa **todos** os Docker secrets de uma vez, silenciosamente. |
+| `APP_COOKIE_SECURE` | gateway · authorization-server | `false` | Liga a flag `Secure` nos cookies de sessão (`SESSION` e `AUTHSESSION`). Fica `false` em dev (HTTP) e `true` no overlay de deploy — a simetria entre os dois serviços é invariante do [ADR-007](adr/ADR-007-sessao-redis-cookies-distintos.md). |
+| `SPRING_PROFILES_ACTIVE` | config-server | `native` | Perfil do config-server (serve de `classpath:/config`). |
+| `JWK_RSA_BITS` | `infra/jwk/gen-keys.sh` | `2048` | Tamanho da chave RSA gerada pelo script (não é lida por serviço algum). |
+| `SECRETS_DIR` | `infra/secrets/gen-secrets.sh` | `./secrets` | Diretório de saída dos segredos gerados. |
 
 ## Dados (Mongo · Postgres · Redis)
 
 | Variável            | Serviço(s)                          | Default dev                                  | Observação                                                       |
 | ------------------- | ----------------------------------- | -------------------------------------------- | ---------------------------------------------------------------- |
-| `MONGODB_URI`           | user-service                        | — (obrigatória)      | Compose: URI de replica set `mongodb://user_service:...@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin`. |
+| `MONGODB_URI`           | user-service                        | — (obrigatória)      | **Docker secret**, montado em `/run/secrets/MONGODB_URI` e resolvido pelo configtree — **não** é montado pelo compose como env. Gerado pelo `infra/secrets/gen-secrets.sh`, que interpola `${MONGO_USER}` (template: `root`) e a senha: `mongodb://<MONGO_USER>:<MONGO_PASSWORD>@mongo-1:27017,mongo-2:27017,mongo-3:27017/user-db?replicaSet=rs0&authSource=admin`. |
 | `MONGODB_DATABASE`      | user-service                        | `user-db`            | Base de dados de usuários.                                                          |
 | `REDIS_SENTINEL_MASTER` | user-service · gateway · auth-server | `mymaster`          | Nome do master monitorado pelos Sentinels. Substitui `REDIS_HOST`/`REDIS_PORT`.     |
 | `REDIS_SENTINEL_NODES`  | user-service · gateway · auth-server | `redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379` | Lista CSV de endereços dos processos Sentinel. |
@@ -169,7 +181,7 @@ gateway), todas as URLs de front-channel derivam dela. Roteiro de subida no [REA
 | Variável        | Onde é lida                        | Default | Observação                                                                                       |
 | --------------- | ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------ |
 | `PUBLIC_ORIGIN` | `docker-compose.deploy.yml` (interpolação) | — (fail-fast) | Esquema + host, **sem barra final** (ex.: `https://app.exemplo.com`). Deriva `CORS_ALLOWED_ORIGINS`, `CORS_ALLOWED_ORIGINS_AUTH`, `OAUTH_AUTHORIZATION_URI`, `OAUTH_REDIRECT_URI`, `OAUTH_END_SESSION_URI`, `POST_LOGOUT_REDIRECT_URI`, `API_BASE_URL`, `AUTH_URL`, `AUTH_TOKEN`, `OAUTH_CLIENT_REDIRECT_URIS` e `OAUTH_CLIENT_POST_LOGOUT_URIS`. Sem ela o overlay não sobe (`${PUBLIC_ORIGIN:?}`). |
-| `PUBLIC_HOST`   | ninguém (documental)               | —       | O mesmo valor sem o esquema. Existe para o `cloudflared tunnel route dns` (o `CNAME` do hostname público). Mantenha em sincronia com `PUBLIC_ORIGIN`. |
+| `PUBLIC_HOST`   | `docker-compose.deploy.yml` (serviço `assert-env`) | — (fail-fast) | O mesmo valor sem o esquema. Usada pelo `cloudflared tunnel route dns` (o `CNAME` do hostname público) e **verificada em runtime**: o init-container `assert-env` aborta a stack se `PUBLIC_HOST` divergir do hostname implícito em `PUBLIC_ORIGIN` (ADR-019 — a divergência silenciosa entre as duas foi o Elo 1 que derrubou o login). Não é mais documental. |
 | `TUNNEL_ID`     | `docker-compose.deploy.yml` (interpolação) | — (fail-fast) | UUID impresso por `cloudflared tunnel create`, passado como argumento do `run`. Mora no `.env` — e não no `infra/cloudflared/config.yml` — porque o compose interpola `${VAR}` no `command` mas **não** dentro de um YAML montado, e o repositório não carrega identificadores do deploy real. Sem ela o overlay não sobe (`${TUNNEL_ID:?}`). |
 
 > **`AUTH_ISSUER` e `AUTH_ISSUER_URI` continuam internos** — o JWT é validado pela rede Docker, não
@@ -202,8 +214,8 @@ Cloudflare Tunnel (ADR-010, item 1.2 RELATORIOA): o header confiável é a fonte
 | ---------------------------------------------- | ----------------------------------- | ------------------------------------ | ------------------------------------------- |
 | `MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT`    | user-service · gateway · auth-server | `http://zipkin:9411/api/v2/spans`    | Endpoint do Zipkin para exportar spans.     |
 | `MANAGEMENT_TRACING_SAMPLING_PROBABILITY`      | user-service · gateway · auth-server | `1.0`                                | Probabilidade de sampling de tracing. Default dev `1.0` (100%) nos `*.yml` do config-server; em **prod** reduza para conter custo/volume (ex.: `0.1`). |
-| `LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SESSION`    | gateway                             | `DEBUG`                              | Toggle de debug (dev) da sessão.            |
-| `LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY_WEB` | gateway                           | `DEBUG`                              | Toggle de debug (dev) do Spring Security.   |
+| `LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SESSION`    | gateway (se setada)                 | — (não setada)                       | Toggle de debug (dev) da sessão. **Não está em nenhum compose nem YAML** — é uma env que o Spring Boot reconhece se você a exportar, não algo que o projeto injete. |
+| `LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY_WEB` | gateway (se setada)               | — (não setada)                       | Idem, para o Spring Security.               |
 
 **Storage do Zipkin** (container `zipkin`, só `docker-compose`). O Zipkin roda **in-memory por
 default** (`STORAGE_TYPE=mem`) — adequado a dev, mas os traces somem no restart. Para
@@ -229,13 +241,19 @@ host vars com prefixo `ZIPKIN_` que o compose injeta nos nomes nativos do contai
 
 Consumidas pelos próprios containers de banco na inicialização, não pelos serviços Spring:
 
-| Variável                      | Container              | Compose         | Observação                                         |
-| ----------------------------- | ---------------------- | --------------- | -------------------------------------------------- |
-| `POSTGRES_DB`                 | `auth-postgres`        | `authdb`        |                                                    |
-| `POSTGRES_USER`               | `auth-postgres`        | `auth_service`  |                                                    |
-| `POSTGRES_PASSWORD`           | `auth-postgres`        | `auth_1234321`  |                                                    |
-| `MONGO_INITDB_ROOT_USERNAME`  | `mongo-1`              | `user_service`  | Só no nó primário; secundários recebem por replicação. |
-| `MONGO_INITDB_ROOT_PASSWORD`  | `mongo-1`              | `user_1234321`  |                                                    |
+> **Corrigido em 2026-08-04.** Esta tabela listava valores literais (`auth_service`,
+> `auth_1234321`, `user_service`, `user_1234321`) que **não existem em lugar nenhum do
+> repositório** — eram resquício de antes da migração para Docker secrets ([[ADR-009]]). As senhas
+> não são mais variáveis de ambiente: vêm de `*_FILE` apontando para `/run/secrets/`.
+
+| Variável                      | Container              | Origem / valor real | Observação                                    |
+| ----------------------------- | ---------------------- | ------------------- | --------------------------------------------- |
+| `POSTGRES_DB`                 | `auth-postgres`        | `authdb` (literal no compose) |                                     |
+| `POSTGRES_USER`               | `auth-postgres`        | `${POSTGRES_USER}` do `.env` — template: `changeme` | Sem `:-default` no compose; se faltar no `.env`, vai vazia. |
+| `POSTGRES_PASSWORD_FILE`      | `auth-postgres`        | `/run/secrets/POSTGRES_PASSWORD` | **Não é `POSTGRES_PASSWORD`.** Default de dev gerado pelo `gen-secrets.sh`: `postgres-dev-secret`. O mesmo secret é montado no `authorization-server` com *target* renomeado para `AUTH_DB_PASSWORD` (configtree). |
+| `MONGO_USER`                  | `mongo-1`, `mongo-init`, `mongodb-exporter` | `${MONGO_USER}` do `.env` — template: `root` | Injetada como `MONGO_INITDB_ROOT_USERNAME` no `mongo-1`. Só no nó primário; secundários recebem por replicação. |
+| `MONGO_INITDB_ROOT_PASSWORD_FILE` | `mongo-1`          | `/run/secrets/MONGO_PASSWORD` | **A chave `MONGO_INITDB_ROOT_PASSWORD` não existe.** Default de dev: `mongo-dev-secret`. O `mongo-init` lê o mesmo secret via `$(cat ...)`. |
+| `GRAFANA_ADMIN_USER`          | `grafana`              | `${GRAFANA_ADMIN_USER}` do `.env` | Injetada como `GF_SECURITY_ADMIN_USER`. A senha vem do secret via `GF_SECURITY_ADMIN_PASSWORD__FILE`. |
 | `WEB_HOST_PORT`               | `interface`            | `5173`          | Porta do **host** da borda pública (mapeia para `:80` do container). Dev usa `5173`; prod tipicamente `80`. Declarada no `docker-compose.override.yml` — na base prod-safe a interface **não é publicada** no host (G10/ADR-019). |
 
 ## Limites de recursos (CPU / memória)
@@ -258,7 +276,7 @@ conforme a carga real do consumidor do blueprint.
 
 | Classe                | Serviços                                            | `cpus` | `mem_limit` | `mem_reservation` |
 | --------------------- | --------------------------------------------------- | ------ | ----------- | ----------------- |
-| App JVM (pesado)      | `gateway`, `authorization-server`, `user-service`   | 1.0    | 1024m       | 512m              |
+| App JVM (pesado)      | `gateway`, `authorization-server`, `user-service`, `notification-service` | 1.0    | 1024m       | 512m              |
 | App JVM (leve)        | `config-server-1/2`, `discovery-server-1/2`         | 0.75   | 512m        | 256m              |
 | MongoDB               | `mongo-1/2/3`                                        | 1.0    | 1024m       | 512m              |
 | PostgreSQL            | `auth-postgres`                                      | 0.75   | 512m        | 256m              |

@@ -45,6 +45,23 @@ carrega conhecimento sobre "usuário".
 |---|---|
 | `gateway/.../config/RateLimiterConfig.java` | Define os 3 buckets (`RedisRateLimiter` LOW/MED/HIGH) por IP ou por sujeito autenticado — throttling puro, sem payload de domínio. |
 | `gateway/.../config/CORSConfig.java` | Configuração CORS reativa parametrizada por env — nenhuma lógica de negócio. |
+| `gateway/.../routing/GatewayRouter.java` | Tabela de rotas em DSL Java (`RouteLocatorBuilder`): tiers de rate limit, `tokenRelay()` por rota, rotas públicas pré-sessão. Os *paths* são do domínio, mas o padrão — roteamento declarativo com filtro por rota — é reaproveitável inteiro. |
+| `gateway/.../filter/RateLimitLogFilter.java` | Loga a decisão do rate limiter com o IP resolvido; observabilidade de throttling, sem payload de domínio. |
+| `gateway/.../filter/CorrelationIdFilter.java` | Semeia `X-Correlation-ID` a partir do traceId B3 (fallback UUID) — correlação de request pura. |
+
+### Revogação ativa de token (ADR-017)
+
+Mecanismo completo, genérico para qualquer sistema com JWT de vida curta + refresh:
+
+| Arquivo | Por que é genérico |
+|---|---|
+| `user-service/.../services/TokenRevocationService.java` | Grava um **epoch de revogação por sujeito** no Redis (`revoke:user:{id}`, TTL configurável). Nada no mecanismo é específico de "usuário" — é um relógio por sujeito. Fail-open. |
+| `user-service/.../config/RevocationTokenValidator.java` | `OAuth2TokenValidator` que rejeita o token cujo `iat` precede o epoch. Somado aos validadores default num `JwtDecoder` de issuer lazy. |
+| `gateway/.../filter/RevocationWebFilter.java` | Mesma checagem na borda, sobre o token guardado na sessão do BFF (defesa em profundidade — o resource server não vê o tráfego autenticado por cookie). |
+| `authorization-server/.../services/RevocationRefreshGuard.java` | Fecha o refresh: aborta a reemissão quando a revogação é mais recente que o refresh token. Sem ele o gateway renovaria o access token silenciosamente. |
+
+> A invariante crítica é o `key-prefix` **idêntico** nos três serviços — é a única coisa que
+> acopla as quatro classes.
 
 ### Sessão e OAuth2
 
@@ -100,6 +117,8 @@ copiar.
 |---|---|
 | `UserController.java` | Rotas `/v1/users/**` — registro, perfil, self-delete, reenvio de verificação. |
 | `AdminController.java` | Rotas `/v1/admin/**` — listagem com inativos, auditoria LGPD, gestão de roles, deletes administrativos. |
+| `InternalUserController.java` | Canal interno `/internal/users/email/{email}` (ADR-006) — expõe credencial + roles ao auth-server. Escondido do OpenAPI com `@Hidden`. |
+| `notification-service/.../controller/NotificationController.java`<br>`.../services/EmailService.java`<br>`.../config/InternalTokenFilterConfig.java`<br>`.../exceptions/EmailSendFailedException.java` | Bounded context de notificação (ADR-015). O *transporte* (SMTP via `JavaMailSender`, guarda por shared secret) é genérico; o **conteúdo** — assunto e corpo do e-mail de verificação de cadastro — é do domínio. |
 
 ### DTOs, exceções e repositórios
 
@@ -108,6 +127,9 @@ copiar.
 | `dtos/` (`UserRequestDTO`, `UserResponseDTO`, `AuthDTO`, `AdminUserResponseDTO`, `AuditLogResponseDTO`, `UpdateRolesRequestDTO`) | Campos hardcoded ao formato de conta de usuário. |
 | `exceptions/` (`EmailAlreadyRegisteredException`, `InvalidVerificationTokenException`, `SelfRoleRevocationException`, `DomainEntityNotFound`) | Semântica de regras de negócio de conta/identidade. |
 | `repository/IUserRepository.java`, `INotificationOutboxRepository.java`, `IAuditLogRepository.java` | Spring Data amarrado às entidades do item anterior (`findByEmail`, etc.). |
+| `exceptions/GlobalExceptionHandler.java` (user-service) | O *mapeamento* exceção→`ProblemDetail` é genérico (inclui o handler de 405 do ADR-021), mas os tipos tratados são do domínio. |
+| `config/MongoConfig.java`, `config/WebConfig.java` | Infraestrutura de persistência/web do módulo. |
+| `util/LogUtils.java` (user-service e authorization-server) | `maskEmail()` — mascaramento de PII em log. Genérico, **duplicado nos dois módulos** por não haver módulo comum. |
 
 ---
 

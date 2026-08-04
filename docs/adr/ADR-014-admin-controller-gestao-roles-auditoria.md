@@ -6,6 +6,16 @@
 - **Tarefa relacionada:** evolução do domínio — superfície administrativa dedicada (spec
   `product-manager`, aprovada em 3 rodadas de `senso-critico`)
 
+> **Atualização (2026-08-04):** duas frases de escopo caducaram; **a decisão abaixo permanece
+> integralmente vigente** — este ADR não foi substituído.
+> - *"Revogação ativa de token (introspection/blocklist) está fora de escopo"* — deixou de ser
+>   verdade com o [[ADR-017]]: `AdminService.updateUserRoles` grava o epoch de revogação por
+>   usuário no Redis, e a janela do token já emitido caiu de indefinida para ≈ segundos.
+> - `GET /v1/admin/users` passou a ser a **única** listagem de titulares do sistema
+>   ([[ADR-021]] removeu a pública). Consequência a registrar: **a listagem administrativa não
+>   emite `ADMIN_READ_USER`** — só as leituras por id/e-mail auditam. Um ADMIN ainda pagina PII
+>   sem deixar rastro na trilha LGPD; dívida aberta, herdada do [[ADR-011]].
+
 ## Contexto
 
 Três gaps documentados motivaram esta tarefa:

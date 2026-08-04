@@ -17,9 +17,15 @@ login-interface (React)
         │
         ▼
     gateway :8081          ← único ponto de entrada externo
-    ├── /users/**        → user-service :8090
-    ├── /oauth2/**       → authorization-server :8082
-    └── /login           → authorization-server :8082
+    ├── /v1/users/register   → user-service :8090   (público, rate limit por IP)
+    ├── /v1/users/verify-email → user-service        (público, pré-sessão)
+    ├── /v1/users/**         → user-service :8090   (sessão BFF → tokenRelay)
+    ├── /v1/admin/**         → user-service :8090   (ROLE_ADMIN, checado downstream)
+    ├── /oauth2/**           → authorization-server :8082
+    ├── /login               → authorization-server :8082  (formulário do IdP)
+    ├── /default-ui.css      → authorization-server :8082  (CSS do formulário)
+    ├── /connect/**          → authorization-server :8082  (RP-Initiated Logout)
+    └── /v3/api-docs/**      → user-service · authorization-server  (doc agregado)
               │
               ├── authorization-server ── PostgreSQL (estado OAuth) · Redis (sessão)
               ├── user-service ────────── MongoDB replica set rs0 · Redis (cache + rate limit)
@@ -42,6 +48,7 @@ login-interface (React)
 ├── discovery-server/             # Service discovery (Eureka)
 ├── gateway/                      # Spring Cloud Gateway — borda, BFF, rate limiting, CSRF
 ├── user-service/                 # Domínio de usuários (CRUD, MongoDB, cache Redis)
+├── notification-service/         # Envio de e-mail de verificação (stateless, SMTP)
 ├── login-interface/              # SPA React (Vite + TailwindCSS)
 ├── infra/                        # Configs de infraestrutura:
 │   ├── secrets/                  #   gen-secrets.sh (gera os Docker secrets)
@@ -50,6 +57,7 @@ login-interface (React)
 │   ├── mongo/                    #   keyfile do replica set
 │   ├── redis/                    #   sentinel.conf
 │   ├── grafana/                  #   dashboards e datasources provisionados
+│   ├── cloudflared/              #   ingress rules do named tunnel (versionadas)
 │   └── prometheus.yml            #   alvos de scrape
 ├── docs/                         # Documentação técnica detalhada
 ├── docker-compose.yml            # Base prod-safe (publica só a borda)
@@ -81,7 +89,15 @@ infra/secrets/gen-secrets.sh        # defaults de DEV (rode uma vez antes do up)
 
 ### 1. Criar o `.env` (obrigatório)
 
-O `.env` guarda apenas as **identidades não-segredo** (usuários, hostnames públicos) interpoladas no compose — os segredos vêm do passo 0. Sem `.env` a subida falha de propósito (fail-fast):
+O `.env` guarda apenas as **identidades não-segredo** (usuários, hostnames públicos) interpoladas no compose — os segredos vêm do passo 0.
+
+> **Atenção:** a base **não** tem fail-fast. As interpolações do `docker-compose.yml`
+> (`${MONGO_USER}`, `${POSTGRES_USER}`, `${CONFIG_SERVER_USERNAME}`, `${GRAFANA_ADMIN_USER}`) são
+> `${VAR}` simples — sem `.env`, o Compose as substitui por **string vazia com um warning** e a
+> stack sobe até o Mongo/Postgres recusarem a credencial vazia. O `docker compose config -q` do CI
+> passa assim. O fail-fast de verdade (`${VAR:?}`) existe só no overlay de deploy
+> (`PUBLIC_ORIGIN`, `PUBLIC_HOST`, `TUNNEL_ID`). Ou seja: preencher o `.env` é obrigatório, mas
+> quem avisa é o banco, não o Compose.
 
 ```bash
 cp .env.example .env   # e preencha os valores (em dev, qualquer valor consistente serve)
@@ -205,6 +221,12 @@ CLOUDFLARE_TUNNEL_CREDENTIALS=~/.cloudflared/<UUID>.json \
 
 # 3. Alinhar MONGO_PASSWORD no .env ao secret gerado — o mongodb-exporter lê do env (resíduo 0.3).
 #    Se divergir, o exporter fica fora do ar em silêncio. Setar também PUBLIC_ORIGIN e TUNNEL_ID.
+#
+#    ATENÇÃO — o gen-secrets.sh reescreve TODOS os secrets, sempre. O comando acima não exporta os
+#    seis SMTP_*, então rodá-lo com SMTP real já configurado REVERTE os seis para os placeholders
+#    de dev (localhost:1025, sem auth/TLS) — em silêncio, e o e-mail de verificação para de sair.
+#    Se já houver SMTP real, exporte também: SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD,
+#    SMTP_AUTH, SMTP_STARTTLS.
 
 # 4. Subir — up ÚNICO (o roteiro de 3 passos com placeholder existia só por causa da URL efêmera)
 export PUBLIC_ORIGIN=https://app.exemplo.com   # ou defina no .env
@@ -229,7 +251,9 @@ docker compose logs cloudflared | grep -i "Registered tunnel connection"   # 4 c
 > responder 200 sem cookie, o `permitAll()` do gateway regrediu.
 
 E o fluxo completo no browser: registro → login → `/dashboard` → logout → retorno a
-`${PUBLIC_ORIGIN}/`. Checklist integral em [docs/DOMINIO.md](docs/DOMINIO.md) § 4.
+`${PUBLIC_ORIGIN}/`. Confira também que os cookies `SESSION`/`AUTHSESSION` chegam com `Secure`
+e que o `CF-Connecting-IP` alimenta o rate limit (um 429 após várias tentativas de registro
+confirma o particionamento por IP).
 
 **Observabilidade neste deploy.** Grafana, Prometheus e Zipkin **não são públicos** e não têm regra
 de ingress no túnel — `${PUBLIC_ORIGIN}/grafana` cai no `try_files` do SPA, não no Grafana. O
@@ -257,6 +281,10 @@ WireGuard) em vez de rotear o túnel até ele — racional completo em `.claude/
 | API (gateway) | http://localhost:8081                                                            |
 | Swagger UI    | http://localhost:8081/swagger-ui/index.html                                      |
 | Front-end     | http://localhost:5173                                                            |
+| authorization-server | http://localhost:8082                                                     |
+| user-service  | http://localhost:8090                                                            |
+| notification-service | http://localhost:8095                                                     |
+| config-lb     | http://localhost:8888                                                            |
 | Eureka        | http://localhost:9091 · http://localhost:9092                                    |
 | Zipkin        | http://localhost:9411 🔒                                                          |
 | Prometheus    | http://localhost:9090 🔒                                                          |
@@ -278,7 +306,7 @@ roda no GitHub Actions três frentes em paralelo:
 
 | Job                | O que roda                                                                                                                      |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `backend` (matrix) | `mvn -B verify` por módulo (5 serviços) — dispara o gate de cobertura JaCoCo; integração via Testcontainers no Docker do runner |
+| `backend` (matrix) | `mvn -B verify` por módulo (6 serviços) — dispara o gate de cobertura JaCoCo; integração via Testcontainers no Docker do runner |
 | `frontend`         | `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold de 80%                                                |
 | `compose-validate` | `docker compose -f docker-compose.yml config -q` — valida a topologia base                                                      |
 
@@ -297,6 +325,7 @@ gh api -X PUT repos/k-lila/user-service/branches/main/protection \
   -f 'required_status_checks[contexts][]=backend (authorization-server)' \
   -f 'required_status_checks[contexts][]=backend (user-service)' \
   -f 'required_status_checks[contexts][]=backend (gateway)' \
+  -f 'required_status_checks[contexts][]=backend (notification-service)' \
   -f 'required_status_checks[contexts][]=frontend' \
   -f 'required_status_checks[contexts][]=compose-validate' \
   -F 'enforce_admins=false' \

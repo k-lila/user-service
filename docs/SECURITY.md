@@ -86,8 +86,13 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 - **Trilha de auditoria de dado pessoal (ADR-011, LGPD):** coleção Mongo
   `auditLogs` (user-service) registra *quem acessou/alterou/apagou qual dado de qual titular,
   quando* — **distinta** do log operacional SLF4J. Cobre mutações (register/update/soft+hard
-  delete, grant/revoke de role), leitura de credencial interna (ator SYSTEM) e leitura
-  cross-subject (titular ≠ solicitante); o `/me`/leitura do próprio dado não é auditado.
+  delete, grant/revoke de role), leitura de credencial interna (ator SYSTEM) e **leitura
+  administrativa de PII por id/e-mail** (`ADMIN_READ_USER`, ADR-016); o `/me`/leitura do próprio
+  dado não é auditado. O valor `READ_CROSS_SUBJECT` está `@Deprecated` e não é mais emitido — a
+  leitura de PII de terceiro virou ADMIN-only —, mas **permanece no enum** para desserializar
+  registros históricos. **Lacuna:** a *listagem* administrativa (`GET /v1/admin/users`) **não é
+  auditada**, e desde o ADR-021 é a única superfície que devolve PII de vários titulares de uma
+  vez — um ADMIN pagina a base sem deixar rastro na trilha.
   `targetEmail` mascarado; `correlationId` = traceId B3 (o IP do cliente vive no log de borda do
   gateway, ADR-010). Escrita assíncrona e isolada de falha (dívida consciente detalhada na seção
   **LGPD**). **Consulta via API (ADR-014):** `GET /v1/admin/audit-logs` (feed geral) e
@@ -163,7 +168,23 @@ Achados levantados na **auditoria de segurança ad hoc de 2026-06-21** (`securit
 um item for tratado, mova-o para "controles ativos"; se for conscientemente aceito, mova-o para a
 tabela de dívida aceita). Os controles já ativos **não** regrediram; estes são gaps novos.
 
-> **G1 — IDOR de leitura de PII (ALTO): corrigido (2026-06-21, [ADR-016](adr/ADR-016-leitura-pii-restrita-admin.md)).** As rotas de leitura por id/e-mail viraram ADMIN-only (`/v1/admin/users/{id}` e `.../email/{email}`) — ver "Controles ativos". Movido para lá; não é mais dívida.
+> **G1 — IDOR de leitura de PII (ALTO): correção incompleta em 2026-06-21, fechado de fato em
+> 2026-08-04 ([ADR-016](adr/ADR-016-leitura-pii-restrita-admin.md) + [ADR-021](adr/ADR-021-remocao-listagem-publica-usuarios.md)).**
+> O ADR-016 tornou ADMIN-only as leituras por id/e-mail (`/v1/admin/users/{id}` e
+> `.../email/{email}`) e o gap foi declarado fechado — **prematuramente**. `GET /v1/users`
+> (`UserController.searchAll`, `hasRole('USER')`) continuou devolvendo `Page<UserResponseDTO>`
+> de **toda a base ativa** a qualquer usuário autenticado, **sem auditoria**: o mesmo desfecho
+> que o G1 descrevia, obtido com uma requisição paginada em vez de enumeração por id. A rota foi
+> removida pelo ADR-021, junto de `SearchService.searchAll` e `IUserRepository.findByActiveTrue`.
+> Agora sim: nenhuma superfície `USER` devolve PII de terceiro.
+>
+> **Por que ficou aberto seis semanas — o que não repetir.** O ADR-016 enumerou as rotas que
+> conhecia em vez de varrer a superfície do controller. A partir daí três documentos (este, o
+> `CLAUDE.md` e as _Consequências_ do próprio ADR-016) passaram a afirmar que o gap estava
+> fechado, e o `BLOCK-004` chegou a ser marcado RESOLVIDO **com base nesses documentos, não no
+> código** — a documentação validando a si mesma. Só o `docs/SERVICOS.md` continuou correto,
+> porque documentava a rota. **Critério de "fechado" verifica-se contra o código, nunca contra
+> outro documento.**
 
 > **G3 — Sem headers de segurança HTTP (MÉDIO): corrigido (2026-07-28).** Correção de registro: não
 > era ausência total — o Spring Security já emitia `X-Content-Type-Options`, `X-Frame-Options: DENY`
@@ -180,11 +201,41 @@ tabela de dívida aceita). Os controles já ativos **não** regrediram; estes s�
 > Atenção ao mexer: no nginx, um `location` com `add_header` próprio **descarta** todos os headers
 > do nível `server`, por isso o bloco do Swagger repete a lista inteira.
 
+> **Canal interno do notification-service publicado em OpenAPI (MÉDIO): fechado (2026-08-04,
+> [ADR-021](adr/ADR-021-remocao-listagem-publica-usuarios.md)).** O módulo trazia
+> `springdoc-openapi-starter-webmvc-ui` no classpath e o YAML servido desligava apenas
+> `springdoc.swagger-ui.enabled` — `/v3/api-docs` seguia servindo a especificação de
+> `POST /internal/notifications/email-verification` a quem alcançasse a porta 8095 (publicada em
+> `0.0.0.0` no override de dev; o `InternalTokenFilter` cobre só `/internal/*`). Violava a
+> invariante do ADR-006. **Fechamento:** dependência removida do `pom.xml` — garantia de
+> *classpath*, não de propriedade. Desligar `springdoc.api-docs.enabled` por YAML seria
+> condicional: o serviço importa a config com `optional:configserver:` e a propriedade evapora se
+> o config-server estiver fora no boot. **Não reintroduzir a dependência.** Regra geral em
+> `docs/CONVENCOES.md`: serviço que publica doc esconde a rota interna com `@Hidden`; serviço que
+> não publica não tem a dependência.
+
+> **Lockout alimentado por indisponibilidade do user-service (MÉDIO, DoS auto-infligido): fechado
+> (2026-08-04, [ADR-021](adr/ADR-021-remocao-listagem-publica-usuarios.md)).** O
+> `UserClientFallbackFactory` lançava `UsernameNotFoundException` quando o circuito abria; o
+> `DaoAuthenticationProvider` a convertia em `BadCredentialsException` **sem encadear a causa**, o
+> publisher emitia `AuthenticationFailureBadCredentialsEvent` e o `LoginAttemptListener`
+> incrementava o contador — **cinco tentativas durante um outage bloqueavam o par (conta, IP) por
+> 15 minutos**. Um incidente de infraestrutura virava negação de serviço para o usuário legítimo,
+> e o comentário de intenção do próprio listener dizia o contrário. **Fechamento:** exceção
+> dedicada `UserServiceUnavailableException extends InternalAuthenticationServiceException`, que o
+> provider repropaga intacta e o publisher não mapeia — nenhum evento, nenhum contador. Detalhe
+> que **não pode regredir**: a exceção **não encadeia `cause`**, porque o failure handler a guarda
+> na sessão Redis e a cadeia Feign/Resilience4j não é serializável (a primeira versão do fix
+> quebrou 3 testes de integração com `SerializationException`). Guard: o teste de cruzamento
+> `naoDeveBloquearConta_apos5FalhasDuranteOutage`.
+
 | Gap | Severidade | Cenário de exploração | Caminho de correção |
 | --- | --- | --- | --- |
 | **G5 — `/v1/admin/**` sem 2FA nem tier dedicado** | MÉDIO | As rotas admin caem no tier MED por-usuário genérico; não há step-up auth/2FA nem rate-limit mais restritivo para mutações destrutivas (`DELETE /v1/admin/users/del/{id}` hard-delete). Combinado com a ausência de revogação ativa de token, o blast radius de um token ADMIN comprometido é alto. | 2FA/step-up para ADMIN e/ou tier dedicado para deletes |
 | **G4 — CORS pattern curinga (risco operacional)** | BAIXO | `CORSConfig` usa `setAllowedOriginPatterns(allowedOrigins)` + `allowCredentials(true)`. Seguro hoje (default `localhost:5173`, não-wildcard), mas como vem de `CORS_ALLOWED_ORIGINS`, um pattern curinga setado por engano em prod vira exfiltração cross-origin **com credenciais**. | Validar/rejeitar pattern curinga quando `allowCredentials=true` |
 | **G8 — Sem invalidação de sessões concorrentes** | BAIXO | Não há limite/registro de sessões simultâneas; um usuário pode manter N sessões ativas e o logout encerra só a corrente. Combinado com a ausência de revogação ativa, sessões antigas não são revogáveis centralmente. | Limitar/registrar sessões concorrentes (Spring Session) |
+| **G13 — Listagem administrativa não auditada** | MÉDIO | `GET /v1/admin/users` devolve PII paginada de vários titulares e **não emite `ADMIN_READ_USER`** — só as leituras por id/e-mail auditam. Desde o ADR-021 é a única superfície de listagem do sistema, então um ADMIN (ou um token ADMIN comprometido) exfiltra a base inteira sem deixar rastro na trilha LGPD. Dívida herdada do ADR-011/ADR-014, tornada mais relevante por ser agora o único caminho. | Emitir `ADMIN_READ_USER` (ou ação própria, ex. `ADMIN_LIST_USERS`) na listagem, com o filtro aplicado no payload de auditoria |
+| **G14 — `/actuator/**` sem guarda fora do gateway** | MÉDIO | Só o gateway isola o actuator em porta de management própria (8181, não publicada). No **authorization-server** `/actuator/**` está em `permitAll()` (`SecurityConfig`); no **notification-service** não há Spring Security algum e o `InternalTokenFilter` cobre só `/internal/*` — o actuator responde na mesma porta 8095, publicada em `0.0.0.0` pelo override de dev. `/actuator/metrics` e `/prometheus` expõem topologia, hostnames internos e volume de tráfego. O ADR-021 tirou o `/v3/api-docs` do notification-service, mas **não** fecha isto. | `management.server.port` separado nos demais módulos (padrão que o gateway já usa), com ajuste em `infra/prometheus.yml` e nos compose |
 | **R-09 — Rede flat Docker (dívida aceita, ADR-019)** | BAIXO | Um container hostil na mesma rede Docker (`user-service-net`) alcança `gateway:8081` diretamente e pode forjar `X-Forwarded-*`, independentemente de `trusted-proxies` (que só protege contra peers externos) e do G10. Resíduo pré-existente — ADR-010 não cobre a rede interna. Mitigação atual: o modelo de ameaça assume que todos os containers da rede são do projeto. | Rede Docker isolada por serviço (network segmentation) em prod |
 
 > **G12 — `OAUTH_CLIENT_SECRET` servido publicamente pelo Swagger (ALTO): fechado (2026-08-04, [ADR-020](adr/ADR-020-swagger-atras-da-sessao.md)).**
@@ -261,7 +312,7 @@ Cloudflare (TLS) → cloudflared → interface:80 (nginx) → gateway:8081 → s
   `cloudflared tunnel create` (CLI), autenticado pelo credentials-file JSON
   (`CLOUDFLARE_TUNNEL_CREDENTIALS`) e roteado por `infra/cloudflared/config.yml`, no repositório.
   O `config.yml` traz só a regra catch-all para `interface:80`, sem `hostname:` e sem o ID do
-  túnel: o domínio real não entra no repo (`docs/DOMINIO.md`), e só alcança o túnel o hostname
+  túnel: o domínio real não entra no repo (**política de sigilo**: valores concretos vivem só no `.env`), e só alcança o túnel o hostname
   cujo `CNAME` aponta para ele. `TUNNEL_ID` e `PUBLIC_ORIGIN` vivem no `.env`.
 - **Observabilidade fora da borda pública:** Grafana, Prometheus e Zipkin **não têm regra de
   ingress** no túnel — `${PUBLIC_ORIGIN}/grafana` cai no `try_files` do SPA, não no Grafana, e o
@@ -270,7 +321,7 @@ Cloudflare (TLS) → cloudflared → interface:80 (nginx) → gateway:8081 → s
   ficam só na rede interna Docker. Decisão e alternativas descartadas em `.claude/memory/decisions.md`.
   **Fato a não redescobrir:** o `cloudflared` **não interpola variáveis de ambiente** no `config.yml`
   — uma regra `hostname: ${VAR}` vira hostname literal e nunca casa, caindo no catch-all. Expor algo
-  por hostname próprio exigiria o domínio literal no repo (contra `docs/DOMINIO.md`) ou um
+  por hostname próprio exigiria o domínio literal no repo (contra a política de sigilo) ou um
   init-container que renderize o config a partir de um template.
 - **Swagger atrás da sessão do BFF** ([ADR-020](adr/ADR-020-swagger-atras-da-sessao.md)): o
   Cloudflare Access segue indisponível (Zero Trust exige cartão), mas `/swagger-ui/*` e

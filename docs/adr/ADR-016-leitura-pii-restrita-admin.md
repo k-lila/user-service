@@ -5,6 +5,24 @@
 - **Serviço alvo:** user-service
 - **Tarefa relacionada:** G1 (auditoria de segurança de 2026-06-21, `docs/SECURITY.md`) — IDOR de leitura de PII
 
+> **Atualização (2026-08-04, [[ADR-021]] — a resolução abaixo estava INCOMPLETA):** este ADR
+> removeu `GET /v1/users/{id}` e `GET /v1/users/email/{email}`, mas **não viu**
+> `GET /v1/users` (`UserController.searchAll`, `@PreAuthorize("hasRole('USER')")`), que devolvia
+> `Page<UserResponseDTO>` de **toda a base ativa** a qualquer usuário autenticado, sem auditoria.
+> Ou seja: as duas afirmações da seção _Consequências_ — *"fecha o G1 — PII de terceiro deixa de
+> ser legível por qualquer `USER`"* e *"`UserController` fica coeso (só dado do próprio
+> titular)"* — **eram falsas** enquanto a listagem existiu. O vetor sobreviveu por seis semanas e
+> era mais barato de explorar que o IDOR original (uma página, sem enumerar ids). Pior: a
+> documentação passou a validar a si mesma, e o `BLOCK-004` chegou a ser marcado RESOLVIDO com
+> base nestes documentos, não no código. O G1 só foi de fato fechado pelo ADR-021, que removeu a
+> listagem. A decisão abaixo (leitura por id/e-mail restrita a ADMIN, auditada como
+> `ADMIN_READ_USER`) permanece **inalterada e vigente** — o que muda é que ela nunca bastou
+> sozinha.
+>
+> **Lição registrada:** fechar um gap enumerando as rotas que se conhece não é o mesmo que fechar
+> a superfície. O critério de "fechado" tem de ser verificado contra o código, nunca contra outro
+> documento.
+
 ## Contexto
 
 A auditoria de segurança de 2026-06-21 (`security-reviewer`) identificou o **G1 (severidade

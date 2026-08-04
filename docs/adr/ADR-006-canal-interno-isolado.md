@@ -7,6 +7,23 @@
 > ADR retroativo: a decisão já está implementada e em produção no blueprint; este
 > registro a formaliza para dar rastreabilidade.
 
+> **Atualização (2026-08-04, [[ADR-021]] — a invariante estava sendo violada):** o
+> `notification-service`, criado depois deste ADR ([[ADR-015]]), trazia
+> `springdoc-openapi-starter-webmvc-ui` no classpath e desligava apenas
+> `springdoc.swagger-ui.enabled` — de modo que `/v3/api-docs` **servia a especificação do canal
+> interno** `POST /internal/notifications/email-verification` a quem alcançasse a porta 8095 (o
+> `InternalTokenFilter` cobre só `/internal/*`). A dependência foi removida do `pom.xml`.
+>
+> **Como cumprir esta invariante, conforme o serviço publique ou não OpenAPI:**
+> - Serviço que **publica** doc (user-service, cujo `/v3/api-docs` o gateway agrega): esconder a
+>   rota interna com `@Hidden` — é o que o `InternalUserController` faz.
+> - Serviço que **não publica** doc (notification-service): **não ter a dependência springdoc**.
+>   Desligar por propriedade não basta — a config vem do config-server com
+>   `optional:configserver:`, e evapora se ele estiver fora no boot. Ausência de dependência é
+>   garantia de classpath; propriedade é garantia condicional.
+>
+> A decisão abaixo permanece inalterada.
+
 ## Contexto
 
 Durante o login, o authorization-server precisa dos dados de credencial e roles do usuário

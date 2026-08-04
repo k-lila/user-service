@@ -7,6 +7,22 @@
 > ADR retroativo: a decisão já está implementada e em produção no blueprint; este
 > registro a formaliza para dar rastreabilidade.
 
+> **Atualização (2026-08-04, [[ADR-021]] — mudou a exceção do fallback):** o
+> `UserClientFallbackFactory` **não lança mais `UsernameNotFoundException`**. Lança
+> `UserServiceUnavailableException`, que estende `InternalAuthenticationServiceException`. Motivo:
+> `UsernameNotFoundException` era convertida pelo `DaoAuthenticationProvider` em
+> `BadCredentialsException`, o publisher emitia `AuthenticationFailureBadCredentialsEvent` e o
+> `LoginAttemptListener` **contava a falha no lockout** — cinco tentativas durante um outage
+> bloqueavam a conta por 15 minutos. Uma indisponibilidade virava negação de serviço para o
+> usuário legítimo. O novo tipo é repropagado intacto e não tem mapping no publisher: nenhum
+> evento, nenhum contador. Detalhe importante: a exceção **não encadeia `cause`** — ela é guardada
+> na sessão Redis pelo failure handler e a cadeia Feign/Resilience4j não é serializável.
+>
+> A decisão abaixo (circuit breaker + fallbackFactory, falha rápida em vez de timeout) permanece
+> **inalterada**; só mudou o **tipo** que o fallback lança e, com ele, o efeito sobre o lockout.
+> Onde este ADR diz que o fallback "conflata" indisponibilidade com credencial inválida, leia-se:
+> essa conflação era o defeito, e foi corrigida.
+
 ## Contexto
 
 No fluxo de login, o authorization-server busca as credenciais e roles do usuário no

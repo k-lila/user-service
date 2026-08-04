@@ -5,6 +5,15 @@
 - **Serviço alvo:** user-service
 - **Tarefa relacionada:** hardening do blueprint (leitura somente de usuários ativos)
 
+> **Atualização (2026-08-04, [[ADR-021]]):** a cláusula desta decisão que se aplicava à
+> **listagem** ficou sem objeto — `GET /v1/users`, `SearchService.searchAll` e
+> `IUserRepository.findByActiveTrue` foram removidos (a listagem pública devolvia PII de toda a
+> base ativa a qualquer `USER`). A invariante "leitura devolve só ativos" **permanece vigente** e
+> sobrevive em `SearchService.searchById` e `searchByEmail`, que continuam tratando o
+> soft-deleted como inexistente. A única listagem restante é `GET /v1/admin/users`
+> (`AdminService.listAllUsers`), que **inclui inativos** de propósito ([[ADR-014]]/[[ADR-016]]):
+> a ocultação de inativos sempre foi regra da superfície pública, não da administrativa.
+
 ## Contexto
 
 O user-service implementa **soft-delete**: `deactivateUser` marca `active=false` em vez de

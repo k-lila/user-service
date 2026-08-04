@@ -10,7 +10,7 @@
 # dashboard: a autenticação é o credentials-file JSON emitido pelo `create`, e o roteamento da
 # borda é ESTE arquivo. Roteiro de criação no README § 2b.
 #
-# SIGILO (docs/DOMINIO.md): o domínio real NÃO aparece neste repositório — os valores concretos
+# SIGILO (política do projeto): o domínio real NÃO aparece neste repositório — os valores concretos
 # vivem só no .env (gitignorado). É por isso que a única regra é o catch-all, sem `hostname:`, e
 # que o ID do túnel não está aqui (vem de `run ${TUNNEL_ID}` no docker-compose.deploy.yml).
 # Não há perda prática de roteamento: só chega a este túnel o hostname cujo CNAME aponta para ele

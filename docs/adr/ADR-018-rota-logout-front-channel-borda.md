@@ -3,7 +3,7 @@
 - **Status:** aceita
 - **Data:** 2026-07-28
 - **Serviço alvo:** gateway (rota + `permitAll`); consumidor indireto: authorization-server
-- **Tarefa relacionada:** A.4 de [DOMINIO.md](../DOMINIO.md) — migração para domínio fixo via named tunnel
+- **Tarefa relacionada:** A.4 da migração para domínio fixo via named tunnel (spec `DOMINIO.md`, removida após a conclusão da tarefa)
 
 ## Contexto
 
@@ -29,7 +29,7 @@ quebra essa premissa. Nessa topologia:
   borda pública, deixando a sessão do IdP viva mesmo após o SPA "deslogar".
 
 O achado é invisível em dev justamente porque lá a URL é o auth-server direto (achado A2 do
-levantamento em `DOMINIO.md`).
+levantamento na spec da migração, já removida).
 
 ## Decisão
 

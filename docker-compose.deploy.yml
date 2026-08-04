@@ -80,7 +80,7 @@ services:
     # distroless, sem shell, e manter o segredo em arquivo o mantém fora da listagem de env do
     # container (docker inspect / ps -e). O ID do túnel é argumento posicional do `run` porque o
     # compose interpola aqui, mas não dentro do YAML montado — e assim o domínio/UUID reais ficam
-    # no .env, fora do repositório (sigilo, docs/DOMINIO.md).
+    # no .env, fora do repositório (política de sigilo do domínio real).
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?defina TUNNEL_ID com o UUID impresso por `cloudflared tunnel create` (ver README § 2b)}
     volumes:
       - ./infra/cloudflared/config.yml:/etc/cloudflared/config.yml:ro
