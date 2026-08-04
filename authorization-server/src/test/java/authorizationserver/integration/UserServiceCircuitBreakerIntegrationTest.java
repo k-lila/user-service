@@ -19,9 +19,10 @@ import com.github.tomakehurst.wiremock.client.WireMock;
 /**
  * Circuit breaker C7 na chamada Feign ao user-service, com o pipeline real
  * (Feign + Resilience4j + {@code UserClientFallbackFactory}) e o WireMock simulando
- * o downstream indisponível (500 e delay acima do timeout).
+ * o downstream indisponível (500 e delay acima do timeout) ou respondendo 404.
  *
- * <p>Configuração de TESTE no application.yml ({@code resilience4j.*.instances.user-service}):
+ * <p>Configuração de TESTE no application.yml ({@code resilience4j.*.configs.user-service} —
+ * `configs`, não `instances`; o motivo está comentado no próprio yml):
  * janela 2 / mínimo 2 chamadas / threshold 50% — duas falhas consecutivas abrem o circuito;
  * {@code waitDurationInOpenState=60s} o mantém aberto durante o teste (a classe base reseta
  * o registry entre testes); TimeLimiter de 2s (produção usa 3s).
@@ -39,7 +40,7 @@ class UserServiceCircuitBreakerIntegrationTest extends AbstractAuthIntegrationTe
 
     private static final String SENHA = "Senha123";
     private static final String SENHA_HASH = new BCryptPasswordEncoder().encode(SENHA);
-    /** resilience4j.timelimiter.instances.user-service.timeoutDuration do yml de teste. */
+    /** resilience4j.timelimiter.configs.user-service.timeoutDuration do yml de teste. */
     private static final Duration TIMEOUT_CONFIGURADO = Duration.ofSeconds(2);
 
     @Autowired
@@ -57,7 +58,7 @@ class UserServiceCircuitBreakerIntegrationTest extends AbstractAuthIntegrationTe
         String redirect = login("cb.erro500@test.com");
         int chamadas = contarChamadasAoUserService();
 
-        // ASSERT — fallback (UsernameNotFoundException) vira falha controlada de login,
+        // ASSERT — fallback (UserServiceUnavailableException) vira falha controlada de login,
         // com exatamente uma chamada ao downstream (sem retry, C14: uma chamada por login)
         assertEquals("/login?error", redirect);
         assertEquals(1, chamadas);
@@ -147,6 +148,48 @@ class UserServiceCircuitBreakerIntegrationTest extends AbstractAuthIntegrationTe
         // confiável — é o par (conta, IP) que o lockout particiona.
         assertFalse(loginAttempts.isBlocked(email, "127.0.0.1"),
                 "indisponibilidade do user-service não pode alimentar o lockout (ADR-021)");
+    }
+
+    /**
+     * ADR-021 (correção do efeito colateral no caminho 404) — cobre AS DUAS correções de uma vez,
+     * e falha se qualquer uma for revertida:
+     *
+     * <ul>
+     *   <li><b>Sem o {@code ignoreExceptions} no circuit breaker:</b> com janela 2 e threshold 50%
+     *       do yml de teste, o circuito abre na 2ª tentativa e as 4 seguintes não chegam ao
+     *       WireMock — quebra a asserção de contagem.</li>
+     *   <li><b>Sem o {@code instanceof FeignException.NotFound} no fallback:</b> o 404 vira
+     *       {@code UserServiceUnavailableException}, que não publica evento — {@code isBlocked}
+     *       dá {@code false} e quebra a asserção do lockout.</li>
+     * </ul>
+     *
+     * <p>A ordem das asserções é deliberada: a contagem vem primeiro porque é a causa mais
+     * proximal. Sem o {@code ignoreExceptions} o lockout <i>também</i> falharia (as tentativas
+     * 3-6 viram {@code CallNotPermittedException}, que não é 404 e não conta) — asserir a
+     * contagem antes faz o diagnóstico apontar o circuito, não o fallback.
+     *
+     * <p>Um 404 aqui é o caso real de e-mail digitado errado: o user-service devolve 404 para
+     * titular inexistente <i>ou</i> inativo.
+     */
+    @Test
+    void deveContarNoLockout_eNaoAbrirCircuito_quando404() throws Exception {
+        // ARRANGE — downstream saudável, respondendo 404 (titular inexistente)
+        String email = "cb.inexistente@test.com";
+        userServiceMock.stubFor(WireMock.get(WireMock.urlPathMatching("/internal/users/email/.*"))
+                .willReturn(WireMock.notFound()));
+
+        // ACT — 6 tentativas, uma acima do max-attempts=5 do yml de teste
+        for (int i = 0; i < 6; i++) {
+            assertEquals("/login?error", login(email), "tentativa " + (i + 1) + " deve falhar controlada");
+        }
+
+        // ASSERT 1 — o circuito NÃO abriu: as 6 chegaram ao downstream
+        assertEquals(6, contarChamadasAoUserService(),
+                "404 não pode contar como falha do circuito, senão typos derrubam o login de todos");
+
+        // ASSERT 2 — e o 404, sendo resultado de negócio, CONTA no lockout (atrito anti-enumeração)
+        assertTrue(loginAttempts.isBlocked(email, "127.0.0.1"),
+                "titular inexistente deve contar no lockout — só indisponibilidade real escapa (ADR-021)");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

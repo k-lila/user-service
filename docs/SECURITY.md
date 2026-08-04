@@ -152,7 +152,7 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 | Gap | Estado / mitigação atual | O que falta para prod |
 | --- | --- | --- |
 | **Botão *Authorize* do Swagger inerte** | Resíduo do ADR-020. O `securityScheme` OAuth2 do `OpenAPIConfig` continua no doc (documenta que os endpoints exigem OAuth2), então o botão aparece — mas o bloco `springdoc.swagger-ui.oauth` foi removido, e sem `client-id`/secret preenchidos ele não completa o fluxo. O `Try it out` funciona pela sessão do BFF, não pelo botão. | Nada, se o botão for aceitável como inerte; alternativa é remover o `securityScheme` (perde informação do doc) ou registrar um cliente público `swagger-ui` dedicado |
-| **SMTP placeholder — não abrir para cadastro de terceiros** | **Bloqueante para usuário real.** Os secrets SMTP são placeholders de dev (`localhost:1025`, sem auth): o e-mail de verificação não sai. Como o login exige `emailVerified` após 24h de grace period (ADR-015) e o reenvio é o **único** caminho de envio, uma conta de terceiro fica permanentemente inacessível. Aceito porque o deploy é para teste pelo próprio operador. | Provedor SMTP real nos 6 secrets (`SMTP_*`) antes de qualquer cadastro externo |
+| **SMTP placeholder — não abrir para cadastro de terceiros** | **Bloqueante para usuário real.** Os secrets SMTP são placeholders de dev (`localhost:1025`, sem auth): o e-mail de verificação não sai. O default é inalcançável **por construção** sob Docker — `localhost` dentro do container é o próprio `notification-service`, e não há MailHog/Mailpit no compose nem override de SMTP em nenhum overlay; um MailHog no host também não seria alcançado. Confirmado empiricamente (2026-08-04): `POST /internal/notifications/email-verification` → **502**, `ConnectException: Connection refused` em `SMTPTransport.openServer`. Toda a cadeia até o SMTP está sadia (Eureka UP, `X-Internal-Token` OK, controller e `EmailService` executam) — o único elo quebrado é a conexão TCP. Como o login exige `emailVerified` após 24h de grace period (ADR-015) e o reenvio é o **único** caminho de envio, uma conta de terceiro fica permanentemente inacessível. **Paradoxo circular do self-service:** passada a janela, `POST /v1/users/resend-verification` é inalcançável — resolve o titular pelo `userID` do JWT e exige sessão, mas o login já está bloqueado por `DisabledException`; sobra **só** o reenvio administrativo (`POST /v1/admin/users/{id}/resend-verification`). Aceito porque o deploy é para teste pelo próprio operador. **Efeito operacional:** o `MailHealthIndicator` faz `testConnection()` a cada scrape → `/actuator/health` responde **503** e o container fica permanentemente `unhealthy`. Não impede o Feign (o Eureka não usa o actuator health por padrão, e o serviço segue `UP` no registro), mas um `depends_on: condition: service_healthy` futuro travaria a subida. | Provedor SMTP real nos 6 secrets (`SMTP_*`) antes de qualquer cadastro externo; para dev, um `mailpit` no compose com `SMTP_HOST` = nome do serviço (nunca `localhost`) |
 | **`/terms` e `/privacy` linkadas mas inexistentes** | Aceito no escopo atual, **frágil sob LGPD**. O `RegisterBox.tsx` linka as duas rotas, o router do SPA não as tem e o `try_files` devolve página em branco → o consentimento obrigatório do ADR-012 é colhido sobre texto que o titular não consegue ler. Base legal frágil. | Publicar as duas páginas antes de coletar consentimento de terceiros |
 | **Resíduo 0.3: credencial Mongo do `mongodb-exporter` em env** | Aceito. A imagem `percona/mongodb_exporter` é distroless (sem shell) e não tem flag/`_FILE` para a URI → `MONGO_USER`/`MONGO_PASSWORD` continuam no `.env` (deve casar com `./secrets/MONGO_PASSWORD`). Único segredo fora do Docker secrets. | Imagem wrapper (multi-stage com shell) lendo a URI do secret, ou usuário Mongo de monitoramento de baixo privilégio |
 | **Grafana sem lockout / rate limit / MFA** | Aceito. A senha vem de Docker secret (`GF_SECURITY_ADMIN_PASSWORD__FILE`), mas **a senha nunca foi o controle suficiente**: o Grafana só tem usuário/senha — o `LoginAttemptService` é do auth-server e o token bucket é do gateway, nenhum dos dois o cobre, e não há MFA. O controle real é a **inalcançabilidade de rede**: porta publicada só em `127.0.0.1` (dev e deploy) e nenhuma regra de ingress no túnel. Expô-lo publicamente colocaria na internet o componente com a autenticação mais fraca do ecossistema. | Se algum dia precisar ser público: SSO OIDC contra o próprio authorization-server com role mapeada (exige `roles` no id_token — hoje `TokenCustomizerConfig` só customiza `access_token`). Para acesso remoto sem superfície pública, malha privada (Tailscale/WireGuard) |
@@ -228,6 +228,24 @@ tabela de dívida aceita). Os controles já ativos **não** regrediram; estes s�
 > na sessão Redis e a cadeia Feign/Resilience4j não é serializável (a primeira versão do fix
 > quebrou 3 testes de integração com `SerializationException`). Guard: o teste de cruzamento
 > `naoDeveBloquearConta_apos5FalhasDuranteOutage`.
+>
+> **Nuance obrigatória (correção pós-revisão, mesmo dia):** só a **indisponibilidade real** escapa
+> do contador. O **404** (titular inexistente ou inativo) é resultado de negócio e **conta no
+> lockout** — o `UserClientFallbackFactory` distingue as duas causas por
+> `instanceof FeignException.NotFound`. A primeira versão do fix não distinguia e tirou o
+> not-found do contador junto, enfraquecendo o atrito contra **enumeração de e-mails**. Ao mexer
+> aqui: `instanceof FeignException` **genérico** devolveria 500/503 ao lockout e reabriria o bug
+> original — só `NotFound` isola o caso de negócio.
+
+> **DoS por typo no login (MÉDIO, pré-existente): fechado (2026-08-04, ADR-021 pós-revisão).**
+> O 404 de "e-mail não encontrado" contava como falha do circuit breaker. Com `slidingWindowSize`
+> 10 e `failureRateThreshold` 50%, um punhado de logins com e-mail digitado errado abria o circuito
+> e derrubava o login de **todos** por 10s — sem nenhuma falha real de infraestrutura. Fechado com
+> `ignoreExceptions: [feign.FeignException$NotFound]` em `configs.user-service`
+> (`config-server/.../authorization-server.yml`), primeira ocorrência de `ignoreExceptions` no
+> projeto. **Não é substituto do `instanceof` no fallback:** `ignoreExceptions` só tira o 404 da
+> contabilidade do circuito; o fallback continua sendo invocado (o `getAndApplyFallback` do Spring
+> Cloud captura `Throwable` sem filtro). As duas correções são interdependentes.
 
 | Gap | Severidade | Cenário de exploração | Caminho de correção |
 | --- | --- | --- | --- |

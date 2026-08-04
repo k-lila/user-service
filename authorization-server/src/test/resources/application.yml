@@ -61,8 +61,8 @@ security:
 # testes é feito pela classe base via CircuitBreakerRegistry); timeout de 2s encurta o
 # teste de timeout do TimeLimiter.
 #
-# NOTA: usa `configs.user-service` (configuração NOMEADA), e não `instances.user-service`
-# como o yml de produção. Com Spring Cloud CircuitBreaker + Feign (group por nome do client),
+# NOTA: usa `configs.user-service` (configuração NOMEADA) — igual ao yml de produção, e NÃO
+# `instances.user-service`. Com Spring Cloud CircuitBreaker + Feign (group por nome do client),
 # a resolução é registry.getConfiguration(id) → getConfiguration(group) → default — e
 # getConfiguration() só enxerga o que vem de `configs.*`; `instances.*` apenas pré-cria um
 # circuit breaker avulso chamado "user-service" que o Feign não usa (o id real é derivado
@@ -76,6 +76,11 @@ resilience4j:
         failureRateThreshold: 50
         waitDurationInOpenState: 60s
         permittedNumberOfCallsInHalfOpenState: 1
+        # Espelha a produção (ADR-021): 404 é resultado de negócio e não conta para o circuito.
+        # Necessário aqui para o IT poder asserir que 6 logins com 404 NÃO abrem o circuito —
+        # com janela 2 e threshold 50%, sem esta linha o circuito abriria já na 2ª tentativa.
+        ignoreExceptions:
+          - feign.FeignException$NotFound
   timelimiter:
     configs:
       user-service:

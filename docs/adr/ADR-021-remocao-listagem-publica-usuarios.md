@@ -5,6 +5,32 @@
 - **Serviço alvo:** user-service · notification-service · authorization-server
 - **Tarefa relacionada:** G1 / `BLOCK-004` (resíduo) — auditoria doc↔código de 2026-08-04
 
+> **Atualização (2026-08-04, pós-revisão — efeito colateral do fix (4) no caminho 404).** O
+> `senso-critico` e o `security-reviewer` aprovaram esta ADR, mas **se contradisseram** sobre o
+> caminho *not-found*; a verificação deu razão ao `senso-critico`. O `AuthenticationService` do
+> user-service devolve **404** para titular inexistente **ou inativo**, e o Feign entrega esse 404
+> ao mesmo fallback que trata indisponibilidade. Sem distinção, o fix (4) fez tentativas de login
+> contra conta inexistente **deixarem de contar no lockout** — perda de atrito contra enumeração de
+> e-mails que ninguém pretendeu, e que o comentário do `AuthorizationService` chegou a descrever ao
+> contrário (afirmação que já nasceu falsa, na leva cujo motivo era exatamente isso).
+>
+> **Correção, em duas partes interdependentes:**
+> 1. `UserClientFallbackFactory` passa a distinguir a causa: `FeignException.NotFound` →
+>    `UsernameNotFoundException` (resultado de negócio, **conta** no lockout); qualquer outra
+>    (500, 503, timeout, conexão recusada, circuito aberto) → `UserServiceUnavailableException`
+>    (**não** conta). Usar `instanceof FeignException` **genérico** aqui devolveria 500/503 ao
+>    lockout e reabriria o bug original.
+> 2. `ignoreExceptions: [feign.FeignException$NotFound]` no `configs.user-service` — fecha um
+>    defeito **pré-existente**: o 404 de negócio contava como falha do circuito, e alguns e-mails
+>    digitados errado abriam o circuito e derrubavam o login de todos (DoS por typo).
+>
+> **Por que as duas juntas, e não uma:** verificado no bytecode do resilience4j 2.3.0 e do
+> spring-cloud-circuitbreaker 5.0.0 — `ignoreExceptions` só tira a exceção da **contabilidade**
+> (`handleThrowable` faz `releasePermission()` e retorna), enquanto `getAndApplyFallback` captura
+> `Throwable` **sem filtro algum**. O fallback é invocado de qualquer forma; não há atalho por
+> configuração. Guard: `deveContarNoLockout_eNaoAbrirCircuito_quando404`, que falha se qualquer uma
+> das duas for revertida — verificado revertendo cada uma isoladamente.
+
 ## Contexto
 
 ### O resíduo do G1 que o ADR-016 não viu
