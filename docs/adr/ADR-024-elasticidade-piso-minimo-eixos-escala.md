@@ -107,6 +107,16 @@ que não existe — barulho deliberado, ver a nota abaixo. Não escalam com as r
 rate limit (global no Redis — replicar não levanta o teto por cliente) e a escrita (um primário
 Mongo, um Postgres). O `auth-postgres` segue singleton e é o SPOF do login.
 
+**Elasticidade medida** (não só registrada — a distinção importa, ver o erro do Eureka abaixo):
+com `user-service` em 3 réplicas, o gateway distribuiu **10/10/10** em 30 requisições;
+`authorization-server` em 2 recebeu ~16/19 em 40; `config-server` em 2, atrás do `config-lb`,
++22/+38 em 40. O caminho via Eureka é round-robin exato; o via DNS (nginx) é enviesado, porque a
+ordem dos endereços fica fixa durante a janela do `valid=10s`. Uma réplica nova leva **~25s** para
+receber tráfego (14s de subida + ~11s de convergência: fetch do Eureka a 10s + cache do
+LoadBalancer a 5s) — escalar antes do pico, não durante. Encolher com `docker compose scale`
+custou **0 falhas em 45** requisições (parada graciosa: SIGTERM → 35s → desregistro); `docker stop`
+abrupto custou **3 em 60**, a janela do cache DNS do nginx.
+
 **Verificação.** `compose-validate` no CI ganhou três asserções: as quatro combinações de compose
 válidas; o delta piso→`ha` exatamente igual aos 7 nós esperados (senão um `profiles:` esquecido faz
 o piso voltar a 26 sem ninguém notar); e ausência de `container_name`/`ports:` nos serviços do eixo

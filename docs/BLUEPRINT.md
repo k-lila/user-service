@@ -203,6 +203,23 @@ Sem estado local. Podem rodar em N cópias simultâneas na mesma máquina.
 Eureka único por container (default `<containerId>:<app>:<porta>`); o nginx do SPA e o `config-lb`
 resolvem por DNS com `resolver` + `proxy_pass` sobre variável, e não por `upstream` estático.
 
+**Distribuição medida** (réplica nova recebendo tráfego real, não só registrada):
+
+| Componente | Mecanismo de balanceamento | Medido |
+|---|---|---|
+| `user-service` ×3 | Eureka + Spring Cloud LoadBalancer (no gateway) | **10 / 10 / 10** em 30 requisições |
+| `authorization-server` ×2 | Eureka + Spring Cloud LoadBalancer (no gateway) | ~16 / 19 em 40 |
+| `gateway` ×2 | DNS do Docker + `resolver` do nginx do SPA | 11 / 19 em 30 |
+| `config-server` ×2 | DNS do Docker + `resolver` do `config-lb` | +22 / +38 em 40 |
+
+Os dois mecanismos têm **equidade diferente**, e vale saber qual você está usando: o caminho via
+Eureka é round-robin exato; o caminho via DNS é enviesado, porque o nginx fixa a ordem dos
+endereços resolvidos durante a janela do `valid=10s`. Nenhum dos dois deixa réplica ociosa.
+
+**Tempo até uma réplica nova receber tráfego: ~25s** — 14s para o container subir e ficar
+*healthy*, mais ~11s de convergência (`registry-fetch-interval-seconds: 10` do Eureka +
+`spring.cloud.loadbalancer.cache.ttl: 5s`). Escalar **antes** do pico, não durante.
+
 **Tetos:** `AUTH_DB_POOL_SIZE` × N réplicas tem de caber no `max_connections` do Postgres
 (default 100); `MONGO_MAX_POOL_SIZE` × N na memória do nó Mongo. `--scale` **não** funciona junto
 com `docker-compose.override.yml`, que publica portas fixas no host — listas de `ports:` são
