@@ -31,6 +31,13 @@ spring:
     timeout: ${SESSION_TIMEOUT:30m}
 
   cloud:
+    # TERCEIRA camada de atraso de convergência, além das duas do Eureka: o Spring Cloud
+    # LoadBalancer cacheia a lista de instâncias resolvida do `lb://` e o default é 35s.
+    # Sem baixar isto, tunar só os timings do Eureka não entrega o ganho — o roteador continua
+    # servindo a lista velha do cache.
+    loadbalancer:
+      cache:
+        ttl: 5s
     config:
       fail-fast: true
       retry:
@@ -112,9 +119,16 @@ security:
     key-prefix: ${TOKEN_REVOCATION_KEY_PREFIX:revoke:user:}
 
 eureka:
+  # Timings de convergência — mesmos valores dos demais serviços (racional em user-service.yml).
+  # Aqui andam junto com o spring.cloud.loadbalancer.cache.ttl acima: os três knobs formam a
+  # latência total entre uma instância sumir e este roteador parar de mandar tráfego a ela.
   client:
     service-url:
       defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
+    registry-fetch-interval-seconds: 10
+  instance:
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
 
 logging:
   pattern:

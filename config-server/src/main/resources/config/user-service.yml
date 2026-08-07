@@ -7,6 +7,15 @@ spring:
     timeout-per-shutdown-phase: 30s
   application:
     name: user-service
+  threads:
+    virtual:
+      # Servlet (Tomcat), thread-per-request: o RevocationTokenValidator (ADR-017) faz um GET
+      # BLOQUEANTE no Redis a cada requisição, dentro da cadeia de validação do JWT. Em thread
+      # de plataforma isso prende uma thread do pool durante o I/O; em virtual thread não.
+      # NÃO replicar no gateway (WebFlux/reativo — a propriedade não tem efeito lá) nem no
+      # authorization-server (usa JDBC/HikariCP, que é `synchronized` no caminho quente, e o
+      # Java 21 ainda prende a carrier thread nesses blocos — JEP 491 só no 24).
+      enabled: true
   security:
     oauth2:
       resourceserver:
@@ -54,6 +63,11 @@ security:
 app:
   terms:
     version: ${TERMS_VERSION:v1}
+  # Retenção da trilha de auditoria LGPD (ADR-022). Gravada por documento em auditLogs.purgeAt,
+  # com índice TTL expire-at — mudar este valor passa a valer para as entradas novas, sem
+  # collMod no índice. Entradas anteriores à mudança não têm purgeAt e nunca expiram.
+  audit:
+    retention: ${AUDIT_LOG_RETENTION:180d}
   # Verificação de e-mail no cadastro (ADR-015).
   verification:
     # TTL do token opaco de verificação.
@@ -67,6 +81,17 @@ app:
     # Retenção do registro de outbox após a expiração/confirmação do token (TTL index do
     # Mongo em purgeAt, não em expiresAt — preserva histórico de auditoria do outbox).
     outbox-retention: ${EMAIL_VERIFICATION_OUTBOX_RETENTION:30d}
+    # Varredura de retry do outbox (OutboxRetryService, emenda do ADR-015). Reprocessa o que o
+    # disparo por evento deixou FAILED/PENDING, emitindo um token NOVO — o token em claro não é
+    # persistido, então não há como reenviar o e-mail original.
+    retry-interval: ${EMAIL_VERIFICATION_RETRY_INTERVAL:5m}
+    # Idade mínima do registro antes de ser reprocessado. Vale também para o PENDING, que dentro
+    # desta janela ainda pode estar em voo no executor assíncrono.
+    retry-backoff: ${EMAIL_VERIFICATION_RETRY_BACKOFF:15m}
+    # Teto de registros por titular. Contado sobre a coleção (não sobre o campo `attempts`):
+    # cada retry cria um registro NOVO com attempts=0, então um contador por registro nunca
+    # expiraria e a varredura reemitiria para sempre. Reenvios manuais consomem o mesmo teto.
+    retry-max-attempts: ${EMAIL_VERIFICATION_RETRY_MAX_ATTEMPTS:5}
 
 resilience4j:
   circuitbreaker:
@@ -88,9 +113,19 @@ resilience4j:
         timeoutDuration: 10s
 
 eureka:
+  # Timings de convergência. Nos defaults (renew 30s / expiration 90s / fetch 30s) leva ~90s
+  # entre uma instância morrer e o roteamento parar de mandar tráfego para ela — em dev isso é
+  # o tempo morto após cada `docker compose restart`; sob autoscaling seria tráfego roteado
+  # para instância inexistente. Reduzido para ~15-20s. O custo é mais heartbeat na rede,
+  # irrelevante nesta escala. ATENÇÃO: o Eureka é só DUAS das três camadas de atraso — a
+  # terceira é o cache do Spring Cloud LoadBalancer (ver gateway.yml/authorization-server.yml).
   client:
     service-url:
       defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
+    registry-fetch-interval-seconds: 10
+  instance:
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
 
 logging:
   pattern:
@@ -101,6 +136,12 @@ springdoc:
     enabled: false
 
 management:
+  # Actuator numa porta de management interna (não publicada no host): a porta de
+  # tráfego (8090) deixa de servir /actuator/**, fechando o acesso anônimo a
+  # /prometheus e /metrics (gap G14). O Prometheus continua raspando por esta porta
+  # na rede interna (ver infra/prometheus.yml → user-service:8181).
+  server:
+    port: 8181
   tracing:
     enabled: true
     propagation:

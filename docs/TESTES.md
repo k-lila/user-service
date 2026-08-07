@@ -7,6 +7,7 @@
 - [Diretrizes de testes](#diretrizes-de-testes)
 - [Como executar](#como-executar)
 - [Cobertura (JaCoCo)](#cobertura-jacoco)
+- [Smoke-test da topologia de login (ADR-023)](#smoke-test-da-topologia-de-login-adr-023)
 - [Armadilhas e comportamentos não óbvios do stack](#armadilhas-e-comportamentos-não-óbvios-do-stack)
 
 ---
@@ -194,6 +195,70 @@ piso de 70%.
 
 ---
 
+## Smoke-test da topologia de login (ADR-023)
+
+`infra/smoke-test/login-topology-smoke-test.sh` é a **única** camada de teste que exercita a cadeia
+real `nginx (interface) → gateway → authorization-server`. Existe porque os quatro elos quebrados
+do [ADR-019](adr/ADR-019-correcao-elos-login-hostname-unico.md) foram descobertos **ao vivo, em
+produção**: unitários e `@WebMvcTest` batem direto no controller, os Testcontainers nunca sobem o
+container `interface`, o `compose-validate` do CI só valida sintaxe YAML, e o dev local vai direto a
+`localhost:8082` — sem nginx e sem o CSRF do gateway no caminho.
+
+**Por que bash+curl e não Playwright/Cypress:** nenhum dos bugs históricos é de comportamento JS
+renderizado — são status code, header `Location` e `Content-Type`. Um browser headless seria mais
+caro de manter e mais frágil sem cobrir nada a mais.
+
+| # | Asserção | Elo/bug coberto |
+| - | -------- | --------------- |
+| (e) | a base do compose não publica `gateway`/`interface` (checagem estática, roda antes de subir a stack) | G10 |
+| (a) | `GET /login` devolve o form do IdP **e não** o `index.html` do SPA | Elo 3 |
+| (b) | `GET /default-ui.css` é `text/css` | Elo 3 |
+| (c) | `POST /login` (com `_csrf` real do auth-server) não é 403 e redireciona para `/login?error` | BUG-001 |
+| (d) | `Location` de `/oauth2/authorize` é **exatamente** `${PUBLIC_ORIGIN}/login` | Elo 2 + Elo 6 |
+
+```bash
+# A guarda fail-closed do script recusa rodar com a stack no ar — derrube-a antes (ato explícito):
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml down
+
+bash infra/smoke-test/login-topology-smoke-test.sh
+SMOKE_KEEP_STACK=1 bash infra/smoke-test/login-topology-smoke-test.sh   # não derruba no fim (debug)
+```
+
+> ⚠️ O script sobe a stack com o **mesmo nome de projeto Compose do deploy** (não dá para isolar por
+> `-p`: `networks.default.name` fixa a rede e dois projetos colidiriam nos aliases) e roda `down -v`
+> **antes e depois**, **apagando os volumes de Mongo e Postgres**. `SMOKE_KEEP_STACK=1` mantém a stack
+> no ar para inspeção, mas **não preserva dado** — a purga é anterior à subida. Nunca rode na máquina
+> com o deploy real no ar.
+
+**Por que a purga inicial é obrigatória (e não zelo excessivo):** o seed do `gateway-client` é
+idempotente e **não reconcilia**. Num volume de Postgres herdado de outro `PUBLIC_ORIGIN`, o client
+mantém os `redirect_uris` antigos; o `redirect_uri` da asserção (d) fica não-registrado e o SAS
+responde **400 sem `Location`** — comportamento correto dele, mas que reprova a (d) por sujeira de
+estado, não por regressão. Foi exatamente o que aconteceu na primeira execução do script. A asserção
+distingue esse 400 na mensagem de falha, para não mandar ninguém caçar um Elo 6 inexistente.
+
+**Detalhes que não são cosméticos** — mexer neles desliga silenciosamente o que o teste cobre:
+
+- **Todo request manda `Host: ${PUBLIC_HOST}` e `X-Forwarded-Proto: https`** — é o que o `cloudflared`
+  entrega ao nginx. Sem eles o `map $http_x_forwarded_proto` cai em `$scheme` (http) e o `Host` vira
+  `interface`; a asserção (d) passa a testar outra coisa.
+- **A asserção (d) manda `X-Forwarded-For: 203.0.113.9`** — é o probe do Elo 6. O IP do próprio
+  container de curl é `172.x`, dentro da faixa de `trusted-proxies`; **sem um IP público no XFF a
+  regressão do Elo 6 passa despercebida**.
+- **A asserção (d) compara o `Location` por igualdade, não por prefixo** — erro não-fatal do endpoint
+  de autorização redireciona para o próprio `redirect_uri`, que também começa com a origem pública.
+- **A asserção (c) monta o cookie `AUTHSESSION` à mão** (`-H "Cookie: ..."`, não `-c/-b`): o overlay de
+  deploy liga `APP_COOKIE_SECURE=true` e o cookie engine do curl se recusa a reenviar cookie `Secure`
+  sobre HTTP. Montar o header evita relaxar a flag e mantém a topologia idêntica à de produção.
+- **A asserção (e) checa a ausência da chave `ports:` via `jq`, não o número da porta** — um
+  `9999:8081` passaria por um grep de número e continuaria publicando o gateway no host.
+
+**Manutenção:** quem editar `login-interface/nginx.conf`, `gateway/.../GatewayRouter.java` ou os
+`SecurityConfig` de gateway/auth-server tem de revisitar as asserções — é a consequência negativa
+que o próprio ADR-023 registra.
+
+---
+
 ## Armadilhas e comportamentos não óbvios do stack
 
 ### Visibilidade eventual do `RedisCache`
@@ -257,7 +322,9 @@ Dois pontos não óbvios na integração do `gateway`:
 
 **MSW intercepta no boundary HTTP** — testa `apiAxios`/`authClient`/`userClient` de verdade, incluindo CSRF (`X-XSRF-TOKEN`) e `withCredentials`. O login não faz fetch direto; redireciona para o gateway OAuth2 — testado via asserção sobre `window.location.href`.
 
-**Sem E2E/Playwright** — decisão explícita de escopo; o boundary HTTP coberto pelo MSW é o substituto.
+**Sem E2E/Playwright** — decisão explícita de escopo; o boundary HTTP coberto pelo MSW é o substituto
+no front. A cadeia de borda que o MSW não alcança (nginx → gateway → auth-server) é coberta pelo
+[smoke-test da topologia de login](#smoke-test-da-topologia-de-login-adr-023), em nível HTTP.
 
 ---
 
@@ -266,7 +333,13 @@ Dois pontos não óbvios na integração do `gateway`:
 - **`discovery-server`** — Eureka puro, sem lógica própria; testar seria testar o framework.
 - **`CORSConfig` / `OpenAPIConfig`** (gateway e auth-server) — configuração declarativa sem branch.
 - **Getters/setters, DTOs sem lógica, código gerado** — conforme as diretrizes de unitários desta página.
-- **E2E / Playwright** — sem cobertura end-to-end; o boundary HTTP é coberto pelo MSW nos testes do `login-interface`.
+- **E2E / Playwright** — sem cobertura end-to-end **de browser**; o boundary HTTP do SPA é coberto
+  pelo MSW nos testes do `login-interface`. A cadeia de borda `nginx → gateway → auth-server` tem
+  cobertura própria, mas **em nível HTTP** (curl), não de browser — ver
+  [Smoke-test da topologia de login](#smoke-test-da-topologia-de-login-adr-023). O que fica de fora
+  disso, de propósito ([ADR-023](adr/ADR-023-smoke-test-automatizado-login-hostname-unico.md) §
+  Consequências): R-09 (rede Docker flat) e os CSRF latentes BUG-002/BUG-004/BUG-005, que não são
+  bugs de roteamento pegáveis por asserção HTTP contra a topologia normal.
 - **Integração própria do `notification-service`** — o serviço é stateless (sem Mongo/Redis/Postgres
   próprios); a pirâmide se limita a unit (`EmailServiceTest`, `InternalTokenFilterTest`) e
   `@WebMvcTest` (`NotificationControllerTest`). O fluxo ponta a ponta (outbox → Feign →

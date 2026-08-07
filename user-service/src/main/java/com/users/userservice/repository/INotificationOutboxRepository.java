@@ -17,4 +17,20 @@ public interface INotificationOutboxRepository extends MongoRepository<Notificat
 
     List<NotificationOutbox> findByUserIdAndTypeAndStatusIn(
             String userId, NotificationType type, List<NotificationStatus> statuses);
+
+    /**
+     * Candidatos à varredura de retry ({@code OutboxRetryService}), do mais antigo para o mais
+     * novo. O teto de 100 é deliberado: a varredura roda a cada ciclo e não pode degenerar em
+     * leitura ilimitada se o notification-service ficar fora por muito tempo — o excedente é
+     * apanhado nos ciclos seguintes.
+     */
+    List<NotificationOutbox> findTop100ByTypeAndStatusInOrderByCreatedAtAsc(
+            NotificationType type, List<NotificationStatus> statuses);
+
+    /**
+     * Total de registros já emitidos para o par (titular, tipo) — é o teto de tentativas do
+     * retry. Ver o racional em {@code OutboxRetryService}: o contador não pode viver no
+     * registro individual, porque cada retry cria um registro novo.
+     */
+    long countByUserIdAndType(String userId, NotificationType type);
 }

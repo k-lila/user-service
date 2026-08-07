@@ -5,13 +5,17 @@ scrape_configs:
   - job_name: "microservices"
     metrics_path: "/actuator/prometheus"
 
+    # Porta 8181 = porta de management (management.server.port), não a porta de
+    # tráfego do serviço. O actuator saiu da porta pública nos quatro (gap G14);
+    # esta porta não é publicada no host, só alcançável pela rede Docker interna.
+    # Os discovery-servers ainda servem o actuator na porta principal.
     static_configs:
       - targets:
           - discovery-server-1:9091
           - discovery-server-2:9092
-          - authorization-server:8082
-          - user-service:8090
-          - notification-service:8095
+          - authorization-server:8181
+          - user-service:8181
+          - notification-service:8181
           - gateway:8181
 
   - job_name: "mongodb"

@@ -26,6 +26,15 @@ eureka:
     hostname: ${EUREKA_HOSTNAME:localhost}
   server:
     wait-time-in-ms-when-sync-empty: 3000
+    # Lado servidor da convergência (o lado cliente vive nos *.yml dos apps). De nada adianta o
+    # lease expirar em 30s se o registro só é varrido a cada 60s (eviction) e a resposta servida
+    # aos clientes fica 30s em cache. Os três knobs têm de descer juntos.
+    eviction-interval-timer-in-ms: 15000
+    response-cache-update-interval-ms: 5000
+    # enable-self-preservation permanece no default (true) DE PROPÓSITO: desligá-lo aceleraria
+    # mais a evicção, mas remove a proteção contra evicção falsa em partição de rede — trocar
+    # robustez por segundos não compensa num blueprint. Revisitar só se a evicção se mostrar
+    # lenta em teste com instâncias reais caindo.
 
 management:
   endpoints:

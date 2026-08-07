@@ -106,3 +106,37 @@ jobs:
 
       - name: Validate compose topology
         run: docker compose -f docker-compose.yml config -q
+
+  # Smoke-test da topologia de login sob hostname único (ADR-023). Sobe nginx + gateway +
+  # authorization-server (menos o cloudflared, que não roda em CI) e verifica por HTTP os pontos
+  # exatos onde os elos do ADR-019 quebraram — todos descobertos em produção, nenhum pego antes
+  # do deploy. É o único job que exercita o container `interface`: nem os Testcontainers nem o
+  # compose-validate acima passam pelo nginx.
+  #
+  # Sem `needs:` — paralelo aos demais. Roda em todo push/PR: o CI não tem path-filtering em
+  # nenhum job, e o filtro deixaria passar mudança indireta (ex.: em SecurityConfig) que também
+  # afeta a cadeia (ADR-023 § Alternativas).
+  smoke-test-login:
+    name: smoke-test-login
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Envs no nível do JOB, não do passo: o passo de teardown abaixo também invoca `docker compose`
+    # com o overlay de deploy, cujos `${PUBLIC_ORIGIN:?}` / `${TUNNEL_ID:?}` são interpolados na
+    # leitura do arquivo — sem elas o próprio `down` falha.
+    env:
+      PUBLIC_ORIGIN: https://smoke-test.local
+      PUBLIC_HOST: smoke-test.local
+      TUNNEL_ID: 00000000-0000-0000-0000-000000000000
+    steps:
+      - uses: actions/checkout@v4
+
+      # O script cuida de .env e ./secrets/ (defaults de dev) e derruba a stack ao final,
+      # imprimindo `compose ps` + logs se alguma asserção reprovar.
+      - name: Smoke-test da topologia de login
+        run: bash infra/smoke-test/login-topology-smoke-test.sh
+
+      # Rede de segurança para o caso de o script ser morto (timeout do job) antes do seu próprio
+      # trap: `down -v` é idempotente, então rodar duas vezes não custa nada.
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.deploy.yml down -v

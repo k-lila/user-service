@@ -5,11 +5,14 @@ import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 
 import com.users.userservice.domain.AuditAction;
 import com.users.userservice.domain.AuditLog;
@@ -45,6 +48,29 @@ class AuditLogIntegrationTest extends AbstractIntegrationTest {
         // E-mail persiste mascarado (LGPD).
         assertThat(saved.getTargetEmail()).isEqualTo("f***@email.com");
         assertThat(saved.getTimestamp()).isNotNull();
+    }
+
+    @Test
+    void listagemAdministrativa_deveAparecerNoHistoricoDeCadaTitular() {
+        // Fix G13: o valor da entrada por titular (em vez de uma agregada) é exatamente este —
+        // a consulta "quem acessou o meu dado?" tem de enxergar a listagem.
+        auditService.recordBulkFromJwt(
+                AuditAction.ADMIN_LIST_USERS,
+                null,
+                List.of(
+                        new AuditService.AuditTarget("alvo-1", "primeiro@email.com"),
+                        new AuditService.AuditTarget("alvo-2", "segundo@email.com")));
+
+        await().atMost(Duration.ofSeconds(5))
+                .until(() -> auditLogRepository.count() == 2);
+
+        Page<AuditLog> doAlvo1 = auditLogRepository.findByTargetUserId("alvo-1", PageRequest.of(0, 10));
+        assertThat(doAlvo1.getTotalElements()).isEqualTo(1);
+        assertThat(doAlvo1.getContent().get(0).getAction()).isEqualTo(AuditAction.ADMIN_LIST_USERS);
+        assertThat(doAlvo1.getContent().get(0).getTargetEmail()).isEqualTo("p***@email.com");
+
+        assertThat(auditLogRepository.findByTargetUserId("alvo-2", PageRequest.of(0, 10)).getTotalElements())
+                .isEqualTo(1);
     }
 
     @Test

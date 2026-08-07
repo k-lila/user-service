@@ -1,55 +1,92 @@
 {
   "project": "user-service (blueprint de sistema de usuários — Java + Spring)",
-  "schema_version": "1.0",
+  "schema_version": "1.1",
+  "schema_notes": {
+    "depends_on": "acoplamento de DOMÍNIO: quem este serviço chama serviço-a-serviço. É o campo do reverse-lookup de impacto ('quem quebra se eu mexer aqui?').",
+    "infra_depends_on": "acoplamento de INFRAESTRUTURA: config-server, discovery-server e datastores. Separado de propósito — misturá-lo em depends_on dilui o sinal de impacto.",
+    "management_port": "porta de management do actuator (G14). NUNCA publicada no host; é o único controle de acesso. '/actuator/**' tem de continuar no permitAll() dos SecurityConfig — a chain do contexto pai governa também esta porta."
+  },
   "services": {
     "gateway": {
       "port": 8081,
-      "role": "Único ponto de entrada externo; cliente OAuth2 do BFF; rate limiting; CSRF; TokenRelay",
-      "stack": ["Spring Cloud Gateway (WebFlux)", "Redis (sessão + rate limit)"],
-      "depends_on": ["authorization-server", "user-service", "discovery-server"]
+      "management_port": 8181,
+      "role": "Único ponto de entrada externo; cliente OAuth2 do BFF (guarda o token na sessão, relaya via TokenRelay por rota); rate limiting Redis por tier; CSRF; entry point híbrido 401/302 (ADR-020); RevocationWebFilter (ADR-017)",
+      "stack": ["Spring Cloud Gateway (WebFlux)", "Redis (sessão Spring Session + rate limit)", "Eureka client"],
+      "depends_on": ["authorization-server", "user-service"],
+      "infra_depends_on": ["config-server", "discovery-server", "redis"]
     },
     "authorization-server": {
       "port": 8082,
-      "role": "OAuth2 Authorization Server (authorization_code + PKCE + refresh + OIDC); customiza JWT; lockout",
-      "stack": ["Spring Authorization Server", "PostgreSQL (estado OAuth)", "Redis (sessão)", "OpenFeign + Resilience4j"],
-      "depends_on": ["user-service"]
+      "management_port": 8181,
+      "role": "OAuth2 Authorization Server (authorization_code + PKCE obrigatório + refresh + OIDC); customiza o JWT (userID/roles/permissions); lockout anti-brute-force por (conta, IP); gate de e-mail verificado com grace period (ADR-015); RevocationRefreshGuard bloqueia o refresh de titular revogado (ADR-017); purga do estado OAuth expirado (ADR-022)",
+      "stack": ["Spring Authorization Server", "PostgreSQL (estado OAuth: client/authorizations/consents)", "Redis (sessão, cookie AUTHSESSION)", "OpenFeign + Resilience4j"],
+      "depends_on": ["user-service"],
+      "infra_depends_on": ["config-server", "discovery-server", "auth-postgres", "redis"]
     },
     "user-service": {
       "port": 8090,
-      "role": "Domínio central: CRUD de usuários; canal interno para o auth-server; outbox + cliente Feign do notification-service (ADR-015)",
-      "stack": ["Spring Boot", "MongoDB (replica set rs0)", "Redis (cache + rate limit de reenvio)", "OpenFeign + Resilience4j"],
-      "depends_on": ["notification-service"]
+      "management_port": 8181,
+      "role": "Domínio central. UserController (self-service do próprio titular), AdminController /v1/admin/** ADMIN-only (leitura/listagem de PII, roles, deletes administrativos, trilha de auditoria — ADR-014/016/021), InternalUserController (canal interno para o auth-server); trilha de auditoria LGPD assíncrona (ADR-011); outbox + cliente Feign do notification-service com retry periódico (ADR-015); grava o epoch de revogação (ADR-017)",
+      "stack": ["Spring Boot", "MongoDB (replica set rs0 — coleções users, auditLogs, notificationOutbox)", "Redis (cache usersById/usersByEmail/authByEmail + rate limit de reenvio + epoch de revogação)", "OpenFeign + Resilience4j"],
+      "depends_on": ["notification-service"],
+      "infra_depends_on": ["config-server", "discovery-server", "mongodb", "redis"]
     },
     "notification-service": {
       "port": 8095,
-      "role": "Envio de e-mail de verificação de cadastro (ADR-015); stateless; nunca exposto pelo gateway",
+      "management_port": 8181,
+      "role": "Envio de e-mail de verificação de cadastro (ADR-015); stateless (sem datastore próprio); nunca exposto pelo gateway; springdoc REMOVIDO do pom por invariante (ADR-021) — não reintroduzir",
       "stack": ["Spring Boot", "JavaMailSender (SMTP)"],
-      "depends_on": []
+      "depends_on": [],
+      "infra_depends_on": ["config-server", "discovery-server"]
     },
     "config-server": {
       "port": 8888,
-      "role": "Config centralizada (HA atrás de config-lb/nginx); HTTP Basic",
+      "role": "Config centralizada via classpath:/config (HA: config-server-1/2 atrás de config-lb/nginx); HTTP Basic, /actuator/health aberto p/ healthcheck. Deve subir primeiro",
       "stack": ["Spring Cloud Config"],
-      "depends_on": []
+      "depends_on": [],
+      "infra_depends_on": []
     },
     "discovery-server": {
       "port": "9091/9092",
-      "role": "Eureka HA (peer replication)",
+      "role": "Eureka HA (dois nós em peer replication)",
       "stack": ["Netflix Eureka"],
-      "depends_on": ["config-server"]
+      "depends_on": [],
+      "infra_depends_on": ["config-server"]
     },
     "login-interface": {
-      "port": "5173 (dev) / 80 (docker)",
-      "role": "SPA React no padrão BFF; nunca manuseia JWT",
-      "stack": ["React 19", "TypeScript", "Vite", "TailwindCSS 4"],
-      "depends_on": ["gateway"]
+      "port": "5173 (dev Vite) / 80 (nginx no Docker)",
+      "role": "SPA React no padrão BFF; nunca manuseia JWT nem usa localStorage. No Docker/deploy o próprio nginx é a origem pública e faz proxy same-origin de 9 paths ao gateway (ADR-019); '/login' pertence ao IdP, não ao React Router",
+      "stack": ["React 19", "TypeScript", "Vite", "TailwindCSS 4", "nginx (Docker)"],
+      "depends_on": ["gateway"],
+      "infra_depends_on": []
     }
   },
   "communication": {
     "sync": "REST via OpenFeign (auth-server -> user-service /internal/users/email/{email}; user-service -> notification-service /internal/notifications/email-verification)",
-    "resilience": "Resilience4j circuit breaker + fallback factory em ambos os clientes Feign",
-    "async": "outbox no MongoDB do user-service (notificationOutbox) + chamada Feign disparada via @Async — sem poller/scan periódico, sem Kafka/broker (ADR-015)",
-    "internal_channel_secret": "X-Internal-Token (reaproveitado pelo notification-service)"
+    "resilience": "Resilience4j circuit breaker + fallback factory em ambos os clientes Feign. No user-client, ignoreExceptions [FeignException$NotFound] + distinção 404 (negócio, conta no lockout) x indisponibilidade (não conta) — ADR-021",
+    "async": "outbox no MongoDB do user-service (notificationOutbox) + chamada Feign disparada via @Async (executor notificationExecutor); sem Kafka/broker. HÁ varredura periódica: OutboxRetryService (@Scheduled, emenda do ADR-015) reprocessa FAILED/PENDING emitindo token NOVO — o ADR-015 original descartou o poller e foi corrigido depois",
+    "internal_channel_secret": "X-Internal-Token (ADR-006; reaproveitado pelo notification-service via Filter de servlet simples, sem Spring Security)",
+    "tracing": "B3; o Feign do auth-server injeta os headers via FeignTracingConfig (a instrumentação automática não os emitia sob circuit breaker — trace órfão no user-service)"
+  },
+  "shared_state": {
+    "revocation_epoch": {
+      "key": "revoke:user:{userID} no Redis (property security.revocation.key-prefix)",
+      "writer": "user-service (AdminService.updateUserRoles, RegisterService.deactivateUser/.deleteUser)",
+      "readers": ["user-service (RevocationTokenValidator)", "gateway (RevocationWebFilter)", "authorization-server (RevocationRefreshGuard)"],
+      "invariant": "o key-prefix tem de ser IDÊNTICO nos três serviços; divergir quebra em silêncio. Fail-open por decisão (ADR-017)"
+    },
+    "session_cookies": "gateway=SESSION (namespace gateway:session), auth-server=AUTHSESSION (namespace authserver:session) — nomes e namespaces distintos evitam colisão no salto front-channel (ADR-007)"
+  },
+  "scheduled_jobs": {
+    "OutboxRetryService": "user-service, EMAIL_VERIFICATION_RETRY_INTERVAL (5m); lock SETNX fail-CLOSED (o único do sistema — falhar aberto com N instâncias = N e-mails duplicados)",
+    "OAuthStatePurgeService": "authorization-server, OAUTH_STATE_PURGE_INTERVAL (6h); apaga por GREATEST das 6 colunas de expiração, lock SETNX fail-closed (ADR-022)",
+    "ttl_indexes": "auditLogs.purgeAt (AUDIT_LOG_RETENTION, 180d) e notificationOutbox (EMAIL_VERIFICATION_OUTBOX_RETENTION, 30d) — padrão expire-at (expireAfterSeconds=0), não TTL fixo no índice"
+  },
+  "edge_topology": {
+    "dev": "gateway:8081 é a borda; o browser vai direto a localhost:8082 no front-channel do OAuth. Portas internas republicadas pelo docker-compose.override.yml",
+    "deploy": "docker-compose.deploy.yml + Cloudflare Tunnel (named tunnel locally-managed, ingress em infra/cloudflared/config.yml). Hostname ÚNICO: o túnel entrega em interface:80 (nginx do SPA), NÃO no gateway; nem o gateway nem o auth-server são alcançáveis de fora. TLS termina na Cloudflare",
+    "observabilidade": "Grafana/Prometheus/Zipkin publicados presos ao loopback (127.0.0.1) em dev e deploy, sem ingress no túnel — nenhum tem authn forte, lockout ou MFA",
+    "smoke_test": "infra/smoke-test/login-topology-smoke-test.sh é a ÚNICA camada que exercita nginx -> gateway -> auth-server (ADR-023). Revisitar ao editar login-interface/nginx.conf, GatewayRouter ou os SecurityConfig de gateway/auth-server"
   },
   "current_task": {
     "task_id": null,

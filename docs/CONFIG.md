@@ -28,6 +28,22 @@
 - A coluna **Serviço(s)** indica quem consome a variável.
 - **Compose base prod-safe + override de dev:** `docker-compose.yml` publica só a borda (`gateway:8081` e `interface`); `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas em dev. As URLs voltadas ao **browser** (front-channel/redirects) entram no compose como `${VAR:-localhost-default}` — em dev usam o default; em **prod** (`docker compose -f docker-compose.yml up`) um `.env` as sobrescreve com os hostnames públicos. Ver `.env.example`.
 - **Secrets sem default no config-server:** `AUTH_DB_USER`, `AUTH_DB_PASSWORD` e `OAUTH_CLIENT_SECRET` deixaram de ter default nos YAMLs servidos → ausência da env no cliente derruba a subida (mesma filosofia do `INTERNAL_API_TOKEN`).
+
+> **Uma variável só é ajustável se estiver declarada no compose.** Ter default no YAML do
+> config-server **não** basta: o `.env` só alimenta interpolação `${VAR}` do próprio compose, e não
+> há `env_file` em serviço nenhum. Uma variável fora de todo bloco `environment:` (e que também não
+> chegue como Docker secret via `configtree:`) é **inerte** — documentá-la aqui promete um knob que
+> não existe. Em 2026-08-06, uma varredura de todo `${VAR}` lido pelos YAMLs contra os três compose
+> e o `./secrets/` encontrou **19 variáveis nesse estado**, entre elas `TERMS_VERSION`,
+> `TRUSTED_CLIENT_IP_HEADER` e `LOCKOUT_MAX_ATTEMPTS` — todas com linha nesta referência e nenhuma
+> ajustável. Foram ligadas em bloco.
+>
+> O padrão adotado é **espelhar o default do YAML no compose** (`VAR: ${VAR:-default-do-yaml}`),
+> como em `JAVA_TOOL_OPTIONS` e `MANAGEMENT_TRACING_SAMPLING_PROBABILITY`. Duas regras:
+> **(1)** nunca escrever `${VAR:-}` — o default vazio injeta string vazia e **sobrescreve** o
+> default do YAML em vez de deixá-lo valer; **(2)** o preço é o default existir em dois lugares —
+> ao mudar um, mudar o outro. Ao acrescentar um knob novo, ligá-lo no compose **no mesmo commit**,
+> senão ele nasce inerte. Verificação: `docker compose config | grep NOME_DA_VAR`.
 - **Segredos vêm de Docker secrets, não do `.env`:** os valores sensíveis são injetados por arquivos em `/run/secrets/` (base secrets-native) — ver [§ Docker secrets](#docker-secrets-base-secrets-native). Onde as tabelas abaixo dizem "o compose injeta `<valor-dev>`", o valor vem do secret correspondente gerado por `infra/secrets/gen-secrets.sh`.
 - **Config-server com Basic auth:** o endpoint do config-server exige autenticação (só `/actuator/health` fica aberto, para os healthchecks). O par `CONFIG_SERVER_USERNAME`/`CONFIG_SERVER_PASSWORD` vale para o usuário in-memory do config-server (`spring.security.user.*`) **e** para os clientes (`spring.cloud.config.username`/`password`).
 
@@ -92,7 +108,7 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 
 > ¹ Defaults de porta: gateway `8081`, authorization-server `8082`, user-service `8090`, **notification-service `8095`**, discovery-server `9091`/`9092`, config-server `8888`.
 >
-> **Porta de management:** só o **gateway** separa o actuator (`management.server.port: 8181`, hardcoded no `gateway.yml`, não publicada no host — o Prometheus raspa `gateway:8181` pela rede interna). Todos os demais servem `/actuator/**` na porta principal — ver gap **G14** em [SECURITY.md](SECURITY.md).
+> **Porta de management:** os **quatro** serviços de domínio (gateway, user-service, authorization-server, notification-service) servem `/actuator/**` em `management.server.port: 8181` — a mesma porta nos quatro, o que não colide porque cada container tem IP próprio na rede Docker. É **hardcoded** em cada YAML de propósito (como env, um `.env` errado devolveria o actuator à porta pública em silêncio) e **não é publicada** em nenhum compose: o Prometheus raspa `<serviço>:8181` pela rede interna e os healthchecks do compose usam `localhost:8181`. Fecha o gap **G14** (ver [SECURITY.md](SECURITY.md)) — não publique essa porta. Exceções: os **discovery-servers** servem o actuator na porta principal (`9091`/`9092`), e o **config-server** o mantém na `8888` atrás de HTTP Basic, com só `/actuator/health` aberto.
 
 ### Variáveis de plataforma (fáceis de esquecer)
 
@@ -149,6 +165,15 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | Variável         | Serviço(s)   | Default dev | Observação                                                                                                  |
 | ---------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------- |
 | `TERMS_VERSION`  | user-service | `v1`        | Versão dos termos/privacidade registrada no cadastro (`app.terms.version`, ADR-012). **Bump** quando a política mudar — permite exigir re-consentimento e prova qual versão cada titular aceitou. |
+| `AUDIT_LOG_RETENTION` | user-service | `180d` | Retenção da trilha de auditoria LGPD (`app.audit.retention`, ADR-022). Gravada por documento em `auditLogs.purgeAt`, com índice TTL *expire-at* — mudar o valor vale para as entradas novas, sem `collMod`. Entradas gravadas antes da introdução do campo não têm `purgeAt` e nunca expiram. **Decisão de conformidade, não técnica:** se o prazo legal aplicável for maior, ajuste **antes** que a primeira entrada expire — depois disso o dado não volta. |
+
+## Higiene do estado persistente (ADR-022)
+
+| Variável                       | Serviço(s)           | Default dev | Observação                                                                                                  |
+| ------------------------------- | -------------------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
+| `OAUTH_STATE_PURGE_INTERVAL`    | authorization-server | `6h`        | Período da purga de `oauth2_authorization` (`app.oauth-state.purge-interval`). O SAS grava uma linha por autorização e **nunca** apaga nenhuma — sem esta varredura a tabela cresce uma linha por login, para sempre. O lock entre instâncias (`SETNX` no Redis) usa TTL de 2× este valor. |
+| `OAUTH_STATE_PURGE_GRACE`       | authorization-server | `1d`        | Folga além da expiração antes de apagar (`app.oauth-state.purge-grace`) — margem para depuração/forense. Uma linha só é elegível quando **todas** as suas colunas de expiração já passaram por esta margem; filtrar só por `access_token_expires_at` apagaria autorizações com refresh token vivo, deslogando usuários ativos. |
+| `OAUTH_STATE_PURGE_BATCH_SIZE`  | authorization-server | `500`       | Teto de linhas removidas por ciclo (`app.oauth-state.purge-batch-size`). Limita o tamanho da transação: numa base que acumulou meses de estado, um `DELETE` único seguraria lock sobre a tabela inteira. O ciclo seguinte continua de onde parou. |
 
 ## Verificação de e-mail (ADR-015)
 
@@ -158,6 +183,9 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | `EMAIL_VERIFICATION_RESEND_MAX`        | user-service           | `3`                       | Limite de reenvios por conta-alvo na janela (`app.verification.resend-max-per-window`, Redis, complementar ao rate limit por IP do gateway). |
 | `EMAIL_VERIFICATION_RESEND_WINDOW`     | user-service           | `1h`                      | Janela do limite acima (`app.verification.resend-window`).                                                   |
 | `EMAIL_VERIFICATION_OUTBOX_RETENTION`  | user-service           | `30d`                     | Retenção do registro de outbox (`notificationOutbox.purgeAt`) após expiração/confirmação do token — TTL index do Mongo atua sobre `purgeAt`, não sobre `expiresAt` (preserva histórico de auditoria). |
+| `EMAIL_VERIFICATION_RETRY_INTERVAL`    | user-service           | `5m`                      | Período da varredura do `OutboxRetryService` (`app.verification.retry-interval`, emenda do ADR-015). Reprocessa registros `FAILED`/`PENDING`. O lock entre instâncias (`SETNX` no Redis) usa TTL de 2× este valor. |
+| `EMAIL_VERIFICATION_RETRY_BACKOFF`     | user-service           | `15m`                     | Idade mínima do registro antes de ser reprocessado (`app.verification.retry-backoff`). Vale também para o `PENDING`, que dentro desta janela ainda pode estar em voo no executor assíncrono — reemitir antes duplicaria um e-mail que estava para dar certo. |
+| `EMAIL_VERIFICATION_RETRY_MAX_ATTEMPTS`| user-service           | `5`                       | Teto de retentativas por titular (`app.verification.retry-max-attempts`). Contado sobre o **número de registros** do par (titular, tipo), **não** sobre o campo `attempts`: cada retry cria um registro novo com `attempts=0`, então um contador por registro nunca expiraria e a varredura reemitiria para sempre. Reenvios manuais consomem o mesmo orçamento. |
 | `EMAIL_VERIFICATION_GRACE_PERIOD`      | authorization-server   | `24h`                     | Janela de carência do gate de login (`security.email-verification.grace-period`) — login permitido mesmo com `emailVerified=false` dentro da janela desde `registrationDate`, evitando conta permanentemente inacessível se o e-mail nunca chegar. |
 | `API_BASE_URL`                         | user-service           | `http://localhost:8081`  | Reaproveitada como base do link de confirmação (`app.verification.base-url`) — já documentada em [§ Swagger/OpenAPI](#swagger--openapi); deve apontar ao gateway (borda), não ao user-service interno. |
 | `SERVER_PORT` (notification-service)   | notification-service   | `8095`                    | Porta do serviço — nunca publicada pelo gateway nem pelo compose base; só republicada em dev via `docker-compose.override.yml`. |
@@ -165,7 +193,7 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | `SMTP_USERNAME` / `SMTP_PASSWORD`      | notification-service   | _(vazio)_                 | Credenciais SMTP — Docker secret, sem valor real por default (placeholder de dev). Exporte com credenciais reais antes de `gen-secrets.sh` em produção. |
 | `SMTP_AUTH` / `SMTP_STARTTLS`          | notification-service   | `false` / `false`         | Docker secret (mesmo mecanismo de `SMTP_HOST` etc.) para `spring.mail.properties.mail.smtp.auth`/`starttls.enable`. Provedor na porta **587** exige ambos `true` — exporte antes de `gen-secrets.sh`. |
 | `SMTP_SSL_ENABLE`                      | notification-service   | `false`                   | Docker secret para `spring.mail.properties.mail.smtp.ssl.enable` — TLS **implícito** (porta **465**). **Mutuamente exclusivo com `SMTP_STARTTLS`**: são duas topologias de conexão, não dois níveis de rigor. `587` → `SMTP_STARTTLS=true` + `SMTP_SSL_ENABLE=false`; `465` → `SMTP_STARTTLS=false` + `SMTP_SSL_ENABLE=true`. Sem este flag a porta 465 é inutilizável (socket em texto plano contra porta que espera handshake TLS imediato). Não há validação em código — ligar os dois é incoerente. |
-| `SMTP_CONNECTION_TIMEOUT` / `SMTP_READ_TIMEOUT` / `SMTP_WRITE_TIMEOUT` | notification-service | `10000` (ms cada)         | **Não são Docker secrets** — têm default no config-server e não são declarados no compose; só entram em `environment:` se alguém quiser afinar. Mapeiam `mail.smtp.connectiontimeout`/`timeout`/`writetimeout`. Existem porque o default do Jakarta Mail é **infinito** e o `NotificationController` bloqueia até `JavaMailSender.send()` retornar: sem eles um SMTP travado segura a thread do Tomcat para sempre. O `timelimiter` de 10s do Feign **não** cobre este lado (libera o chamador, que já estava livre — a chamada é `@Async`). `10000` e não menos porque o handshake TLS + AUTH contra SMTP real passa de 3s. |
+| `SMTP_CONNECTION_TIMEOUT` / `SMTP_READ_TIMEOUT` / `SMTP_WRITE_TIMEOUT` | notification-service | `10000` (ms cada)         | **Não são Docker secrets** (não são segredo) — chegam pelo `environment:` do notification-service, com o default espelhado do config-server. Mapeiam `mail.smtp.connectiontimeout`/`timeout`/`writetimeout`. Existem porque o default do Jakarta Mail é **infinito** e o `NotificationController` bloqueia até `JavaMailSender.send()` retornar: sem eles um SMTP travado segura a thread do Tomcat para sempre. O `timelimiter` de 10s do Feign **não** cobre este lado (libera o chamador, que já estava livre — a chamada é `@Async`). `10000` e não menos porque o handshake TLS + AUTH contra SMTP real passa de 3s. |
 | `APP_MAIL_FROM`                        | notification-service   | `no-reply@users.local`    | Remetente exibido nos e-mails de verificação (`app.mail.from`).                                              |
 
 ## Swagger / OpenAPI
@@ -290,14 +318,27 @@ de `deploy:` só vale em modo Swarm. Validar com `docker compose -f docker-compo
   (soft); omitido nos serviços pequenos/efêmeros.
 
 Os valores são **defaults de dev-blueprint**: `mem_limit` folgado para não causar OOMKill no
-boot (a JVM 21 calibra o heap em ~25% do limite do container via `MaxRAMPercentage`). Ajuste
-conforme a carga real do consumidor do blueprint.
+boot. Ajuste conforme a carga real do consumidor do blueprint.
+
+> **O heap e o coletor dos apps Spring são explícitos, não ergonômicos.** A JVM 21 escolhe
+> sozinha com base nos limites do container, e escolhe mal quando eles são pequenos: com
+> `cpus: 1.0` ela reporta `Effective CPU Count = 1` e, junto do `mem_limit` abaixo de 1792m,
+> classifica o container como *client-class machine* — o que seleciona **`UseSerialGC`**
+> (stop-the-world, thread única) e heap de 25% (256m). Por isso o `x-spring-app-env` fixa
+> `JAVA_TOOL_OPTIONS=-XX:+UseG1GC -XX:MaxRAMPercentage=60`, e a classe **App JVM** usa o perfil
+> `x-res-jvm` com **`cpus: 2.0`** — o G1 só rende com core sobrando para a marcação concorrente,
+> e a quota maior também alivia o throttling do CFS. O `MaxRAMPercentage` é 60 e não 70 porque
+> o overhead non-heap medido (metaspace + code cache + stacks + buffers) é ~150m: 70% de 1024m
+> deixaria o total em ~870m de um teto de 1024m, margem fina demais para OOM kill.
+>
+> `x-res-jvm` é **deliberadamente separado** de `x-res-app`, que serve os nós Mongo — fundir os
+> dois dobraria a quota de CPU do MongoDB sem motivo.
 
 | Classe                | Serviços                                            | `cpus` | `mem_limit` | `mem_reservation` |
 | --------------------- | --------------------------------------------------- | ------ | ----------- | ----------------- |
-| App JVM (pesado)      | `gateway`, `authorization-server`, `user-service`, `notification-service` | 1.0    | 1024m       | 512m              |
+| App JVM (pesado, `x-res-jvm`) | `gateway`, `authorization-server`, `user-service`, `notification-service` | 2.0    | 1024m       | 512m              |
 | App JVM (leve)        | `config-server-1/2`, `discovery-server-1/2`         | 0.75   | 512m        | 256m              |
-| MongoDB               | `mongo-1/2/3`                                        | 1.0    | 1024m       | 512m              |
+| MongoDB (`x-res-app`) | `mongo-1/2/3`                                        | 1.0    | 1024m       | 512m              |
 | PostgreSQL            | `auth-postgres`                                      | 0.75   | 512m        | 256m              |
 | Redis (data)          | `redis-1/2/3`                                        | 0.5    | 256m        | 64m               |
 | Redis Sentinel        | `redis-sentinel-1/2/3`                               | 0.25   | 128m        | —                 |
@@ -305,9 +346,28 @@ conforme a carga real do consumidor do blueprint.
 | Prometheus            | `prometheus`                                         | 0.5    | 512m        | 256m              |
 | Grafana               | `grafana`                                            | 0.5    | 256m        | 128m              |
 | Exporters             | `mongodb-exporter`, `postgres-exporter`, `redis-exporter` | 0.25 | 128m    | —                 |
-| Nginx                 | `config-lb`, `interface`                            | 0.25   | 64m         | —                 |
+| Nginx (SPA / borda)   | `interface`                                          | 1.0    | 128m        | 64m               |
+| Nginx (interno)       | `config-lb`                                          | 0.25   | 64m         | —                 |
 | One-shot              | `mongo-init`                                         | 0.5    | 256m        | —                 |
 
-> A soma das **reservas** (~5,2 GB) é o que dimensiona o host; os `mem_limit` são tetos de
+> A soma das **reservas** (~5,3 GB) é o que dimensiona o host; os `mem_limit` são tetos de
 > contenção, não memória pré-alocada. O `docker-compose.override.yml` (dev) só republica
 > portas — os limites do base valem em dev e no deploy prod-like.
+
+> **Por que o `interface` saiu da classe do `config-lb`.** Os dois são nginx, mas têm papéis
+> opostos sob hostname único: o `config-lb` só balanceia duas instâncias de config-server na
+> rede interna, enquanto o `interface` é o **funil de 100% do tráfego público** — o túnel
+> entrega nele, não no gateway (ver `CLAUDE.md § Deploy via Cloudflare Tunnel`). Era o serviço
+> de menor quota do compose no único salto que toda requisição atravessa. O serviço também
+> declara **`NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE: "1"`**, que aciona o
+> `/docker-entrypoint.d/30-tune-worker-processes.sh` da imagem oficial: ele lê a quota de CPU do
+> **cgroup** e reescreve `worker_processes` de acordo (com `cpus: 1.0` → 1 worker, que é o
+> idiomático para nginx — um worker satura um núcleo). Sem isso vale o `auto` do `nginx.conf`,
+> que conta as CPUs do **host** e ignora a quota: foram medidos **12 workers** disputando um
+> quarto de núcleo, puro custo de troca de contexto.
+>
+> **Armadilha:** não tente passar `worker_processes` via `-g` no `CMD`. É diretiva de contexto
+> *main* (o `nginx.conf` do projeto é copiado para `conf.d/default.conf`, contexto *server*),
+> mas o `nginx.conf` **base da imagem já a declara na linha 3** — o `-g` vira uma segunda
+> declaração e o nginx aborta na subida com `"worker_processes" directive is duplicate`.
+> Derivar da quota, além de funcionar, mantém workers e `cpus` em sincronia automaticamente.

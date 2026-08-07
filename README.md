@@ -303,13 +303,18 @@ WireGuard) em vez de rotear o túnel até ele — racional completo em `.claude/
 ## Integração Contínua (CI)
 
 A cada `push` na `main` e a cada `pull_request`, o workflow [`ci.yml`](.github/workflows/ci.yml)
-roda no GitHub Actions três frentes em paralelo:
+roda no GitHub Actions quatro frentes em paralelo:
 
-| Job                | O que roda                                                                                                                      |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `backend` (matrix) | `mvn -B verify` por módulo (6 serviços) — dispara o gate de cobertura JaCoCo; integração via Testcontainers no Docker do runner |
-| `frontend`         | `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold de 80%                                                |
-| `compose-validate` | `docker compose -f docker-compose.yml config -q` — valida a topologia base                                                      |
+| Job                 | O que roda                                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `backend` (matrix)  | `mvn -B verify` por módulo (6 serviços) — dispara o gate de cobertura JaCoCo; integração via Testcontainers no Docker do runner |
+| `frontend`          | `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold de 80%                                                |
+| `compose-validate`  | `docker compose -f docker-compose.yml config -q` — valida a topologia base                                                      |
+| `smoke-test-login`  | sobe nginx + gateway + authorization-server (topologia de deploy, sem `cloudflared`) e valida 5 asserções HTTP da cadeia de login — [ADR-023](docs/adr/ADR-023-smoke-test-automatizado-login-hostname-unico.md) |
+
+O `smoke-test-login` é o único job que exercita o container `interface`: os Testcontainers nunca
+sobem o nginx e o `compose-validate` só valida sintaxe YAML. É também o mais lento — builda 4
+imagens do zero. Detalhes e execução local em [docs/TESTES.md](docs/TESTES.md#smoke-test-da-topologia-de-login-adr-023).
 
 Não há POM-pai agregador, por isso o back-end roda como **matrix** (um job por módulo).
 Os relatórios (Surefire/Failsafe, JaCoCo, cobertura do Vitest) são publicados como artefatos do run.
@@ -329,6 +334,7 @@ gh api -X PUT repos/k-lila/user-service/branches/main/protection \
   -f 'required_status_checks[contexts][]=backend (notification-service)' \
   -f 'required_status_checks[contexts][]=frontend' \
   -f 'required_status_checks[contexts][]=compose-validate' \
+  -f 'required_status_checks[contexts][]=smoke-test-login' \
   -F 'enforce_admins=false' \
   -F 'required_pull_request_reviews=null' \
   -F 'restrictions=null'

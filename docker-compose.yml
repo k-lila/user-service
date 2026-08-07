@@ -11,8 +11,19 @@ x-healthcheck: &hc
   retries: 25
 
 # Perfis de recurso (cpus / mem_limit / mem_reservation). Racional em docs/CONFIG.md.
-x-res-app: &res-app # apps Spring + nós Mongo
+x-res-app: &res-app # nós Mongo (os apps Spring usam *res-jvm — ver abaixo)
   cpus: 1.0
+  mem_limit: 1024m
+  mem_reservation: 512m
+# Perfil dos 4 apps Spring, SEPARADO do *res-app de propósito: com cpus 1.0 a JVM enxerga
+# "Effective CPU Count = 1" e a ergonomia a classifica como *client-class machine*, escolhendo
+# UseSerialGC (stop-the-world, thread única). O G1 forçado em JAVA_TOOL_OPTIONS (ver
+# x-spring-app-env) só rende se houver core sobrando para a marcação concorrente — daí 2.0.
+# Também alivia o throttling do CFS (1.0 = 25ms de CPU por período de 100ms), que era a outra
+# metade das caudas de latência. Não fundir de volta com *res-app: os nós Mongo não precisam
+# disso e o bump dobraria a quota deles sem motivo.
+x-res-jvm: &res-jvm # apps Spring (auth-server / user-service / notification / gateway)
+  cpus: 2.0
   mem_limit: 1024m
   mem_reservation: 512m
 x-res-mid: &res-mid # config-server / discovery / postgres
@@ -47,6 +58,30 @@ x-spring-app-env: &spring-app-env
   MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
   REDIS_SENTINEL_MASTER: mymaster
   REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+  # Coletor e heap EXPLÍCITOS: sem estes flags a JVM decide sozinha e decide mal em container
+  # pequeno (SerialGC + heap de 25% = 256MiB). MaxRAMPercentage 60 e não 70: o overhead
+  # non-heap medido (metaspace + code cache + stacks + buffers) é ~150MiB, e 70% de 1024MiB
+  # deixaria o total a ~870MiB de um teto de 1024MiB — margem fina demais para OOM kill.
+  JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:+UseG1GC -XX:MaxRAMPercentage=60}
+  # Amostragem de tracing. O default 1.0 preserva o comportamento de dev; em deploy exporte
+  # 0.1 no .env — a 100% o Zipkin (storage `mem`, 512MiB) satura antes da aplicação.
+  MANAGEMENT_TRACING_SAMPLING_PROBABILITY: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+  # ── Knobs lidos por 2+ apps. Ficam aqui, e não por-serviço, justamente porque o valor tem de
+  # ser o MESMO nos serviços que os leem — TOKEN_REVOCATION_KEY_PREFIX em especial: gateway,
+  # auth-server e user-service compartilham a chave de revogação no Redis, e um prefixo divergente
+  # faz a revogação silenciosamente não pegar (ADR-017).
+  #
+  # ATENÇÃO ao mexer aqui e nos blocos por-serviço abaixo: o default do compose ESPELHA o default
+  # do YAML do config-server e os dois têm de continuar iguais. Nunca escreva `${VAR:-}` — o
+  # default vazio injeta string vazia no container e SOBRESCREVE o default do YAML, em vez de
+  # deixá-lo valer. Foi a ausência dessas linhas que manteve 19 variáveis documentadas no
+  # docs/CONFIG.md inertes: sem `env_file` e fora de todo `environment:`, setá-las no .env não
+  # chegava a container nenhum.
+  TOKEN_REVOCATION_ENABLED: ${TOKEN_REVOCATION_ENABLED:-true}
+  TOKEN_REVOCATION_KEY_PREFIX: "${TOKEN_REVOCATION_KEY_PREFIX:-revoke:user:}"
+  SESSION_TIMEOUT: ${SESSION_TIMEOUT:-30m}
+  # Fonte de IP do rate limiting e do lockout (ADR-010). Trocar em deploy não-Cloudflare.
+  TRUSTED_CLIENT_IP_HEADER: ${TRUSTED_CLIENT_IP_HEADER:-CF-Connecting-IP}
 
 # Template comum dos 3 nós Mongo: o entrypoint faz copy-to-/tmp do keyfile (o RS exige keyfile
 # 400/owner mongo) antes do mongod. O volume de dados e — só no mongo-1 — as credenciais root
@@ -391,7 +426,7 @@ services:
 
   authorization-server:
     build: ./authorization-server
-    <<: *res-app
+    <<: *res-jvm
     # Sem ports: em prod. O front-channel (browser → /oauth2/authorize, /login, /connect/logout)
     # é exposto pelo reverse-proxy de TLS/ingress (G1) num hostname dedicado (ex.: auth.<dominio>),
     # restrito a esses paths — não pela publicação da porta inteira. Em dev, o override republica 8082.
@@ -429,6 +464,19 @@ services:
       # Chave de assinatura JWT via Docker secret (0.1) — fora do repo e do .env.
       JWK_PRIVATE_KEY: file:/run/secrets/jwk_private
       JWK_PUBLIC_KEY: file:/run/secrets/jwk_public
+      # `kid` do par RSA. Estável de propósito (ADR-005) — trocar invalida os JWTs em circulação.
+      JWK_KEY_ID: ${JWK_KEY_ID:-user-service-key}
+      # Lockout anti-brute-force por par (conta, IP) — ADR-010.
+      LOCKOUT_MAX_ATTEMPTS: ${LOCKOUT_MAX_ATTEMPTS:-5}
+      LOCKOUT_DURATION: ${LOCKOUT_DURATION:-15m}
+      # Carência do gate de e-mail verificado no login, contada da data de cadastro (ADR-015):
+      # evita conta permanentemente inacessível se o e-mail nunca chegar.
+      EMAIL_VERIFICATION_GRACE_PERIOD: ${EMAIL_VERIFICATION_GRACE_PERIOD:-24h}
+      # Purga do estado OAuth expirado (ADR-022). Sem ela a tabela oauth2_authorization cresce
+      # uma linha por login, para sempre — o SAS nunca apaga nenhuma.
+      OAUTH_STATE_PURGE_INTERVAL: ${OAUTH_STATE_PURGE_INTERVAL:-6h}
+      OAUTH_STATE_PURGE_GRACE: ${OAUTH_STATE_PURGE_GRACE:-1d}
+      OAUTH_STATE_PURGE_BATCH_SIZE: ${OAUTH_STATE_PURGE_BATCH_SIZE:-500}
     secrets:
       - CONFIG_SERVER_PASSWORD
       - OAUTH_CLIENT_SECRET
@@ -441,13 +489,14 @@ services:
       - jwk_public
     healthcheck:
       <<: *hc
-      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      # Actuator do auth-server vive na porta de management interna (8181), não na 8082.
+      test: ["CMD", "curl", "-f", "http://localhost:8181/actuator/health"]
     stop_grace_period: 35s
     restart: unless-stopped
 
   user-service:
     build: ./user-service
-    <<: *res-app
+    <<: *res-jvm
     # Sem ports: em prod — acesso só via gateway (G2: 8090 direto contorna rate limit/CORS).
     # Republicado em dev no override.
     depends_on:
@@ -479,6 +528,24 @@ services:
       AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
       AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
+      # Versão dos termos gravada em cada cadastro (ADR-012). BUMPE quando a política mudar: é o
+      # que prova qual texto cada titular aceitou e permite exigir re-consentimento.
+      TERMS_VERSION: ${TERMS_VERSION:-v1}
+      # Retenção da trilha de auditoria LGPD (ADR-022). Vale para as entradas gravadas daqui em
+      # diante; as anteriores a esta mudança não têm purgeAt e nunca expiram.
+      AUDIT_LOG_RETENTION: ${AUDIT_LOG_RETENTION:-180d}
+      # TTL do epoch de revogação por usuário no Redis (ADR-017). Deve cobrir a validade máxima
+      # de um access token, senão o epoch expira antes do token que ele deveria barrar.
+      TOKEN_REVOCATION_TTL: ${TOKEN_REVOCATION_TTL:-75m}
+      # Verificação de e-mail (ADR-015): TTL do token, limite de reenvio por conta e retenção do
+      # outbox. As três chaves RETRY_* governam a varredura do OutboxRetryService.
+      EMAIL_VERIFICATION_TOKEN_TTL: ${EMAIL_VERIFICATION_TOKEN_TTL:-15m}
+      EMAIL_VERIFICATION_RESEND_MAX: ${EMAIL_VERIFICATION_RESEND_MAX:-3}
+      EMAIL_VERIFICATION_RESEND_WINDOW: ${EMAIL_VERIFICATION_RESEND_WINDOW:-1h}
+      EMAIL_VERIFICATION_OUTBOX_RETENTION: ${EMAIL_VERIFICATION_OUTBOX_RETENTION:-30d}
+      EMAIL_VERIFICATION_RETRY_INTERVAL: ${EMAIL_VERIFICATION_RETRY_INTERVAL:-5m}
+      EMAIL_VERIFICATION_RETRY_BACKOFF: ${EMAIL_VERIFICATION_RETRY_BACKOFF:-15m}
+      EMAIL_VERIFICATION_RETRY_MAX_ATTEMPTS: ${EMAIL_VERIFICATION_RETRY_MAX_ATTEMPTS:-5}
     secrets:
       - CONFIG_SERVER_PASSWORD
       - REDIS_PASSWORD
@@ -486,7 +553,8 @@ services:
       - MONGODB_URI
     healthcheck:
       <<: *hc
-      test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
+      # Actuator do user-service vive na porta de management interna (8181), não na 8090.
+      test: ["CMD", "curl", "-f", "http://localhost:8181/actuator/health"]
     stop_grace_period: 35s
     restart: unless-stopped
 
@@ -497,7 +565,7 @@ services:
   # cadastro), e este serviço também não depende do user-service.
   notification-service:
     build: ./notification-service
-    <<: *res-app
+    <<: *res-jvm
     depends_on:
       discovery-server-1:
         condition: service_healthy
@@ -506,6 +574,14 @@ services:
     environment:
       <<: *spring-app-env
       SERVER_PORT: 8095
+      # Remetente exibido nos e-mails de verificação. Os demais SMTP_* (host/porta/credenciais)
+      # chegam por Docker secret via configtree — estes três timeouts, não: são de socket, não
+      # segredo, e sem eles o default do Jakarta Mail é INFINITO (thread do Tomcat presa para
+      # sempre num SMTP travado). Valores em ms.
+      APP_MAIL_FROM: ${APP_MAIL_FROM:-no-reply@users.local}
+      SMTP_CONNECTION_TIMEOUT: ${SMTP_CONNECTION_TIMEOUT:-10000}
+      SMTP_READ_TIMEOUT: ${SMTP_READ_TIMEOUT:-10000}
+      SMTP_WRITE_TIMEOUT: ${SMTP_WRITE_TIMEOUT:-10000}
     secrets:
       - CONFIG_SERVER_PASSWORD
       - INTERNAL_API_TOKEN
@@ -518,13 +594,16 @@ services:
       - SMTP_SSL_ENABLE
     healthcheck:
       <<: *hc
-      test: ["CMD", "curl", "-f", "http://localhost:8095/actuator/health"]
+      # Actuator do notification-service vive na porta de management interna (8181),
+      # não na 8095. Este health fica 503 enquanto o SMTP for placeholder
+      # (MailHealthIndicator) — sintoma conhecido, ninguém depende do health dele.
+      test: ["CMD", "curl", "-f", "http://localhost:8181/actuator/health"]
     stop_grace_period: 35s
     restart: unless-stopped
 
   gateway:
     build: ./gateway
-    <<: *res-app
+    <<: *res-jvm
     # ports: movido para docker-compose.override.yml (G10 / ADR-019).
     # Na base prod-safe o gateway NÃO é publicado no host — apenas o nginx do SPA
     # (via cloudflared) alcança gateway:8081 pela rede interna Docker.
@@ -563,6 +642,11 @@ services:
       AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
       AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
+      # Regex (ancorada, Pattern.matches) do peer imediato aceito como proxy confiável. Sem esta
+      # propriedade o SCG 5.0.0 não registra XForwardedHeadersFilter/ForwardedHeadersFilter
+      # (ADR-019). Aspas SIMPLES no YAML: o valor tem `\.`, que em aspas duplas o YAML leria como
+      # escape inválido. Seguro só com G10 fechado (gateway não publicado na base).
+      GATEWAY_TRUSTED_PROXIES: '${GATEWAY_TRUSTED_PROXIES:-10\..*|172\.(1[6-9]|2[0-9]|3[01])\..*|192\.168\..*}'
     secrets:
       - CONFIG_SERVER_PASSWORD
       - OAUTH_CLIENT_SECRET
@@ -579,7 +663,21 @@ services:
       context: ./login-interface
       args:
         VITE_API_URL: ""
-    <<: *res-tiny
+    # NÃO usa *res-tiny: sob hostname único este nginx é o funil de 100% do tráfego público
+    # (o túnel entrega aqui, não no gateway), e era o componente de MENOR quota do compose —
+    # 0.25 CPU para o único salto que toda requisição atravessa.
+    cpus: 1.0
+    mem_limit: 128m
+    mem_reservation: 64m
+    environment:
+      # Aciona /docker-entrypoint.d/30-tune-worker-processes.sh da imagem oficial: ele lê a
+      # quota de CPU do cgroup e reescreve `worker_processes` de acordo. Sem isto vale o
+      # `auto` do nginx.conf, que conta as CPUs do HOST e ignora a quota — medidos 12 workers
+      # disputando uma fração de núcleo, puro custo de troca de contexto.
+      # Derivar da quota (em vez de fixar um número) mantém os dois em sincronia se o `cpus`
+      # acima mudar. NÃO passe worker_processes via `-g` no CMD: o nginx.conf base já declara
+      # a diretiva e o nginx aborta com "directive is duplicate".
+      NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE: "1"
     # ports: movido para docker-compose.override.yml (G10 / ADR-019).
     # Na base prod-safe a interface NÃO é publicada no host — o cloudflared alcança
     # interface:80 pela rede interna Docker. Em dev o override republica via WEB_HOST_PORT.

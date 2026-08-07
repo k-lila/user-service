@@ -162,14 +162,15 @@ janela 10, threshold 50%, timeout 3s) + `NotificationClientFallbackFactory`.
   (verificado-dentro-da-janela / expirado-fora-da-janela / legado-null) — não há
   regressão nos cenários já existentes (verificado/não verificado fora de qualquer
   janela/legado), só extensão.
-- Dívida aceita: outbox sem retry automático em background — reenvio é sempre manual
-  nesta v1.
+- ~~Dívida aceita: outbox sem retry automático em background — reenvio é sempre manual
+  nesta v1.~~ **Revertido — ver a emenda no fim deste ADR.**
 
 ## Alternativas consideradas
 
-- **Poller `@Scheduled` varrendo o outbox** — descartado: a UX já provê reenvio manual
+- ~~**Poller `@Scheduled` varrendo o outbox** — descartado: a UX já provê reenvio manual
   sob demanda (token de 15 min + botão de reenvio), tornando inútil um scan periódico;
-  adicionaria complexidade (locking entre instâncias) sem ganho real.
+  adicionaria complexidade (locking entre instâncias) sem ganho real.~~
+  **Decisão revertida — ver a emenda no fim deste ADR.**
 - **JWT como token de verificação** — descartado: difícil invalidar antes do `exp` em
   caso de reenvio (o token antigo continuaria tecnicamente válido até expirar, exigindo
   denylist e perdendo a simplicidade que o JWT prometia). Token opaco + hash no Mongo é
@@ -239,3 +240,54 @@ Isso não exige mudança no gate em si; só reforça a importância de não remo
 Os testes de integração de `EmailVerificationFlowIntegrationTest` que hoje assumiam outbox
 criado pelo registro passaram a inserir uma chamada explícita de resend
 (`EmailVerificationService.resendByUserId`/`resend`) imediatamente após o cadastro.
+
+## Emenda: outbox ganha varredura de retry (`OutboxRetryService`)
+
+Esta emenda **reverte** duas decisões registradas acima: a dívida aceita *"outbox sem retry
+automático em background"* (Consequências) e o descarte do *"Poller `@Scheduled` varrendo o
+outbox"* (Alternativas consideradas). Ambas ficaram tachadas no texto original, que é
+preservado para não apagar o histórico da decisão.
+
+**Por que reverter.** O argumento original — *"a UX já provê reenvio manual sob demanda,
+tornando inútil um scan periódico"* — pressupõe que o titular **saiba** que precisa pedir. Ele
+não sabe: para quem se cadastrou, um outbox `FAILED` é indistinguível de um e-mail que ainda
+não chegou. E o registro `FAILED` era um beco sem saída — `NotificationDispatchService` marcava
+a falha e nada mais tocava aquele documento. Passada a carência de 24h, a conta se tornava
+**permanentemente inacessível** sem intervenção. Duas coisas mudaram desde a decisão original:
+o envio automático no cadastro foi removido (ver a atualização anterior), o que tornou o
+outbox ainda mais dependente de disparos pontuais; e o SMTP real entrou em operação, o que
+transformou "notification-service indisponível" de hipótese em modo de falha observável.
+
+**O que a varredura faz.** `OutboxRetryService` roda a cada `app.verification.retry-interval`
+(5m) e reprocessa registros `FAILED`/`PENDING` de `EMAIL_VERIFICATION`.
+
+**Emite um token NOVO — não reenvia o e-mail original.** É consequência direta da decisão de
+segurança deste mesmo ADR: o outbox persiste só o `tokenHash`, e o token em claro nunca é
+salvo. Não há como remontar o link. O retry portanto supera o registro antigo
+(`SUPERSEDED`) e emite um par token/link novo, pelo mesmo caminho do reenvio manual.
+
+**Critérios de parada**, nesta ordem: backoff (`retry-backoff`, 15m) não decorrido; titular
+inexistente; `emailVerified` diferente de `false` explícito (já confirmou por outro link, ou é
+legado `null`); e o teto `retry-max-attempts` (5).
+
+> **O teto é contado sobre a coleção, não sobre o campo `attempts`.** Cada retry cria um
+> registro **novo**, com `attempts=0` e `createdAt` fresco — qualquer limite ancorado no
+> registro individual (contador ou janela sobre `createdAt`) nunca expiraria, e a varredura
+> reemitiria para sempre. `countByUserIdAndType` conta os registros do par (titular, tipo), que
+> a retenção de 30 dias do `purgeAt` mantém vivos, e é auto-limitante **sem exigir campo novo**.
+> Efeito colateral deliberado: reenvios manuais consomem o mesmo orçamento.
+
+**Locking entre instâncias** — a complexidade que o descarte original citava, e que é real:
+lock `SETNX`+TTL no Redis (`outbox_retry:lock`), sem dependência nova (ShedLock foi descartado
+por isso). **É o único ponto do sistema que é fail-CLOSED no Redis**: cache, rate limit e
+revogação de token são fail-open de propósito, porque um Redis fora não pode barrar
+autenticação; aqui o inverso, porque falhar aberto com N instâncias significaria N e-mails
+duplicados por ciclo, e pular um ciclo de 5 min não custa nada.
+
+**Sem mudança de contrato ou de schema.** Nenhum endpoint novo, nenhum campo novo no
+documento. O único acréscimo de infraestrutura é o índice composto `type_status_createdAt` em
+`notificationOutbox`, porque o índice existente (`userId_type_status`) tem `userId` no prefixo
+e não serve a uma busca por (tipo, status).
+
+**Dívida remanescente:** a varredura não emite métrica própria — o acompanhamento é por log
+(`| OUTBOX-RETRY |`). Um contador de reemissões/desistências seria o passo natural.

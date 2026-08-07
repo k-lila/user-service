@@ -42,6 +42,11 @@ spring:
     timeout: ${SESSION_TIMEOUT:30m}
 
   cloud:
+    # Idem gateway.yml: o cache do LoadBalancer (default 35s) é a terceira camada de atraso na
+    # convergência. Vale aqui porque o Feign para o user-service também resolve via `lb://`.
+    loadbalancer:
+      cache:
+        ttl: 5s
     openfeign:
       circuitbreaker:
         enabled: true
@@ -76,6 +81,16 @@ internal:
   api:
     token: ${INTERNAL_API_TOKEN}
 
+# Purga do estado OAuth expirado (ADR-022). O JdbcOAuth2AuthorizationService nunca apaga
+# linha: sem esta varredura a tabela cresce uma linha por login, para sempre.
+# - purge-grace: folga além da expiração antes de apagar (margem para depuração/forense).
+# - purge-batch-size: teto de linhas por ciclo, para não segurar lock sobre a tabela inteira.
+app:
+  oauth-state:
+    purge-interval: ${OAUTH_STATE_PURGE_INTERVAL:6h}
+    purge-grace: ${OAUTH_STATE_PURGE_GRACE:1d}
+    purge-batch-size: ${OAUTH_STATE_PURGE_BATCH_SIZE:500}
+
 # Lockout anti-brute-force no login (por par conta+IP, estado no Redis).
 security:
   lockout:
@@ -103,9 +118,14 @@ cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS_AUTH:http://localhost:8081}
 
 eureka:
+  # Timings de convergência — mesmos valores dos demais serviços (racional em user-service.yml).
   client:
     service-url:
       defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
+    registry-fetch-interval-seconds: 10
+  instance:
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
 
 logging:
   level:
@@ -150,6 +170,12 @@ resilience4j:
         timeoutDuration: 3s
 
 management:
+  # Actuator numa porta de management interna (não publicada no host): a porta de
+  # tráfego (8082) deixa de servir /actuator/**, fechando o acesso anônimo a
+  # /prometheus e /metrics (gap G14). O Prometheus continua raspando por esta porta
+  # na rede interna (ver infra/prometheus.yml → authorization-server:8181).
+  server:
+    port: 8181
   tracing:
     enabled: true
     propagation:
