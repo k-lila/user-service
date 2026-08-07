@@ -194,9 +194,14 @@ compose_up() {
 	compose down -v --remove-orphans
 
 	# Listar os alvos explicitamente é o que exclui o cloudflared: o Compose sobe só eles e suas
-	# dependências (auth-server, user-service, discovery×2, config-lb+config-server×2, mongo×3,
-	# postgres, redis×3, sentinels×3 e o assert-env). Ficam de fora zipkin, prometheus, grafana,
-	# os exporters e o notification-service — nenhuma asserção os toca.
+	# dependências. Sem --profile ha, essas dependências são o PISO MÍNIMO (ADR-024): auth-server,
+	# user-service, discovery-server-1, config-lb + config-server×1, mongo-1 + mongo-init,
+	# postgres, redis-1, redis-sentinel-1 e o assert-env. Ficam de fora zipkin, prometheus,
+	# grafana, os exporters e o notification-service — nenhuma asserção os toca.
+	#
+	# Rodar sobre o piso mínimo é DELIBERADO: é a topologia que `docker compose up` produz sem
+	# argumento, então é a que precisa de prova de que a cadeia de login sobrevive. As 5 asserções
+	# não dependem de redundância — nenhuma delas fala com Mongo/Redis/Eureka diretamente.
 	compose up -d --build --wait --wait-timeout 900 interface gateway ||
 		die "a stack não subiu (veja o diagnóstico abaixo)."
 }

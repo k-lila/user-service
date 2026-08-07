@@ -328,6 +328,26 @@ no front. A cadeia de borda que o MSW não alcança (nginx → gateway → auth-
 
 ---
 
+## Validação da topologia elástica (ADR-024)
+
+O job **`compose-validate`** deixou de rodar um único `config -q` e passou a cobrir os quatro
+modos em que o compose é usado — piso mínimo (o default de `docker compose up`), `--profile ha`, e
+base + override — mais duas asserções que existem para impedir uma regressão silenciosa:
+
+| Asserção | O que impede |
+|---|---|
+| Delta piso→`ha` é **exatamente** os 7 nós esperados | Um `profiles:` esquecido num serviço novo (ou removido num refactor) faz o piso mínimo voltar a subir 26 containers **sem erro nenhum** — a mesma classe das 19 variáveis inertes de `docs/CONFIG.md` |
+| Serviços do eixo replicável sem `container_name` nem `ports:` na base | Qualquer um dos dois faz a 2ª réplica falhar no bind — e falha só em runtime, sob `--scale`, nunca em `config -q` |
+
+**O que essa camada não cobre.** `docker compose config` valida topologia, não comportamento:
+nada aqui prova que a sessão do BFF atravessa réplicas do gateway, que o `rs.reconfig` do
+`rs-reconcile.sh` cresce o replica set no mesmo volume, ou que o Prometheus enxerga um target por
+réplica. Isso exige stack de pé com `--scale` e um `down -v` entre os cenários (o `rs.initiate` só
+roda uma vez por volume, então testar o crescimento num volume já com 3 membros não prova nada) —
+custo alto demais para todo push. Fica como **verificação manual documentada** no ADR-024 §
+Consequências; o smoke-test do ADR-023 continua sendo a única camada que exercita a cadeia HTTP
+real, agora sobre o piso mínimo.
+
 ## Fora de escopo deliberado
 
 - **`discovery-server`** — Eureka puro, sem lógica própria; testar seria testar o framework.

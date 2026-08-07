@@ -8,7 +8,8 @@
 
 **Como usar:** se você (ou outro time) vai usar este repositório como ponto de partida para
 um domínio diferente (ex.: catálogo de produtos, pedidos), comece pela seção (D). As seções
-(A)/(B)/(C) são o catálogo de referência que sustenta esse roteiro.
+(A)/(B)/(C) são o catálogo de referência que sustenta esse roteiro, e a seção (E) diz em que
+escala a coisa roda — o piso para subir e por onde cresce.
 
 ---
 
@@ -167,6 +168,86 @@ Adaptar = manter a estrutura, trocar a semântica.
    (canal interno isolado, cookies de sessão distintos, autenticação Redis) é herdada da
    seção (A) e continua valendo; as que dependem de "usuário" (lockout, gate de e-mail
    verificado) precisam ser repensadas para a identidade do novo domínio.
+
+---
+
+## (E) Eixo de escala por componente
+
+As seções (A)–(D) catalogam o que o código é. Esta diz em que **escala** ele roda: qual o piso
+para subir e por onde cada peça cresce. Decisão e racional completos em
+[ADR-024](adr/ADR-024-elasticidade-piso-minimo-eixos-escala.md).
+
+O princípio que governa todos os eixos:
+
+> **Encolher é remover nó; crescer é adicionar nó — nunca reconfigurar cliente.**
+
+É por isso que o piso mínimo mantém o replica set `rs0` (com um membro) em vez de Mongo
+standalone, e mantém o Sentinel (com um nó) em vez de falar direto com o Redis: a `MONGODB_URI` e
+o `spring.data.redis.sentinel.*` dos clientes ficam idênticos do piso ao topo.
+
+### Eixo 1 — Replicável (`--scale <serviço>=N`)
+
+Sem estado local. Podem rodar em N cópias simultâneas na mesma máquina.
+
+| Componente | O que torna possível |
+|---|---|
+| `gateway` | Sessão WebFlux no Redis (`@EnableRedisWebSession`); o `OAuth2AuthorizationRequest` do front-channel vive na sessão, então o callback pode cair em outra réplica. Rate limit no Redis, não em memória. |
+| `user-service` | Cache Redis (`RedisCacheManager`, nunca Caffeine), `@Scheduled` do `OutboxRetryService` com lock `SETNX` **fail-closed** — sem ele, N réplicas = N e-mails por ciclo. |
+| `authorization-server` | Estado OAuth em Postgres (`Jdbc*Service`), sessão no Redis, seed do `gateway-client` protegido por índice único (ADR-022), purga com o mesmo lock `SETNX`. |
+| `notification-service` | Stateless por construção — só SMTP externo. |
+| `config-server` | Serve o mesmo `classpath:/config` em qualquer instância. Entrou neste eixo no ADR-024 (era o par nomeado `config-server-1/2`). |
+| `interface` (nginx do SPA) | Serve estático + proxy; o `cloudflared` resolve `interface:80` por DNS. |
+
+**Pré-condições que já estão pagas** — e que quebram se alguém as remover: nenhum
+`container_name` e nenhum `ports:` na base para esses serviços (o CI verifica); `instanceId` do
+Eureka único por container (default `<containerId>:<app>:<porta>`); o nginx do SPA e o `config-lb`
+resolvem por DNS com `resolver` + `proxy_pass` sobre variável, e não por `upstream` estático.
+
+**Tetos:** `AUTH_DB_POOL_SIZE` × N réplicas tem de caber no `max_connections` do Postgres
+(default 100); `MONGO_MAX_POOL_SIZE` × N na memória do nó Mongo. `--scale` **não** funciona junto
+com `docker-compose.override.yml`, que publica portas fixas no host — listas de `ports:` são
+concatenadas no merge, nunca removidas.
+
+### Eixo 2 — Réplica nomeada (`--profile ha`)
+
+Cada nó tem identidade própria (hostname, porta, papel no quorum), então não são cópias
+intercambiáveis. Crescem ligando o profile, não escalando.
+
+| Componente | Piso | Com `--profile ha` | Por que é nomeado |
+|---|---|---|---|
+| `discovery-server` | 1 (auto-registro) | 2 em peer replication | `EUREKA_HOSTNAME` e `EUREKA_PEER_URL` recíprocos |
+| `mongo` | 1 membro de `rs0` | 3 membros | Membro de replica set tem host fixo na config do RS |
+| `redis` | 1 (master) | 3 (1 master + 2 réplicas) | `--replicaof` aponta para host fixo |
+| `redis-sentinel` | 1 | 3 (quorum 2) | Quorum exige contagem de nós conhecida |
+
+Crescer o Mongo é **automático**: `infra/mongo/rs-reconcile.sh` descobre os membros alcançáveis por
+DNS e faz `rs.reconfig` aditivo. Encolher é **manual e deliberado** (`rs.remove`) — remover membro
+por lookup que falhou derrubaria o quorum numa falha transitória de DNS.
+
+### Eixo 3 — Singleton
+
+| Componente | Consequência |
+|---|---|
+| `auth-postgres` | **SPOF do login.** Sem ele não há autenticação nova nem refresh. Réplica exige segunda máquina; no host único o remédio é backup/PITR. |
+| `config-lb` | Ponto único na frente de um eixo replicável. Mantido de propósito: dá failover HTTP-aware que o DNS round-robin não dá, e os clientes sobem com `fail-fast: true`. |
+| `cloudflared` | Funil do caminho público. |
+| `zipkin`, `prometheus`, `grafana`, exporters | Observabilidade; `zipkin` com storage `mem` não sobrevive a restart. |
+
+### O que a escala **não** resolve
+
+Vale escrever porque a expectativa errada é o que decepciona: replicar não reduz a latência de uma
+requisição isolada, não levanta o teto do rate limit (global no Redis — mais réplicas absorvem
+mais picos, não servem mais por cliente) e não escala escrita (um primário Mongo, um Postgres). O
+ganho real de N > 1 é **deploy sem downtime**, cauda de latência sob GC e isolamento de falha de
+processo.
+
+### Ao adaptar para outro domínio
+
+O eixo 1 é herdado inteiro **desde que o novo domínio não introduza estado local**. Se você
+acrescentar cache em memória, agendamento sem lock distribuído, ou um `CommandLineRunner` de
+bootstrap que grave, tirou o serviço do eixo replicável sem perceber. A checagem é direta:
+`ConcurrentHashMap`/`Caffeine`/`static Map` em bean de serviço, `@Scheduled` sem lock, e
+`@PostConstruct` que escreva no banco.
 
 ---
 

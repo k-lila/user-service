@@ -17,6 +17,14 @@ spring:
     username: ${AUTH_DB_USER}
     password: ${AUTH_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    # Teto EXPLÍCITO de conexões por instância (ADR-024). O default do Hikari é 10, e o
+    # max_connections default do postgres:16 é 100 — medido: 10 do pool + 6 (exporter e
+    # internas), deixando ~84. Com N réplicas de auth-server o consumo é N×pool, e a ~9ª
+    # instância o Postgres recusa conexão. O sintoma ("FATAL: sorry, too many clients already")
+    # aparece no auth-server, longe da causa, e só sob a escala que deveria estar ajudando.
+    # 8 permite 10 réplicas dentro do teto atual. Ao subir este valor, subir max_connections junto.
+    hikari:
+      maximum-pool-size: ${AUTH_DB_POOL_SIZE:8}
   sql:
     init:
       mode: always

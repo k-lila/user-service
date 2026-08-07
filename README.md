@@ -121,6 +121,37 @@ docker compose -f docker-compose.yml up -d --build   # ignora o override
 # URLs públicas via .env — ver o bloco comentado no .env.example
 ```
 
+### 2a-bis. Piso mínimo e crescimento (ADR-024)
+
+O comando acima sobe o **piso mínimo**: 19 serviços, com Mongo em replica set `rs0` de **um
+membro** e Redis com **um** nó e **um** Sentinel. É o default porque um blueprint precisa subir
+numa máquina modesta. Crescer é aditivo, e nunca reconfigura cliente:
+
+```bash
+docker compose up -d                            # piso mínimo (19 serviços, ~3,5 GB de reserva)
+
+docker compose --profile ha up -d               # + redundância de dados (26 serviços)
+                                                #   mongo 1→3 membros, redis 1→3, sentinels 1→3,
+                                                #   discovery 1→2. O replica set cresce sozinho.
+
+docker compose -f docker-compose.yml up -d \
+  --scale gateway=2 --scale user-service=2      # + réplicas de aplicação
+```
+
+Três coisas que economizam uma tarde:
+
+- **`--scale` exige o `-f docker-compose.yml` explícito.** Sem ele o Compose carrega o
+  `docker-compose.override.yml`, que publica portas fixas no host, e a 2ª réplica falha no bind.
+  Listas de `ports:` são concatenadas no merge entre arquivos — nenhum overlay consegue removê-las.
+- **O piso mínimo não é HA.** Um nó Mongo e um Redis, sem failover. É elasticidade (subir pequeno,
+  crescer depois), não redundância — ver [docs/SECURITY.md](docs/SECURITY.md).
+- **Encolher o Mongo é manual.** Crescer é automático (`rs.reconfig` aditivo por descoberta DNS);
+  voltar de 3 para 1 membro exige `rs.remove` antes de desligar o profile, senão o replica set
+  fica com dois membros ausentes e sem quorum para eleger primário.
+- **`down` também precisa do profile.** `docker compose down -v` sem `--profile ha` **não remove**
+  os containers e volumes dos nós de redundância — eles ficam órfãos, e o `up` seguinte reencontra
+  volumes antigos. Para teardown completo: `docker compose --profile ha down -v --remove-orphans`.
+
 ### 2b. Deploy na própria máquina via Cloudflare Tunnel (domínio fixo)
 
 **Named tunnel + domínio próprio.** O túnel entrega em `interface:80` (o nginx do SPA), que faz

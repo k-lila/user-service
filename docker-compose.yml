@@ -23,9 +23,14 @@ x-res-app: &res-app # nós Mongo (os apps Spring usam *res-jvm — ver abaixo)
 # metade das caudas de latência. Não fundir de volta com *res-app: os nós Mongo não precisam
 # disso e o bump dobraria a quota deles sem motivo.
 x-res-jvm: &res-jvm # apps Spring (auth-server / user-service / notification / gateway)
-  cpus: 2.0
-  mem_limit: 1024m
-  mem_reservation: 512m
+  # Parametrizado para o eixo replicável (ADR-024): estes números foram calibrados para UM
+  # processo por serviço, e valem POR RÉPLICA. Num host de 12 vCPU / 15 GB, seis réplicas a
+  # cpus 2.0 e mem_reservation 512m não cabem. Os defaults preservam exatamente o comportamento
+  # anterior — o knob existe para quem escala, e baixar para ~1.5 mantém a JVM fora do
+  # UseSerialGC (ver o racional acima, que continua valendo por réplica).
+  cpus: ${APP_CPUS:-2.0}
+  mem_limit: ${APP_MEM_LIMIT:-1024m}
+  mem_reservation: ${APP_MEM_RESERVATION:-512m}
 x-res-mid: &res-mid # config-server / discovery / postgres
   cpus: 0.75
   mem_limit: 512m
@@ -205,11 +210,18 @@ services:
     restart: unless-stopped
 
   # ──────────────────────────────────────────────
-  # Config Server HA (2 instâncias + nginx LB)
+  # Config Server — eixo REPLICÁVEL (ADR-024): 1 instância no piso, N por --scale
   # ──────────────────────────────────────────────
 
-  # config-server-2 é idêntico: aliasa a âncora inteira (<<: *config-server).
-  config-server-1: &config-server
+  # Serviço ÚNICO e escalável, e não mais o par nomeado config-server-1/config-server-2.
+  # Por que mudou (ADR-024): sendo stateless (qualquer instância serve o mesmo
+  # classpath:/config), o config-server pertence ao eixo replicável — quantidade é
+  # `--scale config-server=N`, não linha nova no compose. O par nomeado custava duas coisas:
+  #   (a) BLOQUEAVA O PISO MÍNIMO — o `upstream` estático do config-lb listava os dois nomes, e
+  #       o nginx recusa iniciar se um deles não resolve ("host not found in upstream");
+  #   (b) passar de 2 exigia editar arquivo, em vez de um argumento de linha de comando.
+  # NÃO acrescente container_name nem ports: aqui — qualquer um dos dois quebra o --scale.
+  config-server:
     build: ./config-server
     <<: *res-mid
     environment:
@@ -225,19 +237,15 @@ services:
     stop_grace_period: 35s
     restart: unless-stopped
 
-  config-server-2:
-    <<: *config-server
-
   config-lb:
     image: nginx:alpine
     <<: *res-tiny
     # Sem ports: em prod — config-server não publicado (G3). Republicado em dev no override.
     volumes:
       - ./infra/config-lb/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    # Uma entrada só: com --scale, o Compose espera TODAS as réplicas ficarem healthy.
     depends_on:
-      config-server-1:
-        condition: service_healthy
-      config-server-2:
+      config-server:
         condition: service_healthy
     healthcheck:
       <<: *hc
@@ -261,7 +269,16 @@ services:
       <<: *spring-config
       SERVER_PORT: 9091
       EUREKA_HOSTNAME: discovery-server-1
-      EUREKA_PEER_URL: http://discovery-server-2:9092/eureka
+      # Auto-referência no piso mínimo (ADR-024): com um só nó, apontar o defaultZone para um
+      # peer inexistente faria o Eureka registrar falha de replicação a cada evento de registro.
+      # Auto-registro é a configuração canônica de nó único.
+      #
+      # No piso `ha` quem carrega o par é o discovery-server-2 (aponta para cá): ele se registra
+      # aqui e faz fetch do registry a cada 10s (registry-fetch-interval-seconds), ficando
+      # atualizado como standby quente sem que este nó precise saber que ele existe — é o que
+      # mantém o profile autossuficiente, sem env para setar junto. Para replicação push
+      # simétrica entre os dois, exporte EUREKA_PEER_URL apontando ao par.
+      EUREKA_PEER_URL: ${EUREKA_PEER_URL:-http://discovery-server-1:9091/eureka}
     secrets:
       - CONFIG_SERVER_PASSWORD
     healthcheck:
@@ -270,8 +287,11 @@ services:
     stop_grace_period: 35s
     restart: unless-stopped
 
+  # Só com --profile ha (ADR-024). Réplica NOMEADA, não replicável por --scale: peers Eureka
+  # precisam de identidade (EUREKA_HOSTNAME) e porta próprias.
   discovery-server-2:
     <<: *discovery
+    profiles: ["ha"]
     environment:
       <<: *spring-config
       SERVER_PORT: 9092
@@ -297,14 +317,19 @@ services:
     secrets:
       - MONGO_PASSWORD
 
+  # mongo-2/3 só existem com --profile ha (ADR-024). O piso mínimo roda rs0 com UM membro —
+  # replica set degenerado, e não Mongo standalone, para que a MONGODB_URI dos clientes
+  # (replicaSet=rs0) seja IDÊNTICA nos dois extremos. Crescer não reconfigura cliente nenhum.
   mongo-2:
     <<: *mongo-node
+    profiles: ["ha"]
     volumes:
       - ./infra/mongo/keyfile:/tmp/keyfile:ro
       - mongo_2_data:/data/db
 
   mongo-3:
     <<: *mongo-node
+    profiles: ["ha"]
     volumes:
       - ./infra/mongo/keyfile:/tmp/keyfile:ro
       - mongo_3_data:/data/db
@@ -313,28 +338,26 @@ services:
     image: mongo:8.2
     cpus: 0.5
     mem_limit: 256m
+    # SÓ mongo-1: a invariante de profile do ADR-024 é que nenhum serviço fora do profile pode
+    # depender de um serviço dentro dele (o comportamento de depends_on → serviço com profile
+    # inativo variou entre versões do Compose; obedecer à regra torna a questão irrelevante).
+    # Se mongo-2/3 ainda não estiverem prontos no primeiro ciclo, o restart: on-failure repete.
     depends_on:
       mongo-1:
         condition: service_healthy
-      mongo-2:
-        condition: service_healthy
-      mongo-3:
-        condition: service_healthy
     secrets:
       - MONGO_PASSWORD
-    # Senha lida do secret em runtime ($$ → $ no container). Usuário (não-segredo) vem do .env.
-    entrypoint:
-      - bash
-      - -c
-    # Folded scalar (>): TODAS as linhas com a MESMA indentação que `mongosh` — assim o YAML
-    # dobra as quebras em espaços e o bash -c recebe UM comando só (linha mais indentada vira
-    # newline literal e quebraria a invocação em comandos soltos).
-    command:
-      - >
-        mongosh --host mongo-1:27017
-        -u ${MONGO_USER} -p "$$(cat /run/secrets/MONGO_PASSWORD)"
-        --authenticationDatabase admin
-        --eval "try { rs.initiate({ _id: 'rs0', members: [ {_id: 0, host: 'mongo-1:27017'}, {_id: 1, host: 'mongo-2:27017'}, {_id: 2, host: 'mongo-3:27017'} ] }); print('Replica set iniciado'); } catch(e) { if (e.codeName === 'AlreadyInitialized') print('Replica set ja iniciado'); else throw e; }"
+    environment:
+      # Senha vem do secret (lida pelo script); o usuário não é segredo e vem do .env.
+      MONGO_USER: ${MONGO_USER}
+    volumes:
+      # Mount :ro simples é adequado AQUI porque o script não é reescrito em runtime — o padrão
+      # copy-to-/tmp vale para config que o próprio processo muta (sentinel.conf, keyfile).
+      - ./infra/mongo/rs-reconcile.sh:/opt/rs-reconcile.sh:ro
+    # Reconciliador idempotente: initiate se novo, rs.reconfig aditivo se já iniciado. Descobre
+    # os membros por DNS, então --profile ha sozinho faz o replica set crescer. Ver o cabeçalho
+    # do script para o racional completo.
+    entrypoint: ["bash", "/opt/rs-reconcile.sh"]
     restart: on-failure
 
   # ──────────────────────────────────────────────
@@ -346,8 +369,12 @@ services:
     command:
       - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)"
 
+  # redis-2/3 e sentinel-2/3 só existem com --profile ha (ADR-024). O piso mínimo mantém o
+  # Sentinel (com um nó) em vez de falar direto com o Redis: assim spring.data.redis.sentinel.*
+  # dos clientes — e a invariante das DUAS senhas do ADR-008 — valem sem emenda nos dois extremos.
   redis-2:
     <<: *redis-node
+    profiles: ["ha"]
     command:
       - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)" --replicaof redis-1 6379
     depends_on:
@@ -356,6 +383,7 @@ services:
 
   redis-3:
     <<: *redis-node
+    profiles: ["ha"]
     command:
       - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)" --replicaof redis-1 6379
     depends_on:
@@ -381,12 +409,10 @@ services:
       - REDIS_PASSWORD
     volumes:
       - ./infra/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+    # SÓ redis-1 (invariante de profile do ADR-024, ver mongo-init). Esperar pelas réplicas nunca
+    # foi necessário: o Sentinel descobre réplicas sozinho, pelo INFO do master.
     depends_on:
       redis-1:
-        condition: service_healthy
-      redis-2:
-        condition: service_healthy
-      redis-3:
         condition: service_healthy
     healthcheck:
       <<: *hc
@@ -395,9 +421,11 @@ services:
 
   redis-sentinel-2:
     <<: *redis-sentinel
+    profiles: ["ha"]
 
   redis-sentinel-3:
     <<: *redis-sentinel
+    profiles: ["ha"]
 
   # ──────────────────────────────────────────────
   # PostgreSQL (estado OAuth — sem SPOF identificado)
@@ -430,18 +458,15 @@ services:
     # Sem ports: em prod. O front-channel (browser → /oauth2/authorize, /login, /connect/logout)
     # é exposto pelo reverse-proxy de TLS/ingress (G1) num hostname dedicado (ex.: auth.<dominio>),
     # restrito a esses paths — não pela publicação da porta inteira. Em dev, o override republica 8082.
+    # Só os nós do piso mínimo (invariante de profile do ADR-024): nenhum serviço fora do
+    # profile `ha` pode declarar depends_on para um serviço dentro dele. Um discovery e um
+    # sentinel bastam para subir; os nós do profile entram em cena sozinhos quando existem.
     depends_on:
       discovery-server-1:
-        condition: service_healthy
-      discovery-server-2:
         condition: service_healthy
       auth-postgres:
         condition: service_healthy
       redis-sentinel-1:
-        condition: service_healthy
-      redis-sentinel-2:
-        condition: service_healthy
-      redis-sentinel-3:
         condition: service_healthy
     environment:
       # *spring-app-env traz CONFIG_SERVER_URL/USERNAME, SPRING_CONFIG_IMPORT (configtree + config-lb),
@@ -461,6 +486,9 @@ services:
       OAUTH_CLIENT_POST_LOGOUT_URIS: ${OAUTH_CLIENT_POST_LOGOUT_URIS:-http://localhost:5173/}
       AUTH_DB_URL: jdbc:postgresql://auth-postgres:5432/authdb
       AUTH_DB_USER: ${POSTGRES_USER}
+      # Conexões JDBC por réplica (ADR-024). Espelha o default do authorization-server.yml.
+      # N réplicas × este valor tem de caber no max_connections do Postgres (default 100).
+      AUTH_DB_POOL_SIZE: ${AUTH_DB_POOL_SIZE:-8}
       # Chave de assinatura JWT via Docker secret (0.1) — fora do repo e do .env.
       JWK_PRIVATE_KEY: file:/run/secrets/jwk_private
       JWK_PUBLIC_KEY: file:/run/secrets/jwk_public
@@ -499,24 +527,16 @@ services:
     <<: *res-jvm
     # Sem ports: em prod — acesso só via gateway (G2: 8090 direto contorna rate limit/CORS).
     # Republicado em dev no override.
+    # Só os nós do piso mínimo (invariante de profile do ADR-024, ver auth-server). O gate real
+    # continua sendo mongo-init: ele é quem garante que rs0 está formado — com 1 ou 3 membros.
     depends_on:
       discovery-server-1:
         condition: service_healthy
-      discovery-server-2:
-        condition: service_healthy
       mongo-1:
-        condition: service_healthy
-      mongo-2:
-        condition: service_healthy
-      mongo-3:
         condition: service_healthy
       mongo-init:
         condition: service_completed_successfully
       redis-sentinel-1:
-        condition: service_healthy
-      redis-sentinel-2:
-        condition: service_healthy
-      redis-sentinel-3:
         condition: service_healthy
     environment:
       # *spring-app-env (ver auth-server). O configtree injeta os segredos do user-service:
@@ -524,6 +544,8 @@ services:
       <<: *spring-app-env
       SERVER_PORT: 8090
       MONGODB_DATABASE: user-db
+      # Teto de conexões Mongo por réplica (ADR-024). Espelha o default do user-service.yml.
+      MONGO_MAX_POOL_SIZE: ${MONGO_MAX_POOL_SIZE:-50}
       AUTH_ISSUER_URI: http://authorization-server:8082
       AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
       AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
@@ -566,10 +588,9 @@ services:
   notification-service:
     build: ./notification-service
     <<: *res-jvm
+    # Só o discovery do piso mínimo (invariante de profile do ADR-024, ver auth-server).
     depends_on:
       discovery-server-1:
-        condition: service_healthy
-      discovery-server-2:
         condition: service_healthy
     environment:
       <<: *spring-app-env
@@ -607,20 +628,15 @@ services:
     # ports: movido para docker-compose.override.yml (G10 / ADR-019).
     # Na base prod-safe o gateway NÃO é publicado no host — apenas o nginx do SPA
     # (via cloudflared) alcança gateway:8081 pela rede interna Docker.
+    # Só os nós do piso mínimo (invariante de profile do ADR-024, ver auth-server).
     depends_on:
       discovery-server-1:
-        condition: service_healthy
-      discovery-server-2:
         condition: service_healthy
       authorization-server:
         condition: service_healthy
       user-service:
         condition: service_healthy
       redis-sentinel-1:
-        condition: service_healthy
-      redis-sentinel-2:
-        condition: service_healthy
-      redis-sentinel-3:
         condition: service_healthy
     environment:
       # *spring-app-env (ver auth-server). O configtree injeta os segredos do gateway:
@@ -697,12 +713,10 @@ services:
     command:
       - --collect-all
       - --discovering-mode
+    # Só mongo-1 + o init (invariante de profile do ADR-024). O --discovering-mode do exporter
+    # descobre os demais membros do rs0 sozinho, quando existirem.
     depends_on:
       mongo-1:
-        condition: service_healthy
-      mongo-2:
-        condition: service_healthy
-      mongo-3:
         condition: service_healthy
       mongo-init:
         condition: service_completed_successfully
@@ -736,12 +750,10 @@ services:
       - --redis.password-file=/run/secrets/redis_exporter_json
     secrets:
       - redis_exporter_json
+    # Só redis-1 (invariante de profile do ADR-024). O exporter é multi-target por /scrape: os
+    # alvos vêm do Prometheus, e os do profile `ha` simplesmente reportam down enquanto não sobem.
     depends_on:
       redis-1:
-        condition: service_healthy
-      redis-2:
-        condition: service_healthy
-      redis-3:
         condition: service_healthy
     restart: unless-stopped
 

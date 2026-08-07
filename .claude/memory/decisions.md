@@ -572,3 +572,78 @@
 - **Fail-closed no lock**, como o `OutboxRetryService` — mas por motivo diferente: aqui o dano de rodar concorrente não é e-mail duplicado, é duas transações disputando as mesmas linhas. Pular um ciclo não custa nada.
 - **Dívida:** purga sem métrica (só o log `| OAUTH-PURGE |`); e numa base que **já** tenha duplicatas de `client_id` a criação do índice único falha e o `continue-on-error: true` a engole em silêncio.
 - **Tipo:** fechamento de dívida de ciclo de vida de dados + correção de bug latente de concorrência.
+
+---
+
+## Elasticidade — piso mínimo e eixos de escala (ADR-024, 2026-08-07)
+
+### 1. O que motivou
+
+Auditoria de escalabilidade a pedido do operador ("dado mais hardware, o projeto escala?"). A
+resposta foi: **a camada de aplicação já escalava** — sem estado em memória, `@Scheduled` com lock
+`SETNX`, seed protegido por índice único, `instanceId` único por container (verificado no registro
+Eureka do ambiente rodando). O que faltava era infraestrutura e registro, não arquitetura. Mas a
+topologia era **fixa nas duas direções**: não encolhia (26 serviços, ~10 GB) e não crescia com
+segurança.
+
+### 2. Os três bloqueios reais (medidos, não supostos)
+
+- **Pool JDBC no default de 10 contra `max_connections=100`.** Medido no ambiente: 10 do pool + 6
+  de exporter/internas, ~84 livres → a ~9ª réplica de auth-server o Postgres recusa conexão. O
+  sintoma aparece **longe da causa** e **só sob a escala que deveria estar ajudando**. É o único
+  item que faz o scale-out *falhar* em vez de apenas não ajudar.
+- **`static_configs` no Prometheus.** `user-service:8181` resolve para UMA réplica por scrape; com
+  N > 1 as séries alternam a cada 5s e o `dashboardJVM` soma heap de processos distintos. Escalar
+  às cegas.
+- **`upstream` estático no `config-lb`.** O nginx resolve no start e **recusa iniciar** se um nome
+  não resolver — com `config-server-1/2` hardcoded, o piso mínimo era literalmente impossível.
+  Foi o achado que mudou o desenho: `config-server` virou serviço único escalável.
+
+### 3. O princípio, e por que ele decide o formato do piso
+
+**Encolher é remover nó; crescer é adicionar nó — nunca reconfigurar cliente.** Daí o piso ser
+*degenerado* e não *simplificado*: replica set `rs0` de **um membro** (não Mongo standalone) e
+**um** Sentinel (não Redis direto). `MONGODB_URI` e `spring.data.redis.sentinel.*` ficam idênticos
+do piso ao topo, e o ADR-008 vale sem emenda. O piso agressivo foi rejeitado justamente por
+transformar o caminho de volta ao HA em "reconfigurar cliente".
+
+### 4. `rs.initiate` não bastava — o erro que quase passou
+
+`rs.initiate` roda **uma vez por volume**. Parametrizar a lista de membros não resolveria nada:
+subir o piso com 1 membro e ligar `--profile ha` depois **não adicionaria membro nenhum** —
+`AlreadyInitialized`, e dois containers Mongo ociosos ao lado. Crescer exige `rs.reconfig`, daí o
+`infra/mongo/rs-reconcile.sh`.
+
+Ele decide os membros **por resolução DNS**, não por env, para não acoplar o profile a uma variável
+que se esquece de setar junto — a classe de bug das 19 variáveis inertes de 2026-08-06. E **só
+cresce, nunca encolhe**: remover membro por lookup que falhou significaria que uma falha
+transitória de DNS num restart derrubaria o quorum.
+
+### 5. Invariante que evitou apostar na versão do Compose
+
+**Nenhum serviço fora do profile `ha` declara `depends_on` para um dentro dele.** O comportamento
+do Compose nesse caso variou entre versões; a regra torna a questão irrelevante em vez de testar a
+versão instalada. Obrigou a remover esperas que, revistas, nunca deveriam existir: `sentinel-1`
+esperava `redis-2/3` (o Sentinel descobre réplicas pelo `INFO` do master), `mongodb-exporter`
+esperava `mongo-2/3` (tem `--discovering-mode`), e os 4 apps esperavam nós de redundância quando um
+de cada basta.
+
+### 6. Deixado de fora, com motivo
+
+- **`readPreference=secondaryPreferred`** para usar os secundários do piso `ha`. Global é
+  perigoso: lag de replicação faria `/internal/users/email/{email}` devolver 404 logo após o
+  cadastro, e esse 404 **conta no lockout** por desenho do ADR-021 — atraso de replicação viraria
+  conta bloqueada por 15 min. Se for feito, só nas leituras que toleram staleness.
+- **Autoscaler e Swarm:** decisão do operador. Num host único o teto de RAM chega antes do
+  benefício, e Swarm reescreveria os três compose (a seção de recursos usa `cpus`/`mem_limit`
+  justamente por não ser Swarm).
+
+### 7. Dívidas contraídas
+
+- **Replicação Eureka assimétrica** no piso `ha`: o `-2` aponta para o `-1` e faz fetch a cada 10s
+  (standby quente), mas o `-1` aponta para si mesmo — para não registrar falha de replicação a
+  cada evento no piso mínimo. Simetria exige exportar `EUREKA_PEER_URL`.
+- **Nada verifica que produção subiu com `--profile ha`.** O `up` do piso mínimo é silencioso e
+  bem-sucedido; o único sinal é a contagem de containers. Registrado em `SECURITY.md`.
+- **Tipo:** mudança de topologia + fechamento de dívida de escalabilidade. Sem mudança de contrato
+  de API.

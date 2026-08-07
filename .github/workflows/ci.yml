@@ -104,8 +104,51 @@ jobs:
       - name: Provide a dummy .env
         run: cp .env.example .env
 
+      # Piso mínimo (default), profile ha, e as duas combinações de overlay. Todas têm de
+      # continuar válidas — o piso é o que `docker compose up` faz sem argumento nenhum.
       - name: Validate compose topology
-        run: docker compose -f docker-compose.yml config -q
+        run: |
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml --profile ha config -q
+          docker compose -f docker-compose.yml -f docker-compose.override.yml config -q
+
+      # O profile só serve para alguma coisa se o piso mínimo REALMENTE não incluir os nós de
+      # redundância. Sem esta asserção, um `profiles:` esquecido num serviço novo (ou removido
+      # num refactor) faz o piso voltar a subir 26 containers sem ninguém notar — a mesma classe
+      # de bug das 19 variáveis inertes registradas em docs/CONFIG.md.
+      - name: Piso mínimo não inclui os nós do profile ha
+        run: |
+          minimo="$(docker compose -f docker-compose.yml config --services | sort)"
+          ha="$(docker compose -f docker-compose.yml --profile ha config --services | sort)"
+          esperado="discovery-server-2 mongo-2 mongo-3 redis-2 redis-3 redis-sentinel-2 redis-sentinel-3"
+          delta="$(comm -13 <(echo "$minimo") <(echo "$ha") | tr '\n' ' ' | sed 's/ $//')"
+          if [ "$delta" != "$esperado" ]; then
+            echo "[ERRO] delta piso→ha divergiu."
+            echo "  esperado: $esperado"
+            echo "  obtido:   $delta"
+            exit 1
+          fi
+          echo "[OK] piso mínimo com $(echo "$minimo" | wc -l) serviços; profile ha acrescenta: $delta"
+
+      # O eixo replicável tem de continuar replicável: nem `container_name` nem `ports:` na base
+      # para os serviços escaláveis — qualquer um dos dois faz a 2ª réplica falhar no bind.
+      - name: Serviços do eixo replicável aceitam --scale
+        run: |
+          docker compose -f docker-compose.yml config \
+            | python3 -c '
+import sys, yaml
+c = yaml.safe_load(sys.stdin)
+falhas = []
+for nome in ["gateway", "user-service", "authorization-server", "notification-service", "config-server"]:
+    svc = c["services"][nome]
+    if "container_name" in svc:
+        falhas.append(f"{nome}: container_name impede --scale")
+    if svc.get("ports"):
+        falhas.append(f"{nome}: ports na base impede --scale (mova para o override)")
+if falhas:
+    print("[ERRO] " + "; ".join(falhas)); sys.exit(1)
+print("[OK] eixo replicável sem container_name nem ports na base")
+'
 
   # Smoke-test da topologia de login sob hostname único (ADR-023). Sobe nginx + gateway +
   # authorization-server (menos o cloudflared, que não roda em CI) e verifica por HTTP os pontos

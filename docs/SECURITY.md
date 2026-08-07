@@ -147,6 +147,22 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 
 ## Gaps de segurança conhecidos (dívida aceita)
 
+> **PISO MÍNIMO NÃO É HA (2026-08-07, ADR-024).** Desde a adoção do piso mínimo, `docker compose
+> up` sem argumento sobe **um** nó Mongo, **um** Redis e **um** Sentinel. Isso é elasticidade
+> (subir pequeno, crescer depois), **não** redundância: não há failover, e a perda de qualquer um
+> dos três derruba o serviço até o restart. A confusão é fácil e cara porque a topologia *parece*
+> a de antes — o replica set `rs0` e o Sentinel continuam lá, só que degenerados (um membro, um
+> sentinel), justamente para que a configuração dos clientes não mude ao crescer.
+>
+> **Para qualquer ambiente que precise sobreviver à perda de um nó, suba com `--profile ha`.** Não
+> há verificação automática disso: o `up` do piso mínimo é silencioso e bem-sucedido. O único
+> sinal é a contagem de containers (19 vs. 26) e `rs.status().members.length` (1 vs. 3).
+>
+> Vale notar o que **não** mudou: o `auth-postgres` já era e continua sendo instância única nos
+> dois pisos — é o SPOF do login (sem ele não há autenticação nova nem refresh), e réplica de
+> verdade exige uma segunda máquina. No host único o remédio disponível é backup/PITR, ainda não
+> implementado.
+
 > **"Sem TLS em prod": fechado (2026-07-28).** Deixou de ser dívida com a migração para **named
 > tunnel + domínio fixo**: a Cloudflare termina TLS numa origem **estável**, e o que antes era
 > curativo (quick tunnel de URL efêmera) virou o caminho de deploy real. Ver _Estado atual do

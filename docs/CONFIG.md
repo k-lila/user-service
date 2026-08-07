@@ -99,7 +99,7 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 | Variável            | Serviço(s)             | Default dev                     | Observação                                                            |
 | ------------------- | ---------------------- | ------------------------------- | -------------------------------------------------------------------- |
 | `SERVER_PORT`       | todos                  | por serviço¹                    | Porta HTTP do serviço.                                                |
-| `CONFIG_SERVER_URL` | todos (exceto config)  | —                               | `spring.config.import=optional:configserver:...`. Compose: `http://config-lb:8888` (nginx LB na frente de `config-server-1` e `config-server-2`). |
+| `CONFIG_SERVER_URL` | todos (exceto config)  | —                               | `spring.config.import=optional:configserver:...`. Compose: `http://config-lb:8888` (nginx na frente do serviço `config-server`, resolvido por DNS — `--scale config-server=N` entra em rotação em ≤10s, sem editar arquivo; ADR-024). |
 | `CONFIG_SERVER_USERNAME` | config-server · clientes | `config-client`             | Usuário do Basic auth do config-server. No config-server vira `spring.security.user.name`; nos clientes, `spring.cloud.config.username`. |
 | `CONFIG_SERVER_PASSWORD` | config-server · clientes | `config-dev-secret`         | Senha do Basic auth. **É Docker secret, não variável de ambiente** — montada em `/run/secrets/CONFIG_SERVER_PASSWORD` e resolvida pelo configtree; o `prometheus.yml` a lê por `password_file`. Por isso **não** está no `.env.example` (que lista só `CONFIG_SERVER_USERNAME`). Quem o compose passa sem `:-default` é o **`CONFIG_SERVER_USERNAME`**: se faltar no `.env`, o container recebe a var vazia (não cai no default do `application.yml`). |
 | `EUREKA_URI`        | todos (exceto discovery) | `http://localhost:9091/eureka` | `defaultZone` do Eureka. Compose: lista CSV com ambas as instâncias HA (`http://discovery-server-1:9091/eureka,http://discovery-server-2:9092/eureka`). |
@@ -336,8 +336,8 @@ boot. Ajuste conforme a carga real do consumidor do blueprint.
 
 | Classe                | Serviços                                            | `cpus` | `mem_limit` | `mem_reservation` |
 | --------------------- | --------------------------------------------------- | ------ | ----------- | ----------------- |
-| App JVM (pesado, `x-res-jvm`) | `gateway`, `authorization-server`, `user-service`, `notification-service` | 2.0    | 1024m       | 512m              |
-| App JVM (leve)        | `config-server-1/2`, `discovery-server-1/2`         | 0.75   | 512m        | 256m              |
+| App JVM (pesado, `x-res-jvm`) | `gateway`, `authorization-server`, `user-service`, `notification-service` | 2.0 (`APP_CPUS`) | 1024m (`APP_MEM_LIMIT`) | 512m (`APP_MEM_RESERVATION`) |
+| App JVM (leve)        | `config-server`, `discovery-server-1/2`             | 0.75   | 512m        | 256m              |
 | MongoDB (`x-res-app`) | `mongo-1/2/3`                                        | 1.0    | 1024m       | 512m              |
 | PostgreSQL            | `auth-postgres`                                      | 0.75   | 512m        | 256m              |
 | Redis (data)          | `redis-1/2/3`                                        | 0.5    | 256m        | 64m               |
@@ -350,9 +350,57 @@ boot. Ajuste conforme a carga real do consumidor do blueprint.
 | Nginx (interno)       | `config-lb`                                          | 0.25   | 64m         | —                 |
 | One-shot              | `mongo-init`                                         | 0.5    | 256m        | —                 |
 
-> A soma das **reservas** (~5,3 GB) é o que dimensiona o host; os `mem_limit` são tetos de
-> contenção, não memória pré-alocada. O `docker-compose.override.yml` (dev) só republica
-> portas — os limites do base valem em dev e no deploy prod-like.
+> A soma das **reservas** é o que dimensiona o host; os `mem_limit` são tetos de contenção, não
+> memória pré-alocada. O `docker-compose.override.yml` (dev) só republica portas — os limites do
+> base valem em dev e no deploy prod-like. A tabela acima descreve o piso **`ha`** (26 serviços,
+> ~5,3 GB de reserva); o **piso mínimo** (19 serviços, default) tira 2 nós Mongo, 2 Redis, 2
+> sentinels e 1 discovery, caindo para ~3,5 GB.
+
+> **Os três valores da classe `x-res-jvm` valem POR RÉPLICA** (ADR-024). Foram calibrados para um
+> processo por serviço; com `--scale`, N réplicas multiplicam reserva e quota. Num host de 12 vCPU
+> / 15 GB isso esgota rápido — daí `APP_CPUS` / `APP_MEM_LIMIT` / `APP_MEM_RESERVATION`. Ao
+> baixar `APP_CPUS`, **não desça abaixo de ~1.5**: com quota de 1.0 a JVM se classifica como
+> *client-class machine* e escolhe `UseSerialGC`, anulando o `-XX:+UseG1GC` do `JAVA_TOOL_OPTIONS`
+> — é exatamente o problema que motivou separar `x-res-jvm` de `x-res-app`.
+
+### Pools de conexão (tetos de escala)
+
+| Variável | Serviço | Default | Teto que governa |
+| --- | --- | --- | --- |
+| `AUTH_DB_POOL_SIZE` | authorization-server | 8 | N réplicas × 8 ≤ `max_connections` do Postgres (default **100**; medido no ambiente: 10 do pool + 6 de exporter/internas, ~84 livres → até 10 réplicas) |
+| `MONGO_MAX_POOL_SIZE` | user-service | 50 | Limitado pela **memória** do nó Mongo, não por `max_connections`: ~1 MB de pilha por conexão contra `mem_limit: 1024m` |
+
+> Sem o `AUTH_DB_POOL_SIZE` explícito valia o default do Hikari (10) e a ~9ª réplica de
+> auth-server encontrava o Postgres esgotado — com o sintoma (`FATAL: sorry, too many clients
+> already`) aparecendo no auth-server, longe da causa, e só sob a escala que deveria estar
+> ajudando. O `MONGO_MAX_POOL_SIZE` vive no `user-service.yml` e **não** dentro da `MONGODB_URI`
+> de propósito: a URI é Docker secret gerado pelo `gen-secrets.sh`, e mudar o pool não pode
+> exigir regerar segredo.
+
+### Piso mínimo e crescimento (ADR-024)
+
+`docker compose up` sem argumento sobe o **piso mínimo**: 19 serviços, com Mongo em replica set
+`rs0` de **um membro** e Redis com **um** nó e **um** Sentinel. Não é standalone de propósito — a
+`MONGODB_URI` (`replicaSet=rs0`) e o `spring.data.redis.sentinel.*` dos clientes são idênticos no
+piso e no topo, então crescer nunca reconfigura cliente.
+
+```bash
+docker compose up -d                                    # piso mínimo (19 serviços)
+docker compose --profile ha up -d                       # + redundância de dados (26)
+docker compose -f docker-compose.yml up -d \
+  --scale gateway=2 --scale user-service=2              # + réplicas de aplicação
+```
+
+> **`--scale` não funciona com o `docker-compose.override.yml`** (que é o default de
+> `docker compose up`, daí o `-f` explícito acima): ele publica portas fixas no host e a 2ª
+> réplica falha no bind. Listas de `ports:` são **concatenadas** no merge entre arquivos, nunca
+> removidas — não há overlay capaz de desfazê-las.
+
+**Crescer o Mongo é automático; encolher é manual.** O `infra/mongo/rs-reconcile.sh` descobre por
+DNS os nós alcançáveis e faz `rs.reconfig` aditivo, então `--profile ha` sozinho leva o replica set
+de 1 para 3 membros no mesmo volume. Ele **nunca remove** membro: fazê-lo por lookup que falhou
+significaria que uma falha transitória de DNS num restart derrubaria o quorum. Para encolher,
+`rs.remove` manual antes de desligar o profile.
 
 > **Por que o `interface` saiu da classe do `config-lb`.** Os dois são nginx, mas têm papéis
 > opostos sob hostname único: o `config-lb` só balanceia duas instâncias de config-server na
