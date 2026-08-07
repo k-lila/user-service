@@ -17,6 +17,21 @@
           "text": "gateway",
           "value": "gateway"
         }
+      },
+      {
+        "name": "instance",
+        "label": "réplica",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(http_server_requests_seconds_count{application=\"$application\"}, instance)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -30,9 +45,10 @@
     {
       "type": "stat",
       "title": "RPS",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m]))"
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m]))"
         }
       ],
       "fieldConfig": {
@@ -40,15 +56,29 @@
           "unit": "reqps"
         }
       },
-      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 0, "y": 1, "w": 5, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Réplicas atendendo",
+      "description": "Réplicas que serviram ALGUMA requisição nos últimos 5 min — distingue REGISTRADA de USADA. Uma réplica de pé no Eureka que não aparece aqui é uma réplica que ninguém está usando, e o dashboard JVM (painel 'Réplicas') mostrará um número maior. Divergência entre os dois por mais de ~25s (a janela de convergência do ADR-024) é problema de balanceamento, não de escala.",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "count(count by (instance) (rate(http_server_requests_seconds_count{application=\"$application\"}[5m]) > 0))"
+        }
+      ],
+      "gridPos": { "x": 5, "y": 1, "w": 4, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Erro (%)",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "100 * (sum(rate(http_server_requests_seconds_count{application=\"$application\",status=~\"5..\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])))"
+          "expr": "100 * (sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\",status=~\"5..\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m])))"
         }
       ],
       "fieldConfig": {
@@ -63,15 +93,16 @@
           }
         }
       },
-      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 9, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Latência Média",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "1000 * (sum(rate(http_server_requests_seconds_sum{application=\"$application\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])))"
+          "expr": "1000 * (sum(rate(http_server_requests_seconds_sum{application=\"$application\",instance=~\"$instance\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m])))"
         }
       ],
       "fieldConfig": {
@@ -86,15 +117,16 @@
           }
         }
       },
-      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 14, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Erros (RPS)",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",status=~\"5..\"}[1m]))"
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\",status=~\"5..\"}[1m]))"
         }
       ],
       "fieldConfig": {
@@ -102,7 +134,7 @@
           "unit": "reqps"
         }
       },
-      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 19, "y": 1, "w": 5, "h": 4 }
     },
 
     {
@@ -113,9 +145,10 @@
     {
       "type": "timeseries",
       "title": "Latência Média (no tempo)",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "1000 * (sum(rate(http_server_requests_seconds_sum{application=\"$application\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])))"
+          "expr": "1000 * (sum(rate(http_server_requests_seconds_sum{application=\"$application\",instance=~\"$instance\"}[1m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m])))"
         }
       ],
       "fieldConfig": {
@@ -123,19 +156,40 @@
           "unit": "ms"
         }
       },
-      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 }
+      "gridPos": { "x": 0, "y": 6, "w": 8, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Latência média por réplica",
+      "description": "Uma réplica lenta é invisível na média da frota: com 3 réplicas, uma a 600ms e duas a 50ms dão média de ~230ms e nenhum alerta dispara. Numerador e denominador agregados pelo MESMO by (instance) — dividir séries com conjuntos de labels diferentes devolveria vazio.",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "1000 * (sum by (instance) (rate(http_server_requests_seconds_sum{application=\"$application\",instance=~\"$instance\"}[1m])) / sum by (instance) (rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m])))",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "x": 8, "y": 6, "w": 8, "h": 8 }
     },
 
     {
       "type": "timeseries",
       "title": "Latência p95 / p99",
+      "description": "NÃO quebrar por réplica. histogram_quantile sobre buckets somados (sum by (le)) é a forma correta de calcular quantil de frota; calcular o p95 de cada réplica e tirar a média seria matematicamente errado — quantil não é linear. Para o p95 de UMA réplica, escolha-a no dropdown: o filtro entra antes da agregação e a conta continua correta.",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "1000 * histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"$application\"}[5m])) by (le))",
+          "expr": "1000 * histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"$application\",instance=~\"$instance\"}[5m])) by (le))",
           "legendFormat": "p95"
         },
         {
-          "expr": "1000 * histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"$application\"}[5m])) by (le))",
+          "expr": "1000 * histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"$application\",instance=~\"$instance\"}[5m])) by (le))",
           "legendFormat": "p99"
         }
       ],
@@ -144,7 +198,7 @@
           "unit": "ms"
         }
       },
-      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 }
+      "gridPos": { "x": 16, "y": 6, "w": 8, "h": 8 }
     },
 
     {
@@ -154,10 +208,13 @@
 
     {
       "type": "timeseries",
-      "title": "RPS Total",
+      "title": "RPS por réplica",
+      "description": "O painel que responde 'a carga está distribuída?'. Séries empilhadas em patamares iguais = balanceamento uniforme; uma série colada no zero enquanto as outras trabalham = réplica registrada mas não usada. Medido no ADR-024: pelo Eureka a distribuição é round-robin exato (10/10/10 em 30 requisições); pelos proxies nginx (config-lb e SPA) é enviesada, porque a ordem dos endereços resolvidos fica fixa durante a janela do `valid=10s`.",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m]))"
+          "expr": "sum by (instance) (rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m]))",
+          "legendFormat": "{{instance}}"
         }
       ],
       "fieldConfig": {
@@ -165,15 +222,34 @@
           "unit": "reqps"
         }
       },
-      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 }
+      "gridPos": { "x": 0, "y": 15, "w": 8, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "RPS Total",
+      "description": "Somar taxas entre réplicas é a leitura CORRETA no nível de serviço — este painel é agregado de propósito e não deve ser quebrado por réplica (para isso existe o painel ao lado).",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "x": 8, "y": 15, "w": 8, "h": 8 }
     },
 
     {
       "type": "timeseries",
       "title": "RPS por Endpoint",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",uri!~\"/actuator.*|/swagger.*|UNKNOWN\"}[1m])) by (uri, method)",
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\",uri!~\"/actuator.*|/swagger.*|UNKNOWN\"}[1m])) by (uri, method)",
           "legendFormat": "{{method}} {{uri}}"
         }
       ],
@@ -182,7 +258,7 @@
           "unit": "reqps"
         }
       },
-      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 }
+      "gridPos": { "x": 16, "y": 15, "w": 8, "h": 8 }
     },
 
     {
@@ -193,9 +269,10 @@
     {
       "type": "timeseries",
       "title": "Distribuição HTTP",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\"}[1m])) by (status)"
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m])) by (status)"
         }
       ],
       "options": {
@@ -214,9 +291,10 @@
     {
       "type": "timeseries",
       "title": "Top endpoints com erro",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "topk(5, sum(rate(http_server_requests_seconds_count{application=\"$application\",status=~\"5..\",uri!~\"/actuator.*|/swagger.*|UNKNOWN\"}[1m])) by (uri))",
+          "expr": "topk(5, sum(rate(http_server_requests_seconds_count{application=\"$application\",instance=~\"$instance\",status=~\"5..\",uri!~\"/actuator.*|/swagger.*|UNKNOWN\"}[1m])) by (uri))",
           "legendFormat": "{{uri}}"
         }
       ],

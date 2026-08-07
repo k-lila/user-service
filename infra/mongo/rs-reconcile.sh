@@ -14,7 +14,8 @@
 #
 # SÓ CRESCE, NUNCA ENCOLHE — deliberado. Remover membro com base em lookup que falhou seria
 # perigoso: uma falha transitória de DNS durante um restart derrubaria o quorum do replica set.
-# Encolher é operação manual e deliberada (rs.remove), documentada em docs/CONFIG.md.
+# Encolher é operação manual e deliberada (rs.remove), documentada em docs/CONFIG.md. O que o
+# script FAZ a respeito é detectar quem encolheu na ordem errada: ver a guarda de maioria abaixo.
 set -euo pipefail
 
 PRIMARY="${MONGO_PRIMARY_HOST:-mongo-1:27017}"
@@ -63,6 +64,31 @@ exec mongosh --host "$PRIMARY" \
     const cfg = rs.conf();
     const present = cfg.members.map(m => m.host);
     const missing = desired.filter(h => !present.includes(h));
+
+    // GUARDA DE MAIORIA. A config do rs0 vive no VOLUME, não no compose: depois de um ciclo
+    // --profile ha ela fica com 3 membros e continua com 3 depois que mongo-2/3 somem. Sozinho
+    // numa config de 3 votantes, mongo-1 não alcança maioria, assume SECONDARY e RECUSA escrita
+    // — com leitura funcionando, healthcheck verde e nada nos logs apontando a causa. Este
+    // script chegava aqui, calculava missing = [] e saía com SUCESSO, ratificando o estado.
+    const majority = Math.floor(present.length / 2) + 1;
+    if (desired.length < majority) {
+      const unreachable = present.filter(h => !desired.includes(h));
+      print('[rs-reconcile] ERRO: rs0 tem ' + present.length + ' membro(s) configurado(s) e só ' +
+            desired.length + ' alcançável(is) — abaixo da maioria de ' + majority + '.');
+      print('[rs-reconcile] Sem maioria não há PRIMARY: leitura funciona, escrita falha com');
+      print('[rs-reconcile] NotWritablePrimary. É o estado de quem desligou o --profile ha sem');
+      print('[rs-reconcile] remover os membros antes. Dois caminhos:');
+      print('[rs-reconcile]   (a) voltar ao perfil completo: docker compose --profile ha up -d');
+      print('[rs-reconcile]   (b) encolher de verdade — com o replica set AINDA com maioria,');
+      print('[rs-reconcile]       rodar no PRIMARY e só então desligar o profile:');
+      unreachable.forEach(h => print('[rs-reconcile]         rs.remove(\"' + h + '\")'));
+      // Falhar (em vez de avisar) é deliberado: user-service depende deste job com
+      // service_completed_successfully, então o exit != 0 impede que a aplicação suba contra um
+      // Mongo somente-leitura e aceite cadastros que morreriam em 500. O restart: on-failure
+      // cobre o caso transitório — na subida do --profile ha, se mongo-2 ainda não resolve no
+      // DNS a guarda dispara, o job repete, e passa assim que o nó aparece.
+      quit(1);
+    }
 
     if (missing.length === 0) {
       print('[rs-reconcile] rs0 já contém os ' + present.length + ' membro(s) alcançáveis');

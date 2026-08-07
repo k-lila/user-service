@@ -91,6 +91,32 @@ variáveis documentadas e inertes). E **só cresce, nunca encolhe**: remover mem
 lookup que falhou seria perigoso — uma falha transitória de DNS num restart derrubaria o quorum.
 Encolher é operação manual e deliberada (`rs.remove`).
 
+### Emenda (2026-08-07): a guarda de maioria
+
+"Só cresce" estava certo, mas deixava um **modo de falha silencioso** que só apareceu ao testar o
+encolhimento. A config do `rs0` vive no volume: depois de um ciclo `--profile ha` ela tem 3 membros
+e continua com 3 quando mongo-2/3 somem. Sozinho numa config de 3 votantes, mongo-1 não alcança
+maioria, assume SECONDARY e **recusa escrita** — com leitura funcionando e healthcheck verde. O
+`rs-reconcile.sh` chegava nesse estado, calculava `missing = []` e **saía com sucesso**,
+ratificando-o. Medido no ambiente de dev em 2026-08-07: 3 membros configurados, 1 saudável,
+`isWritablePrimary: false`, `insertOne` falhando com `NotWritablePrimary`.
+
+O script agora compara os membros **configurados** com os **alcançáveis** e falha quando estes não
+formam maioria, imprimindo os `rs.remove` exatos a executar. Falhar em vez de avisar é deliberado:
+`user-service` depende do job com `condition: service_completed_successfully`, então o `exit 1`
+impede a aplicação de subir contra um Mongo somente-leitura e aceitar cadastros que morreriam em
+500. O caso transitório se auto-resolve pelo mesmo `restart: on-failure` que já cobria a corrida de
+startup. O script **continua sem nunca remover membro sozinho** — o racional acima fica intacto; a
+guarda só transforma silêncio em diagnóstico. Runbook do encolhimento em `docs/CONFIG.md`.
+
+**Encolhimento verificado ponta a ponta** (mesma data, sobre dado real): `rs.remove` dos dois
+membros → `--profile ha down` (sem `-v`) → `up` do piso. Preservados: contagem de `users` e
+`auditLogs`, o titular semeado com o mesmo `_id`, a leitura da credencial pelo canal interno
+(HTTP 200), e o estado OAuth no Postgres (`registered_client`/`authorization`/`consent` = 1/1/0,
+inalterados). Escrita pós-encolhimento: `POST /v1/users/register` → 201. **Não** preservado: o
+Redis, que não tem volume nomeado — sessões, cache e contadores de rate limit são perdidos em
+qualquer `down`, não só neste.
+
 ## Consequências
 
 **Positivas.** O piso cai de 26 para **19 serviços** (13 de plataforma + 6 de observabilidade). O

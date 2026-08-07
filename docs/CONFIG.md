@@ -399,8 +399,55 @@ docker compose -f docker-compose.yml up -d \
 **Crescer o Mongo é automático; encolher é manual.** O `infra/mongo/rs-reconcile.sh` descobre por
 DNS os nós alcançáveis e faz `rs.reconfig` aditivo, então `--profile ha` sozinho leva o replica set
 de 1 para 3 membros no mesmo volume. Ele **nunca remove** membro: fazê-lo por lookup que falhou
-significaria que uma falha transitória de DNS num restart derrubaria o quorum. Para encolher,
-`rs.remove` manual antes de desligar o profile.
+significaria que uma falha transitória de DNS num restart derrubaria o quorum.
+
+### Encolher de `ha` para o piso mínimo (runbook)
+
+A ordem importa, e errá-la tem um custo específico: **a config do `rs0` vive no volume, não no
+compose**. Depois de um ciclo `--profile ha` ela fica com 3 membros e continua com 3 quando
+mongo-2/3 somem. Sozinho numa config de 3 votantes, mongo-1 não alcança maioria, assume
+**SECONDARY** e passa a **recusar escrita** (`NotWritablePrimary`) — com leitura funcionando e
+healthcheck verde. Verificado em 2026-08-07: `docker compose up` sobre um volume nesse estado sobe
+um Mongo somente-leitura.
+
+```bash
+# 1. Com o replica set AINDA em maioria (profile ha no ar), remova os membros no PRIMARY:
+docker exec <mongo-1> mongosh -u "$MONGO_USER" -p "$(cat secrets/MONGO_PASSWORD)" \
+  --authenticationDatabase admin --quiet \
+  --eval 'rs.remove("mongo-2:27017"); rs.remove("mongo-3:27017"); rs.conf().members.length'
+
+# 2. Confirme que redis-1 é o master corrente (ver nota abaixo):
+docker exec <redis-sentinel-1> sh -c 'REDISCLI_AUTH=$(cat /run/secrets/REDIS_PASSWORD) \
+  redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster'
+
+# 3. Derrube COM o profile e SEM -v (o -v apagaria Mongo e Postgres):
+docker compose --profile ha down
+
+# 4. Suba o piso:
+docker compose up -d
+```
+
+O **passo 1 é o que não pode faltar**; o `rs.remove` precisa rodar enquanto ainda há maioria para
+aceitar o `rs.reconfig`. O **passo 2** existe porque `infra/redis/sentinel.conf` fixa `quorum 2`:
+no piso, com um único Sentinel, failover é impossível por construção — encolher com o master fora
+de `redis-1` deixaria o piso sem master. O **profile no `down`** (passo 3) é obrigatório: sem ele
+os serviços do profile ficam órfãos rodando.
+
+**Se a ordem for violada, o `rs-reconcile.sh` avisa.** Ele compara os membros configurados com os
+alcançáveis e, quando estes não formam maioria, imprime o diagnóstico com os `rs.remove` exatos a
+executar e **sai com erro**. Como `user-service` depende dele com
+`condition: service_completed_successfully`, a aplicação **não sobe** contra um Mongo
+somente-leitura — falha alta em vez de aceitar cadastros que morreriam em 500. O mesmo mecanismo
+cobre a corrida de startup do `--profile ha` (se mongo-2 ainda não resolve no DNS, o job repete via
+`restart: on-failure` e passa quando o nó aparece).
+
+**O que o encolhimento preserva e o que não preserva.** Mongo e Postgres têm volumes **nomeados** e
+atravessam o `down` intactos — medido: `users`, `auditLogs`, o registro do `gateway-client` e as
+autorizações OAuth sobreviveram, e a escrita voltou a funcionar no piso. O **Redis não**: o compose
+não declara volume nomeado para ele, e o `VOLUME /data` da imagem gera um volume **anônimo** por
+container, que o container seguinte não reaproveita. Sessão de login, cache e contadores de rate
+limit são perdidos — todo mundo precisa logar de novo. Isso vale para **qualquer** `down`, não é
+custo específico do encolhimento, mas é visível ao usuário e não deve ser confundido com falha.
 
 > **Por que o `interface` saiu da classe do `config-lb`.** Os dois são nginx, mas têm papéis
 > opostos sob hostname único: o `config-lb` só balanceia duas instâncias de config-server na

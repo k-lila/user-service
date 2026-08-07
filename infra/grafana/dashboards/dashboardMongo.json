@@ -15,6 +15,7 @@
     {
       "type": "stat",
       "title": "MongoDB UP",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "mongodb_up"
@@ -27,23 +28,49 @@
           ]
         }
       },
-      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 0, "y": 1, "w": 4, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Membros saudáveis",
+      "description": "Verde a partir de 1: o piso mínimo do ADR-024 roda rs0 com UM membro e é estado válido. O sinal de problema é este número ficar ABAIXO do painel ao lado, não ficar abaixo de 3.",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "sum(mongodb_rs_members_health)"
         }
       ],
-      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 4, "y": 1, "w": 4, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Membros configurados",
+      "description": "Lido da config do rs0, que vive no VOLUME e não no compose. O PAR com 'Membros saudáveis' é o ponto deste painel: configurados 3 / saudáveis 1 é a assinatura exata de quem desligou o --profile ha sem rs.remove antes — sem maioria não há PRIMARY, a leitura funciona, a escrita falha com NotWritablePrimary e o healthcheck fica verde. Ver o runbook de encolhimento em docs/CONFIG.md.",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "count(mongodb_rs_members_state)"
+        }
+      ],
+      "gridPos": { "x": 8, "y": 1, "w": 4, "h": 4 }
     },
 
     {
       "type": "timeseries",
       "title": "Estado dos membros (1=PRIMARY, 2=SECONDARY)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "mongodb_rs_members_state",
@@ -56,6 +83,7 @@
     {
       "type": "timeseries",
       "title": "Ping entre membros (ms)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "mongodb_rs_members_pingMs",
@@ -78,6 +106,7 @@
     {
       "type": "timeseries",
       "title": "Conexões atuais",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "mongodb_ss_connections{conn_type=\"current\"}",
@@ -90,6 +119,7 @@
     {
       "type": "timeseries",
       "title": "Operações/s",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "sum(rate(mongodb_ss_opcounters[1m])) by (legacy_op_type)",
@@ -112,6 +142,7 @@
     {
       "type": "timeseries",
       "title": "Memória (resident / virtual)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "mongodb_ss_mem_resident",
@@ -133,6 +164,7 @@
     {
       "type": "timeseries",
       "title": "Rede (bytes/s)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "rate(mongodb_ss_network_bytesIn[1m])",

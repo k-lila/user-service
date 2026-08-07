@@ -656,3 +656,32 @@ de cada basta.
   bem-sucedido; o único sinal é a contagem de containers. Registrado em `SECURITY.md`.
 - **Tipo:** mudança de topologia + fechamento de dívida de escalabilidade. Sem mudança de contrato
   de API.
+
+### 8. Encolhimento e dashboards (2026-08-07)
+
+- **Guarda de maioria no `rs-reconcile.sh` é fail-CLOSED, e isso é escolha.** A config do `rs0`
+  vive no volume: depois de um ciclo `--profile ha` ela fica com 3 membros mesmo sem mongo-2/3, e
+  mongo-1 sozinho vira SECONDARY que **recusa escrita** — com leitura OK e healthcheck verde. O
+  script saía com **sucesso** nesse estado. Agora compara configurados × alcançáveis e sai com
+  erro; como `user-service` depende dele por `service_completed_successfully`, a aplicação **não
+  sobe** contra um Mongo somente-leitura. **Por quê falhar e não avisar:** um aviso deixaria a
+  aplicação aceitar cadastros que morrem em 500, longe da causa. O caso transitório (mongo-2 ainda
+  fora do DNS na subida do `ha`) se auto-resolve pelo `restart: on-failure` que já existia.
+- **A armadilha estava armada no ambiente, não era hipótese.** Verificado antes de qualquer
+  conserto: 3 membros configurados / 1 saudável, `isWritablePrimary: false`, `insertOne` falhando
+  com `NotWritablePrimary`. Encolhimento depois validado ponta a ponta com preservação de Mongo e
+  Postgres; Redis **não** preserva (sem volume nomeado — o `VOLUME /data` da imagem é anônimo por
+  container). Runbook em `docs/CONFIG.md`.
+- **Regra de dashboard: threshold que assume o topo da escala é bug.** O `dashboardRedis` ficava
+  **vermelho permanente na topologia default** (contava os 6 nós do `ha`; o piso tem 2). Um
+  dashboard vermelho por desenho treina quem o vê a ignorá-lo. Critério de aceite adotado: **o
+  piso mínimo saudável tem de renderizar verde nos cinco dashboards** — verificado avaliando cada
+  query com threshold contra o Prometheus.
+- **Validação de PromQL não pode ser por inspeção.** Meu primeiro validador em lote reportou "0
+  queries vazias" e estava errado: `pg_settings_max_connections - sum(pg_stat_activity_count)`
+  retorna **vazio** (operação binária entre vetores com conjuntos de labels diferentes não casa).
+  Só a consulta direta ao Prometheus pegou. Corrigido para `max(...) - sum(...)`, que descarta os
+  labels dos dois lados. **Toda query de dashboard nova deve ser executada, não lida.**
+- **`count(process_uptime_seconds{...})` super-conta por até 5 min** após remover réplica (janela
+  de lookback do PromQL mantém a série da réplica morta). Medido; não é defeito da query. Anotado
+  na `description` do painel para ninguém ler 4 depois de um scale-down e achar que falhou.
