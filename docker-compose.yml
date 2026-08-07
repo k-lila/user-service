@@ -269,16 +269,25 @@ services:
       <<: *spring-config
       SERVER_PORT: 9091
       EUREKA_HOSTNAME: discovery-server-1
-      # Auto-referência no piso mínimo (ADR-024): com um só nó, apontar o defaultZone para um
-      # peer inexistente faria o Eureka registrar falha de replicação a cada evento de registro.
-      # Auto-registro é a configuração canônica de nó único.
+      # Aponta para o PAR, não para si mesmo — e isso é obrigatório, não preferência.
       #
-      # No piso `ha` quem carrega o par é o discovery-server-2 (aponta para cá): ele se registra
-      # aqui e faz fetch do registry a cada 10s (registry-fetch-interval-seconds), ficando
-      # atualizado como standby quente sem que este nó precise saber que ele existe — é o que
-      # mantém o profile autossuficiente, sem env para setar junto. Para replicação push
-      # simétrica entre os dois, exporte EUREKA_PEER_URL apontando ao par.
-      EUREKA_PEER_URL: ${EUREKA_PEER_URL:-http://discovery-server-1:9091/eureka}
+      # A tentação (ADR-024, corrigida na verificação) é auto-referenciar no piso mínimo para não
+      # registrar falha de replicação contra um peer que não existe, deixando o discovery-server-2
+      # apontar para cá e se manter atualizado por fetch. NÃO FUNCIONA: o fetch client-side de um
+      # servidor Eureka popula o cache que ele usa como CLIENTE, não o registry que ele SERVE a
+      # terceiros. Medido: com a auto-referência, o discovery-server-2 servia um registry sem
+      # AUTHORIZATION-SERVER, e todo gateway que buscasse nele respondia 503 em /login
+      # ("No servers available for service: authorization-server"). Replicação de peer no Eureka é
+      # push; sem esta linha, o nó 2 nunca recebe o push.
+      #
+      # O custo é WARN de replicação no piso mínimo, onde o peer não existe: MEDIDO em ~11
+      # linhas/min (ReplicationTaskProcessor + RetryableEurekaHttpClient). Deliberadamente NÃO
+      # silenciado — é exatamente a mensagem que denuncia falha de replicação no piso `ha`, e
+      # suprimi-la esconderia o bug acima em vez de corrigi-lo. A polaridade importa: o default
+      # errado quebra o sistema, o default barulhento só incomoda. Quem roda o piso mínimo e quer
+      # silêncio faz opt-in explícito: EUREKA_PEER_URL=http://discovery-server-1:9091/eureka
+      # (auto-referência) — seguro SÓ com um nó, e catastrófico com dois.
+      EUREKA_PEER_URL: ${EUREKA_PEER_URL:-http://discovery-server-2:9092/eureka}
     secrets:
       - CONFIG_SERVER_PASSWORD
     healthcheck:

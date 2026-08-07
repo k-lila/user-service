@@ -215,7 +215,7 @@ intercambiáveis. Crescem ligando o profile, não escalando.
 
 | Componente | Piso | Com `--profile ha` | Por que é nomeado |
 |---|---|---|---|
-| `discovery-server` | 1 (auto-registro) | 2 em peer replication | `EUREKA_HOSTNAME` e `EUREKA_PEER_URL` recíprocos |
+| `discovery-server` | 1 | 2 em peer replication | `EUREKA_HOSTNAME` e `EUREKA_PEER_URL` **recíprocos** — replicação de peer no Eureka é *push*; quebrar a reciprocidade faz um nó servir registry incompleto e o gateway responder 503 (ADR-024) |
 | `mongo` | 1 membro de `rs0` | 3 membros | Membro de replica set tem host fixo na config do RS |
 | `redis` | 1 (master) | 3 (1 master + 2 réplicas) | `--replicaof` aponta para host fixo |
 | `redis-sentinel` | 1 | 3 (quorum 2) | Quorum exige contagem de nós conhecida |

@@ -640,9 +640,18 @@ de cada basta.
 
 ### 7. Dívidas contraídas
 
-- **Replicação Eureka assimétrica** no piso `ha`: o `-2` aponta para o `-1` e faz fetch a cada 10s
-  (standby quente), mas o `-1` aponta para si mesmo — para não registrar falha de replicação a
-  cada evento no piso mínimo. Simetria exige exportar `EUREKA_PEER_URL`.
+- **Bug encontrado E CORRIGIDO na verificação — replicação Eureka.** A auto-referência do
+  `discovery-server-1` (para evitar WARN contra peer inexistente no piso mínimo) fazia o `-2`
+  servir registry **sem AUTHORIZATION-SERVER**: replicação de peer no Eureka é **push**, e o fetch
+  client-side popula o cache do nó como CLIENTE, não o registry que ele SERVE. Resultado: 503 em
+  `/login` em toda réplica de gateway que sorteasse o `-2`. O piso `ha` estava quebrado pela
+  metade e os dois nós estavam `healthy` o tempo todo. **"Componente healthy" não é evidência de
+  cluster funcionando.** Corrigido para apontar sempre ao par; os ~11 WARN/min do piso mínimo
+  ficam **não silenciados** de propósito — default errado quebra, default barulhento só incomoda.
+- **Janela de ~10s ao matar réplica abruptamente:** medido 3 falhas em 60 requisições com
+  `docker stop` (o `resolver valid=10s` do nginx mantém o IP morto em cache). Com
+  `docker compose scale` (parada graciosa: SIGTERM → 35s → desregistro no Eureka), **0 falhas em
+  45**. Encolher pelo caminho suportado é limpo; matar container não é.
 - **Nada verifica que produção subiu com `--profile ha`.** O `up` do piso mínimo é silencioso e
   bem-sucedido; o único sinal é a contagem de containers. Registrado em `SECURITY.md`.
 - **Tipo:** mudança de topologia + fechamento de dívida de escalabilidade. Sem mudança de contrato

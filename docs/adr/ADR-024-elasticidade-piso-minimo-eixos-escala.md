@@ -102,10 +102,8 @@ rolling restart com N > 1.
 
 **Negativas e limites.** O piso mínimo **não é HA**: um nó Mongo e um Redis sem failover. Está
 registrado em `docs/SECURITY.md` porque a confusão entre "piso enxuto" e "redundante" é fácil e
-cara. A replicação Eureka no piso `ha` é **assimétrica** — `discovery-server-2` aponta para o `-1`,
-se registra nele e faz fetch do registry a cada 10s como standby quente, mas o `-1` não empurra
-para o `-2` (ele aponta para si mesmo, para não registrar falha de replicação a cada evento no piso
-mínimo). Para replicação push simétrica, exporte `EUREKA_PEER_URL`. Não escalam com as réplicas: o
+cara. No piso mínimo o `discovery-server-1` registra **~11 WARN/min** de replicação contra um peer
+que não existe — barulho deliberado, ver a nota abaixo. Não escalam com as réplicas: o
 rate limit (global no Redis — replicar não levanta o teto por cliente) e a escrita (um primário
 Mongo, um Postgres). O `auth-postgres` segue singleton e é o SPOF do login.
 
@@ -113,6 +111,36 @@ Mongo, um Postgres). O `auth-postgres` segue singleton e é o SPOF do login.
 válidas; o delta piso→`ha` exatamente igual aos 7 nós esperados (senão um `profiles:` esquecido faz
 o piso voltar a 26 sem ninguém notar); e ausência de `container_name`/`ports:` nos serviços do eixo
 replicável (qualquer um dos dois faz a 2ª réplica falhar no bind).
+
+### Erro corrigido na verificação: auto-referência do `discovery-server-1`
+
+A primeira versão desta decisão apontava o `EUREKA_PEER_URL` do `discovery-server-1` **para si
+mesmo**, para não registrar falha de replicação contra um peer inexistente no piso mínimo, deixando
+o `discovery-server-2` apontar para o `-1` e se manter atualizado por *fetch* — descrito como
+"standby quente". **Está errado, e a verificação com a stack de pé provou.**
+
+O *fetch* client-side de um servidor Eureka popula o cache que ele usa **como cliente**, não o
+registry que ele **serve** a terceiros. Replicação de peer no Eureka é **push**: sem o `-1`
+apontando para o `-2`, o nó 2 nunca recebe nada. Medido no piso `ha` com 2 gateways:
+
+```
+discovery-server-1 → AUTHORIZATION-SERVER=1, GATEWAY=2, USER-SERVICE=2, ...
+discovery-server-2 → GATEWAY=2, USER-SERVICE=1          ← sem AUTHORIZATION-SERVER
+```
+
+Todo gateway que buscasse o registry no `-2` respondia **503 em `/login`**
+(`No servers available for service: authorization-server`) — ou seja, o piso `ha` estava
+**quebrado pela metade**, com o sintoma dependendo de qual nó Eureka a réplica sorteasse.
+
+A correção é apontar para o par sempre. O custo é WARN de replicação no piso mínimo — **medido em
+~11 linhas/min** e deliberadamente **não silenciado**: é exatamente a mensagem que denuncia falha
+de replicação no piso `ha`, e suprimi-la esconderia esta classe de bug em vez de corrigi-la. A
+polaridade é o que importa: **um default errado quebra o sistema; um default barulhento só
+incomoda.** Quem roda o piso mínimo e quer silêncio faz opt-in explícito
+(`EUREKA_PEER_URL=http://discovery-server-1:9091/eureka`), seguro **só** com um nó.
+
+Lição transferível: "componente sobe healthy" não é evidência de que o cluster funciona. O
+`discovery-server-2` estava `healthy` o tempo todo, servindo um registry incompleto.
 
 ## Alternativas consideradas
 
