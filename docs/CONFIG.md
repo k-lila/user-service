@@ -26,7 +26,7 @@
 - **Default dev** é o valor embutido (no `*.yml` do config-server ou em `@Value` no código) quando a variável não é exportada.
 - Variáveis **sem default** são _fail-fast_: o app não sobe sem elas (o `docker-compose.yml` injeta um valor de dev).
 - A coluna **Serviço(s)** indica quem consome a variável.
-- **Compose base prod-safe + override de dev:** `docker-compose.yml` publica só a borda (`gateway:8081` e `interface`); `docker-compose.override.yml` (auto-carregado por `docker compose up`) republica as portas internas em dev. As URLs voltadas ao **browser** (front-channel/redirects) entram no compose como `${VAR:-localhost-default}` — em dev usam o default; em **prod** (`docker compose -f docker-compose.yml up`) um `.env` as sobrescreve com os hostnames públicos. Ver `.env.example`.
+- **Compose base prod-safe + override de dev:** `docker-compose.yml` **não publica porta nenhuma** no host — nem `gateway`, nem `interface` (G10/ADR-019; a asserção (e) do smoke-test de login verifica isso). Quem publica é o `docker-compose.override.yml` (auto-carregado por `docker compose up`, portas internas em dev) e o `docker-compose.deploy.yml` (só Grafana/Prometheus/Zipkin, presos a `127.0.0.1`; a borda pública chega pelo túnel). As URLs voltadas ao **browser** (front-channel/redirects) entram no compose como `${VAR:-localhost-default}` — em dev usam o default; em **prod** (`docker compose -f docker-compose.yml up`) um `.env` as sobrescreve com os hostnames públicos. Ver `.env.example`.
 - **Secrets sem default no config-server:** `AUTH_DB_USER`, `AUTH_DB_PASSWORD` e `OAUTH_CLIENT_SECRET` deixaram de ter default nos YAMLs servidos → ausência da env no cliente derruba a subida (mesma filosofia do `INTERNAL_API_TOKEN`).
 
 > **Uma variável só é ajustável se estiver declarada no compose.** Ter default no YAML do
@@ -448,6 +448,59 @@ não declara volume nomeado para ele, e o `VOLUME /data` da imagem gera um volum
 container, que o container seguinte não reaproveita. Sessão de login, cache e contadores de rate
 limit são perdidos — todo mundo precisa logar de novo. Isso vale para **qualquer** `down`, não é
 custo específico do encolhimento, mas é visível ao usuário e não deve ser confundido com falha.
+
+### Manobras de escala em deploy
+
+Em deploy, **todo** comando carrega os dois `-f` — sem eles o Compose auto-carrega o
+`docker-compose.override.yml` (portas de dev) e trata `cloudflared`/`assert-env` como órfãos. Os
+comandos abaixo assumem o atalho:
+
+```bash
+dcd() { docker compose -f docker-compose.yml -f docker-compose.deploy.yml "$@"; }
+```
+
+**Duas regras do Compose decidem o resultado de tudo o que segue** (medidas na v2.27):
+
+1. **`up -d` sem `--scale` devolve o serviço a 1.** Não é incremental: `--scale user-service=3`
+   seguido de um `up -d` qualquer deixa **uma** réplica.
+2. **`up -d` sem `--profile ha` não derruba os nós de redundância.** Eles continuam rodando, fora
+   do controle do comando — é daí que vêm os órfãos.
+
+Juntas: **todo `up` tem de carregar o estado desejado inteiro — profile _e_ scale.** Omitir um não
+significa "mantenha como está"; significa duas coisas diferentes, e nenhuma delas é essa.
+
+| # | Manobra | Comando | O que acontece |
+|---|---------|---------|----------------|
+| a | Subir o piso | `dcd up -d --build` | 19 serviços; `mongo-init`/`assert-env` saem com 0 |
+| a | Derrubar o piso | `dcd down` | Para tudo; **preserva** os volumes nomeados (Mongo/Postgres) |
+| b | Piso → redundância de dados | `dcd --profile ha up -d` | 26 serviços; o `rs0` cresce de 1 para 3 membros sozinho (`rs-reconcile.sh`) |
+| b | Redundância → piso | runbook acima, passos 1–2, e então `dcd --profile ha down` + `dcd up -d` | O `rs.remove` **antes** do `down` é o que impede o Mongo somente-leitura |
+| c | Piso → mais instâncias | `dcd up -d --scale user-service=3 --scale gateway=2` | Réplicas de aplicação; Eureka distribui em round-robin (~25s de convergência) |
+| c | Instâncias → piso | `dcd up -d` | Regra 1: **todos** os serviços voltam a 1 |
+| c | Derrubar réplicas de um serviço só | `dcd up -d --scale user-service=1` | Os demais `--scale` omitidos também voltam a 1 |
+| d | Redundância + instâncias | `dcd --profile ha up -d --scale user-service=3` | Os dois eixos são ortogonais e convivem |
+| d | Remover instâncias, manter a redundância | `dcd --profile ha up -d --scale user-service=1` | Sem o `--profile ha` os nós `ha` viram órfãos (regra 2) |
+| e | Instâncias + subir redundância | `dcd --profile ha up -d --scale user-service=3` | **Repetir o `--scale` é obrigatório** — sem ele o mesmo comando derruba as réplicas (regra 1) |
+| e | Remover a redundância, manter instâncias | runbook acima, passos 1–2, e então `dcd --profile ha down` + `dcd up -d --scale user-service=3` | O caminho verificado passa por `down`; o `--scale` no `up` traz as réplicas de volta |
+
+**Em deploy, `--scale` não tem restrição de porta.** A ressalva do início desta seção
+(`--scale` exige `-f docker-compose.yml`) é sobre **dev**: quem publica porta fixa é o override. A
+base não publica porta nenhuma, e no deploy os únicos `ports:` são `grafana`/`prometheus`/`zipkin`
+presos a `127.0.0.1` — esses três não escalam, o resto sim, inclusive `gateway` e `interface`.
+Eixos escaláveis na prática: os 4 apps Spring e o `config-server`. Antes de escalar o
+`authorization-server`, confira o teto de conexões em [Pools de conexão](#pools-de-conexão-tetos-de-escala).
+
+**Variante sem downtime para as linhas `b`/`e`** — remover só os containers de redundância, deixando
+o resto no ar:
+
+```bash
+dcd rm -sf mongo-2 mongo-3 redis-2 redis-3 redis-sentinel-2 redis-sentinel-3 discovery-server-2
+```
+
+Vale o mesmo pré-requisito (`rs.remove` e checagem do master do Redis antes), mas este caminho
+**não foi exercitado** — o verificado ponta a ponta, com preservação de dado medida, é o
+`down`/`up` da tabela. O `discovery-server-1` vai logar erro de replicação de peer até o próximo
+restart.
 
 > **Por que o `interface` saiu da classe do `config-lb`.** Os dois são nginx, mas têm papéis
 > opostos sob hostname único: o `config-lb` só balanceia duas instâncias de config-server na

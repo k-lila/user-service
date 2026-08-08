@@ -60,11 +60,14 @@ login-interface (React)
 │   ├── cloudflared/              #   ingress rules do named tunnel (versionadas)
 │   └── prometheus.yml            #   alvos de scrape
 ├── docs/                         # Documentação técnica detalhada
-├── docker-compose.yml            # Base prod-safe (publica só a borda)
+├── docker-compose.yml            # Base prod-safe (não publica NENHUMA porta no host)
 ├── docker-compose.override.yml   # Deltas de dev (republica portas internas; auto-carregado)
 ├── docker-compose.deploy.yml     # Overlay opcional — Cloudflare Tunnel
 └── .env.example                  # Template do .env (contrato de variáveis, comentado)
 ```
+
+> Árvore completa e anotada (pacotes, classes por camada, testes, `infra/`), junto da
+> arquitetura interna de cada serviço, em [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
 ---
 
@@ -114,12 +117,18 @@ docker compose down -v            # derrubar (incluindo volumes)
 
 Acesso: front-end em http://localhost:5173 · API em http://localhost:8081.
 
-Para um deploy **prod-like** (só a borda exposta, sem as portas de dev):
+Para a topologia **prod-safe** (sem as portas de dev):
 
 ```bash
 docker compose -f docker-compose.yml up -d --build   # ignora o override
 # URLs públicas via .env — ver o bloco comentado no .env.example
 ```
+
+> **Este comando sobe uma stack sem porta nenhuma no host.** Desde o G10 ([ADR-019](docs/adr/ADR-019-correcao-elos-login-hostname-unico.md))
+> a base não publica `gateway` nem `interface` — é exatamente o ponto dela. Serve para validar a
+> topologia (é o que o `compose-validate` do CI faz) e como base do overlay de deploy, que abre a
+> borda pelo túnel. Se você quer alcançar o sistema pelo browser, use `2a` (dev) ou `2b` (deploy);
+> aqui não há o que abrir sem publicar porta por conta própria.
 
 ### 2a-bis. Piso mínimo e crescimento (ADR-024)
 
