@@ -14,10 +14,12 @@
 
     {
       "type": "stat",
-      "title": "Nós UP",
+      "title": "Data nodes UP (piso 1 · ha 3)",
+      "description": "Separado dos sentinels pela porta no label `instance` (redis://host:porta, montado pelo relabel do exporter multi-target). O contador ANTIGO somava os seis e ficava verde só a partir de 6 — no piso mínimo do ADR-024, que tem 1 data node e 1 sentinel, o painel acendia vermelho permanente na topologia DEFAULT do projeto. Threshold vermelho só em 0: 1 nó é o piso, é estado válido, e o número no painel já diz se está em 1 ou 3.",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "count(redis_up == 1)"
+          "expr": "count(redis_up{instance=~\".*:6379\"} == 1)"
         }
       ],
       "fieldConfig": {
@@ -25,40 +27,65 @@
           "thresholds": {
             "steps": [
               { "color": "red", "value": null },
-              { "color": "yellow", "value": 4 },
-              { "color": "green", "value": 6 }
+              { "color": "green", "value": 1 }
             ]
           }
         }
       },
-      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 0, "y": 1, "w": 5, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Sentinels UP (piso 1 · ha 3)",
+      "description": "Os regexes de porta não se cruzam: o Prometheus ancora label matchers na string inteira, então `.*:6379` não casa com `...:26379` (o caractere anterior a 6379 é 2, não :).",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "count(redis_up{instance=~\".*:26379\"} == 1)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 5, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Masters monitorados (Sentinel)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "max(redis_sentinel_masters)"
         }
       ],
-      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 10, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Clientes conectados",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "sum(redis_connected_clients)"
         }
       ],
-      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 15, "y": 1, "w": 4, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Memória usada (total)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "sum(redis_memory_used_bytes)"
@@ -69,7 +96,7 @@
           "unit": "bytes"
         }
       },
-      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 19, "y": 1, "w": 5, "h": 4 }
     },
 
     {
@@ -80,6 +107,7 @@
     {
       "type": "timeseries",
       "title": "Memória usada por nó",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "redis_memory_used_bytes",
@@ -97,6 +125,7 @@
     {
       "type": "timeseries",
       "title": "Keyspace hit ratio",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "sum(rate(redis_keyspace_hits_total[5m])) / (sum(rate(redis_keyspace_hits_total[5m])) + sum(rate(redis_keyspace_misses_total[5m])))",
@@ -121,6 +150,7 @@
     {
       "type": "timeseries",
       "title": "Comandos processados/s",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "rate(redis_commands_processed_total[1m])",
@@ -138,6 +168,7 @@
     {
       "type": "timeseries",
       "title": "Clientes conectados por nó",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "redis_connected_clients",
@@ -155,6 +186,7 @@
     {
       "type": "timeseries",
       "title": "Réplicas conectadas (master)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "redis_connected_slaves",
@@ -167,6 +199,7 @@
     {
       "type": "timeseries",
       "title": "Master link up (réplicas)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "redis_master_link_up",
@@ -188,6 +221,7 @@
     {
       "type": "timeseries",
       "title": "Sentinel — sentinels/slaves OK",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "redis_sentinel_master_ok_sentinels",

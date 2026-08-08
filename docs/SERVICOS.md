@@ -52,7 +52,7 @@ rota `admin-service` do gateway — superfície sensível, poucos operadores esp
 
 | Método | Path                              | Auth       | Rate Limit | Descrição |
 | ------ | ---------------------------------- | ---------- | ---------- | --------- |
-| GET    | /v1/admin/users                    | ROLE_ADMIN | MED (5/s)  | Listagem completa incl. inativos, filtros opcionais `active`/`name`/`email`, paginada |
+| GET    | /v1/admin/users                    | ROLE_ADMIN | MED (5/s)  | Listagem completa incl. inativos, filtros opcionais `active`/`name`/`email`, paginada; audita `ADMIN_LIST_USERS` — **uma entrada por titular da página** (fix G13) |
 | GET    | /v1/admin/users/{id}               | ROLE_ADMIN | MED (5/s)  | Busca um titular por ID, incl. inativos (`AdminUserResponseDTO` com `roles`); audita `ADMIN_READ_USER` (ADR-016) |
 | GET    | /v1/admin/users/email/{email}      | ROLE_ADMIN | MED (5/s)  | Busca um titular por e-mail, incl. inativos; audita `ADMIN_READ_USER` (ADR-016) |
 | GET    | /v1/admin/users/{id}/audit-logs    | ROLE_ADMIN | MED (5/s)  | Trilha de auditoria LGPD de um titular específico, paginada |
@@ -278,7 +278,8 @@ Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetU
   timestamp: ISODate,        // quando a operação ocorreu
   action: String,            // REGISTER | UPDATE | SOFT_DELETE_ADMIN | HARD_DELETE_ADMIN
                              //   | SOFT_DELETE_SELF | HARD_DELETE_SELF | READ_INTERNAL_CREDENTIAL
-                             //   | ADMIN_READ_USER | ROLE_GRANT | ROLE_REVOKE | EMAIL_VERIFIED
+                             //   | ADMIN_READ_USER | ADMIN_LIST_USERS | ROLE_GRANT | ROLE_REVOKE
+                             //   | EMAIL_VERIFIED
                              //   | READ_CROSS_SUBJECT (legado/deprecated, ADR-016 — não mais emitido)
   actorType: String,         // USER | ADMIN | SYSTEM
   actorUserId: String,       // null quando SYSTEM
@@ -289,10 +290,15 @@ Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetU
 }
 ```
 
-> Leitura do próprio dado (`/me`, consulta ao próprio ID/email) **não** gera trilha. A listagem
-> (`GET /v1/users`) não é auditada (escopo inicial). Sem TTL — ver ADR-011. A consulta da trilha
-> via API existe desde o ADR-014: `GET /v1/admin/audit-logs` (feed geral) e
-> `GET /v1/admin/users/{id}/audit-logs` (por titular), ambos ADMIN-only e paginados.
+> Leitura do próprio dado (`/me`, consulta ao próprio ID/email) **não** gera trilha. Sem TTL — ver
+> ADR-011. A consulta da trilha via API existe desde o ADR-014: `GET /v1/admin/audit-logs` (feed
+> geral) e `GET /v1/admin/users/{id}/audit-logs` (por titular), ambos ADMIN-only e paginados.
+>
+> **`ADMIN_LIST_USERS` grava uma entrada por titular retornado** (fix G13, 2026-08-05), não uma
+> entrada agregada por requisição: com `targetUserId` nulo a listagem não apareceria no histórico
+> de titular algum — e "quem acessou o meu dado?" é a pergunta que a trilha existe para responder.
+> O custo é volume: uma página no teto (`MAX_AUDIT_PAGE_SIZE=100`) grava 100 entradas, num único
+> `insert` em lote, numa coleção que segue sem TTL. Página vazia não grava nada.
 
 ## Estratégia de cache (Redis)
 

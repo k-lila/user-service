@@ -12,6 +12,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -90,6 +91,19 @@ public class GlobalExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(
             HttpStatus.METHOD_NOT_ALLOWED, "Método não suportado");
         pd.setTitle("Method Not Allowed");
+        return pd;
+    }
+
+    // Path sem handler → 404, não 500. Mesma raiz do 405 acima: o catch-all Exception intercepta
+    // antes do DefaultHandlerExceptionResolver. O gatilho concreto é "/actuator/**", que continua
+    // no permitAll() do SecurityConfig (ver o comentário lá) mas deixou de ser mapeado na porta de
+    // tráfego quando o actuator foi para a 8181 (gap G14): o request atravessa a segurança, não
+    // acha recurso e virava 500 + stack trace em ERROR a cada healthcheck errado ou scanner.
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ProblemDetail handleNoResourceFound(NoResourceFoundException e) {
+        LOGGER.warn("| 404 | recurso inexistente | {}", e.getResourcePath());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "Recurso não encontrado");
+        pd.setTitle("Not Found");
         return pd;
     }
 

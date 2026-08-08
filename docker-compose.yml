@@ -11,10 +11,26 @@ x-healthcheck: &hc
   retries: 25
 
 # Perfis de recurso (cpus / mem_limit / mem_reservation). Racional em docs/CONFIG.md.
-x-res-app: &res-app # apps Spring + nós Mongo
+x-res-app: &res-app # nós Mongo (os apps Spring usam *res-jvm — ver abaixo)
   cpus: 1.0
   mem_limit: 1024m
   mem_reservation: 512m
+# Perfil dos 4 apps Spring, SEPARADO do *res-app de propósito: com cpus 1.0 a JVM enxerga
+# "Effective CPU Count = 1" e a ergonomia a classifica como *client-class machine*, escolhendo
+# UseSerialGC (stop-the-world, thread única). O G1 forçado em JAVA_TOOL_OPTIONS (ver
+# x-spring-app-env) só rende se houver core sobrando para a marcação concorrente — daí 2.0.
+# Também alivia o throttling do CFS (1.0 = 25ms de CPU por período de 100ms), que era a outra
+# metade das caudas de latência. Não fundir de volta com *res-app: os nós Mongo não precisam
+# disso e o bump dobraria a quota deles sem motivo.
+x-res-jvm: &res-jvm # apps Spring (auth-server / user-service / notification / gateway)
+  # Parametrizado para o eixo replicável (ADR-024): estes números foram calibrados para UM
+  # processo por serviço, e valem POR RÉPLICA. Num host de 12 vCPU / 15 GB, seis réplicas a
+  # cpus 2.0 e mem_reservation 512m não cabem. Os defaults preservam exatamente o comportamento
+  # anterior — o knob existe para quem escala, e baixar para ~1.5 mantém a JVM fora do
+  # UseSerialGC (ver o racional acima, que continua valendo por réplica).
+  cpus: ${APP_CPUS:-2.0}
+  mem_limit: ${APP_MEM_LIMIT:-1024m}
+  mem_reservation: ${APP_MEM_RESERVATION:-512m}
 x-res-mid: &res-mid # config-server / discovery / postgres
   cpus: 0.75
   mem_limit: 512m
@@ -47,6 +63,30 @@ x-spring-app-env: &spring-app-env
   MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
   REDIS_SENTINEL_MASTER: mymaster
   REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+  # Coletor e heap EXPLÍCITOS: sem estes flags a JVM decide sozinha e decide mal em container
+  # pequeno (SerialGC + heap de 25% = 256MiB). MaxRAMPercentage 60 e não 70: o overhead
+  # non-heap medido (metaspace + code cache + stacks + buffers) é ~150MiB, e 70% de 1024MiB
+  # deixaria o total a ~870MiB de um teto de 1024MiB — margem fina demais para OOM kill.
+  JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:+UseG1GC -XX:MaxRAMPercentage=60}
+  # Amostragem de tracing. O default 1.0 preserva o comportamento de dev; em deploy exporte
+  # 0.1 no .env — a 100% o Zipkin (storage `mem`, 512MiB) satura antes da aplicação.
+  MANAGEMENT_TRACING_SAMPLING_PROBABILITY: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+  # ── Knobs lidos por 2+ apps. Ficam aqui, e não por-serviço, justamente porque o valor tem de
+  # ser o MESMO nos serviços que os leem — TOKEN_REVOCATION_KEY_PREFIX em especial: gateway,
+  # auth-server e user-service compartilham a chave de revogação no Redis, e um prefixo divergente
+  # faz a revogação silenciosamente não pegar (ADR-017).
+  #
+  # ATENÇÃO ao mexer aqui e nos blocos por-serviço abaixo: o default do compose ESPELHA o default
+  # do YAML do config-server e os dois têm de continuar iguais. Nunca escreva `${VAR:-}` — o
+  # default vazio injeta string vazia no container e SOBRESCREVE o default do YAML, em vez de
+  # deixá-lo valer. Foi a ausência dessas linhas que manteve 19 variáveis documentadas no
+  # docs/CONFIG.md inertes: sem `env_file` e fora de todo `environment:`, setá-las no .env não
+  # chegava a container nenhum.
+  TOKEN_REVOCATION_ENABLED: ${TOKEN_REVOCATION_ENABLED:-true}
+  TOKEN_REVOCATION_KEY_PREFIX: "${TOKEN_REVOCATION_KEY_PREFIX:-revoke:user:}"
+  SESSION_TIMEOUT: ${SESSION_TIMEOUT:-30m}
+  # Fonte de IP do rate limiting e do lockout (ADR-010). Trocar em deploy não-Cloudflare.
+  TRUSTED_CLIENT_IP_HEADER: ${TRUSTED_CLIENT_IP_HEADER:-CF-Connecting-IP}
 
 # Template comum dos 3 nós Mongo: o entrypoint faz copy-to-/tmp do keyfile (o RS exige keyfile
 # 400/owner mongo) antes do mongod. O volume de dados e — só no mongo-1 — as credenciais root
@@ -170,11 +210,18 @@ services:
     restart: unless-stopped
 
   # ──────────────────────────────────────────────
-  # Config Server HA (2 instâncias + nginx LB)
+  # Config Server — eixo REPLICÁVEL (ADR-024): 1 instância no piso, N por --scale
   # ──────────────────────────────────────────────
 
-  # config-server-2 é idêntico: aliasa a âncora inteira (<<: *config-server).
-  config-server-1: &config-server
+  # Serviço ÚNICO e escalável, e não mais o par nomeado config-server-1/config-server-2.
+  # Por que mudou (ADR-024): sendo stateless (qualquer instância serve o mesmo
+  # classpath:/config), o config-server pertence ao eixo replicável — quantidade é
+  # `--scale config-server=N`, não linha nova no compose. O par nomeado custava duas coisas:
+  #   (a) BLOQUEAVA O PISO MÍNIMO — o `upstream` estático do config-lb listava os dois nomes, e
+  #       o nginx recusa iniciar se um deles não resolve ("host not found in upstream");
+  #   (b) passar de 2 exigia editar arquivo, em vez de um argumento de linha de comando.
+  # NÃO acrescente container_name nem ports: aqui — qualquer um dos dois quebra o --scale.
+  config-server:
     build: ./config-server
     <<: *res-mid
     environment:
@@ -190,19 +237,15 @@ services:
     stop_grace_period: 35s
     restart: unless-stopped
 
-  config-server-2:
-    <<: *config-server
-
   config-lb:
     image: nginx:alpine
     <<: *res-tiny
     # Sem ports: em prod — config-server não publicado (G3). Republicado em dev no override.
     volumes:
       - ./infra/config-lb/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    # Uma entrada só: com --scale, o Compose espera TODAS as réplicas ficarem healthy.
     depends_on:
-      config-server-1:
-        condition: service_healthy
-      config-server-2:
+      config-server:
         condition: service_healthy
     healthcheck:
       <<: *hc
@@ -226,7 +269,25 @@ services:
       <<: *spring-config
       SERVER_PORT: 9091
       EUREKA_HOSTNAME: discovery-server-1
-      EUREKA_PEER_URL: http://discovery-server-2:9092/eureka
+      # Aponta para o PAR, não para si mesmo — e isso é obrigatório, não preferência.
+      #
+      # A tentação (ADR-024, corrigida na verificação) é auto-referenciar no piso mínimo para não
+      # registrar falha de replicação contra um peer que não existe, deixando o discovery-server-2
+      # apontar para cá e se manter atualizado por fetch. NÃO FUNCIONA: o fetch client-side de um
+      # servidor Eureka popula o cache que ele usa como CLIENTE, não o registry que ele SERVE a
+      # terceiros. Medido: com a auto-referência, o discovery-server-2 servia um registry sem
+      # AUTHORIZATION-SERVER, e todo gateway que buscasse nele respondia 503 em /login
+      # ("No servers available for service: authorization-server"). Replicação de peer no Eureka é
+      # push; sem esta linha, o nó 2 nunca recebe o push.
+      #
+      # O custo é WARN de replicação no piso mínimo, onde o peer não existe: MEDIDO em ~11
+      # linhas/min (ReplicationTaskProcessor + RetryableEurekaHttpClient). Deliberadamente NÃO
+      # silenciado — é exatamente a mensagem que denuncia falha de replicação no piso `ha`, e
+      # suprimi-la esconderia o bug acima em vez de corrigi-lo. A polaridade importa: o default
+      # errado quebra o sistema, o default barulhento só incomoda. Quem roda o piso mínimo e quer
+      # silêncio faz opt-in explícito: EUREKA_PEER_URL=http://discovery-server-1:9091/eureka
+      # (auto-referência) — seguro SÓ com um nó, e catastrófico com dois.
+      EUREKA_PEER_URL: ${EUREKA_PEER_URL:-http://discovery-server-2:9092/eureka}
     secrets:
       - CONFIG_SERVER_PASSWORD
     healthcheck:
@@ -235,8 +296,11 @@ services:
     stop_grace_period: 35s
     restart: unless-stopped
 
+  # Só com --profile ha (ADR-024). Réplica NOMEADA, não replicável por --scale: peers Eureka
+  # precisam de identidade (EUREKA_HOSTNAME) e porta próprias.
   discovery-server-2:
     <<: *discovery
+    profiles: ["ha"]
     environment:
       <<: *spring-config
       SERVER_PORT: 9092
@@ -262,14 +326,19 @@ services:
     secrets:
       - MONGO_PASSWORD
 
+  # mongo-2/3 só existem com --profile ha (ADR-024). O piso mínimo roda rs0 com UM membro —
+  # replica set degenerado, e não Mongo standalone, para que a MONGODB_URI dos clientes
+  # (replicaSet=rs0) seja IDÊNTICA nos dois extremos. Crescer não reconfigura cliente nenhum.
   mongo-2:
     <<: *mongo-node
+    profiles: ["ha"]
     volumes:
       - ./infra/mongo/keyfile:/tmp/keyfile:ro
       - mongo_2_data:/data/db
 
   mongo-3:
     <<: *mongo-node
+    profiles: ["ha"]
     volumes:
       - ./infra/mongo/keyfile:/tmp/keyfile:ro
       - mongo_3_data:/data/db
@@ -278,28 +347,26 @@ services:
     image: mongo:8.2
     cpus: 0.5
     mem_limit: 256m
+    # SÓ mongo-1: a invariante de profile do ADR-024 é que nenhum serviço fora do profile pode
+    # depender de um serviço dentro dele (o comportamento de depends_on → serviço com profile
+    # inativo variou entre versões do Compose; obedecer à regra torna a questão irrelevante).
+    # Se mongo-2/3 ainda não estiverem prontos no primeiro ciclo, o restart: on-failure repete.
     depends_on:
       mongo-1:
         condition: service_healthy
-      mongo-2:
-        condition: service_healthy
-      mongo-3:
-        condition: service_healthy
     secrets:
       - MONGO_PASSWORD
-    # Senha lida do secret em runtime ($$ → $ no container). Usuário (não-segredo) vem do .env.
-    entrypoint:
-      - bash
-      - -c
-    # Folded scalar (>): TODAS as linhas com a MESMA indentação que `mongosh` — assim o YAML
-    # dobra as quebras em espaços e o bash -c recebe UM comando só (linha mais indentada vira
-    # newline literal e quebraria a invocação em comandos soltos).
-    command:
-      - >
-        mongosh --host mongo-1:27017
-        -u ${MONGO_USER} -p "$$(cat /run/secrets/MONGO_PASSWORD)"
-        --authenticationDatabase admin
-        --eval "try { rs.initiate({ _id: 'rs0', members: [ {_id: 0, host: 'mongo-1:27017'}, {_id: 1, host: 'mongo-2:27017'}, {_id: 2, host: 'mongo-3:27017'} ] }); print('Replica set iniciado'); } catch(e) { if (e.codeName === 'AlreadyInitialized') print('Replica set ja iniciado'); else throw e; }"
+    environment:
+      # Senha vem do secret (lida pelo script); o usuário não é segredo e vem do .env.
+      MONGO_USER: ${MONGO_USER}
+    volumes:
+      # Mount :ro simples é adequado AQUI porque o script não é reescrito em runtime — o padrão
+      # copy-to-/tmp vale para config que o próprio processo muta (sentinel.conf, keyfile).
+      - ./infra/mongo/rs-reconcile.sh:/opt/rs-reconcile.sh:ro
+    # Reconciliador idempotente: initiate se novo, rs.reconfig aditivo se já iniciado. Descobre
+    # os membros por DNS, então --profile ha sozinho faz o replica set crescer. Ver o cabeçalho
+    # do script para o racional completo.
+    entrypoint: ["bash", "/opt/rs-reconcile.sh"]
     restart: on-failure
 
   # ──────────────────────────────────────────────
@@ -311,8 +378,12 @@ services:
     command:
       - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)"
 
+  # redis-2/3 e sentinel-2/3 só existem com --profile ha (ADR-024). O piso mínimo mantém o
+  # Sentinel (com um nó) em vez de falar direto com o Redis: assim spring.data.redis.sentinel.*
+  # dos clientes — e a invariante das DUAS senhas do ADR-008 — valem sem emenda nos dois extremos.
   redis-2:
     <<: *redis-node
+    profiles: ["ha"]
     command:
       - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)" --replicaof redis-1 6379
     depends_on:
@@ -321,6 +392,7 @@ services:
 
   redis-3:
     <<: *redis-node
+    profiles: ["ha"]
     command:
       - exec redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)" --masterauth "$$(cat /run/secrets/REDIS_PASSWORD)" --replicaof redis-1 6379
     depends_on:
@@ -346,12 +418,10 @@ services:
       - REDIS_PASSWORD
     volumes:
       - ./infra/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+    # SÓ redis-1 (invariante de profile do ADR-024, ver mongo-init). Esperar pelas réplicas nunca
+    # foi necessário: o Sentinel descobre réplicas sozinho, pelo INFO do master.
     depends_on:
       redis-1:
-        condition: service_healthy
-      redis-2:
-        condition: service_healthy
-      redis-3:
         condition: service_healthy
     healthcheck:
       <<: *hc
@@ -360,9 +430,11 @@ services:
 
   redis-sentinel-2:
     <<: *redis-sentinel
+    profiles: ["ha"]
 
   redis-sentinel-3:
     <<: *redis-sentinel
+    profiles: ["ha"]
 
   # ──────────────────────────────────────────────
   # PostgreSQL (estado OAuth — sem SPOF identificado)
@@ -391,22 +463,19 @@ services:
 
   authorization-server:
     build: ./authorization-server
-    <<: *res-app
+    <<: *res-jvm
     # Sem ports: em prod. O front-channel (browser → /oauth2/authorize, /login, /connect/logout)
     # é exposto pelo reverse-proxy de TLS/ingress (G1) num hostname dedicado (ex.: auth.<dominio>),
     # restrito a esses paths — não pela publicação da porta inteira. Em dev, o override republica 8082.
+    # Só os nós do piso mínimo (invariante de profile do ADR-024): nenhum serviço fora do
+    # profile `ha` pode declarar depends_on para um serviço dentro dele. Um discovery e um
+    # sentinel bastam para subir; os nós do profile entram em cena sozinhos quando existem.
     depends_on:
       discovery-server-1:
-        condition: service_healthy
-      discovery-server-2:
         condition: service_healthy
       auth-postgres:
         condition: service_healthy
       redis-sentinel-1:
-        condition: service_healthy
-      redis-sentinel-2:
-        condition: service_healthy
-      redis-sentinel-3:
         condition: service_healthy
     environment:
       # *spring-app-env traz CONFIG_SERVER_URL/USERNAME, SPRING_CONFIG_IMPORT (configtree + config-lb),
@@ -426,9 +495,25 @@ services:
       OAUTH_CLIENT_POST_LOGOUT_URIS: ${OAUTH_CLIENT_POST_LOGOUT_URIS:-http://localhost:5173/}
       AUTH_DB_URL: jdbc:postgresql://auth-postgres:5432/authdb
       AUTH_DB_USER: ${POSTGRES_USER}
+      # Conexões JDBC por réplica (ADR-024). Espelha o default do authorization-server.yml.
+      # N réplicas × este valor tem de caber no max_connections do Postgres (default 100).
+      AUTH_DB_POOL_SIZE: ${AUTH_DB_POOL_SIZE:-8}
       # Chave de assinatura JWT via Docker secret (0.1) — fora do repo e do .env.
       JWK_PRIVATE_KEY: file:/run/secrets/jwk_private
       JWK_PUBLIC_KEY: file:/run/secrets/jwk_public
+      # `kid` do par RSA. Estável de propósito (ADR-005) — trocar invalida os JWTs em circulação.
+      JWK_KEY_ID: ${JWK_KEY_ID:-user-service-key}
+      # Lockout anti-brute-force por par (conta, IP) — ADR-010.
+      LOCKOUT_MAX_ATTEMPTS: ${LOCKOUT_MAX_ATTEMPTS:-5}
+      LOCKOUT_DURATION: ${LOCKOUT_DURATION:-15m}
+      # Carência do gate de e-mail verificado no login, contada da data de cadastro (ADR-015):
+      # evita conta permanentemente inacessível se o e-mail nunca chegar.
+      EMAIL_VERIFICATION_GRACE_PERIOD: ${EMAIL_VERIFICATION_GRACE_PERIOD:-24h}
+      # Purga do estado OAuth expirado (ADR-022). Sem ela a tabela oauth2_authorization cresce
+      # uma linha por login, para sempre — o SAS nunca apaga nenhuma.
+      OAUTH_STATE_PURGE_INTERVAL: ${OAUTH_STATE_PURGE_INTERVAL:-6h}
+      OAUTH_STATE_PURGE_GRACE: ${OAUTH_STATE_PURGE_GRACE:-1d}
+      OAUTH_STATE_PURGE_BATCH_SIZE: ${OAUTH_STATE_PURGE_BATCH_SIZE:-500}
     secrets:
       - CONFIG_SERVER_PASSWORD
       - OAUTH_CLIENT_SECRET
@@ -441,33 +526,26 @@ services:
       - jwk_public
     healthcheck:
       <<: *hc
-      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      # Actuator do auth-server vive na porta de management interna (8181), não na 8082.
+      test: ["CMD", "curl", "-f", "http://localhost:8181/actuator/health"]
     stop_grace_period: 35s
     restart: unless-stopped
 
   user-service:
     build: ./user-service
-    <<: *res-app
+    <<: *res-jvm
     # Sem ports: em prod — acesso só via gateway (G2: 8090 direto contorna rate limit/CORS).
     # Republicado em dev no override.
+    # Só os nós do piso mínimo (invariante de profile do ADR-024, ver auth-server). O gate real
+    # continua sendo mongo-init: ele é quem garante que rs0 está formado — com 1 ou 3 membros.
     depends_on:
       discovery-server-1:
         condition: service_healthy
-      discovery-server-2:
-        condition: service_healthy
       mongo-1:
-        condition: service_healthy
-      mongo-2:
-        condition: service_healthy
-      mongo-3:
         condition: service_healthy
       mongo-init:
         condition: service_completed_successfully
       redis-sentinel-1:
-        condition: service_healthy
-      redis-sentinel-2:
-        condition: service_healthy
-      redis-sentinel-3:
         condition: service_healthy
     environment:
       # *spring-app-env (ver auth-server). O configtree injeta os segredos do user-service:
@@ -475,10 +553,30 @@ services:
       <<: *spring-app-env
       SERVER_PORT: 8090
       MONGODB_DATABASE: user-db
+      # Teto de conexões Mongo por réplica (ADR-024). Espelha o default do user-service.yml.
+      MONGO_MAX_POOL_SIZE: ${MONGO_MAX_POOL_SIZE:-50}
       AUTH_ISSUER_URI: http://authorization-server:8082
       AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
       AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
+      # Versão dos termos gravada em cada cadastro (ADR-012). BUMPE quando a política mudar: é o
+      # que prova qual texto cada titular aceitou e permite exigir re-consentimento.
+      TERMS_VERSION: ${TERMS_VERSION:-v1}
+      # Retenção da trilha de auditoria LGPD (ADR-022). Vale para as entradas gravadas daqui em
+      # diante; as anteriores a esta mudança não têm purgeAt e nunca expiram.
+      AUDIT_LOG_RETENTION: ${AUDIT_LOG_RETENTION:-180d}
+      # TTL do epoch de revogação por usuário no Redis (ADR-017). Deve cobrir a validade máxima
+      # de um access token, senão o epoch expira antes do token que ele deveria barrar.
+      TOKEN_REVOCATION_TTL: ${TOKEN_REVOCATION_TTL:-75m}
+      # Verificação de e-mail (ADR-015): TTL do token, limite de reenvio por conta e retenção do
+      # outbox. As três chaves RETRY_* governam a varredura do OutboxRetryService.
+      EMAIL_VERIFICATION_TOKEN_TTL: ${EMAIL_VERIFICATION_TOKEN_TTL:-15m}
+      EMAIL_VERIFICATION_RESEND_MAX: ${EMAIL_VERIFICATION_RESEND_MAX:-3}
+      EMAIL_VERIFICATION_RESEND_WINDOW: ${EMAIL_VERIFICATION_RESEND_WINDOW:-1h}
+      EMAIL_VERIFICATION_OUTBOX_RETENTION: ${EMAIL_VERIFICATION_OUTBOX_RETENTION:-30d}
+      EMAIL_VERIFICATION_RETRY_INTERVAL: ${EMAIL_VERIFICATION_RETRY_INTERVAL:-5m}
+      EMAIL_VERIFICATION_RETRY_BACKOFF: ${EMAIL_VERIFICATION_RETRY_BACKOFF:-15m}
+      EMAIL_VERIFICATION_RETRY_MAX_ATTEMPTS: ${EMAIL_VERIFICATION_RETRY_MAX_ATTEMPTS:-5}
     secrets:
       - CONFIG_SERVER_PASSWORD
       - REDIS_PASSWORD
@@ -486,7 +584,8 @@ services:
       - MONGODB_URI
     healthcheck:
       <<: *hc
-      test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
+      # Actuator do user-service vive na porta de management interna (8181), não na 8090.
+      test: ["CMD", "curl", "-f", "http://localhost:8181/actuator/health"]
     stop_grace_period: 35s
     restart: unless-stopped
 
@@ -497,15 +596,22 @@ services:
   # cadastro), e este serviço também não depende do user-service.
   notification-service:
     build: ./notification-service
-    <<: *res-app
+    <<: *res-jvm
+    # Só o discovery do piso mínimo (invariante de profile do ADR-024, ver auth-server).
     depends_on:
       discovery-server-1:
-        condition: service_healthy
-      discovery-server-2:
         condition: service_healthy
     environment:
       <<: *spring-app-env
       SERVER_PORT: 8095
+      # Remetente exibido nos e-mails de verificação. Os demais SMTP_* (host/porta/credenciais)
+      # chegam por Docker secret via configtree — estes três timeouts, não: são de socket, não
+      # segredo, e sem eles o default do Jakarta Mail é INFINITO (thread do Tomcat presa para
+      # sempre num SMTP travado). Valores em ms.
+      APP_MAIL_FROM: ${APP_MAIL_FROM:-no-reply@users.local}
+      SMTP_CONNECTION_TIMEOUT: ${SMTP_CONNECTION_TIMEOUT:-10000}
+      SMTP_READ_TIMEOUT: ${SMTP_READ_TIMEOUT:-10000}
+      SMTP_WRITE_TIMEOUT: ${SMTP_WRITE_TIMEOUT:-10000}
     secrets:
       - CONFIG_SERVER_PASSWORD
       - INTERNAL_API_TOKEN
@@ -518,30 +624,28 @@ services:
       - SMTP_SSL_ENABLE
     healthcheck:
       <<: *hc
-      test: ["CMD", "curl", "-f", "http://localhost:8095/actuator/health"]
+      # Actuator do notification-service vive na porta de management interna (8181),
+      # não na 8095. Este health fica 503 enquanto o SMTP for placeholder
+      # (MailHealthIndicator) — sintoma conhecido, ninguém depende do health dele.
+      test: ["CMD", "curl", "-f", "http://localhost:8181/actuator/health"]
     stop_grace_period: 35s
     restart: unless-stopped
 
   gateway:
     build: ./gateway
-    <<: *res-app
+    <<: *res-jvm
     # ports: movido para docker-compose.override.yml (G10 / ADR-019).
     # Na base prod-safe o gateway NÃO é publicado no host — apenas o nginx do SPA
     # (via cloudflared) alcança gateway:8081 pela rede interna Docker.
+    # Só os nós do piso mínimo (invariante de profile do ADR-024, ver auth-server).
     depends_on:
       discovery-server-1:
-        condition: service_healthy
-      discovery-server-2:
         condition: service_healthy
       authorization-server:
         condition: service_healthy
       user-service:
         condition: service_healthy
       redis-sentinel-1:
-        condition: service_healthy
-      redis-sentinel-2:
-        condition: service_healthy
-      redis-sentinel-3:
         condition: service_healthy
     environment:
       # *spring-app-env (ver auth-server). O configtree injeta os segredos do gateway:
@@ -563,6 +667,11 @@ services:
       AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
       AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
+      # Regex (ancorada, Pattern.matches) do peer imediato aceito como proxy confiável. Sem esta
+      # propriedade o SCG 5.0.0 não registra XForwardedHeadersFilter/ForwardedHeadersFilter
+      # (ADR-019). Aspas SIMPLES no YAML: o valor tem `\.`, que em aspas duplas o YAML leria como
+      # escape inválido. Seguro só com G10 fechado (gateway não publicado na base).
+      GATEWAY_TRUSTED_PROXIES: '${GATEWAY_TRUSTED_PROXIES:-10\..*|172\.(1[6-9]|2[0-9]|3[01])\..*|192\.168\..*}'
     secrets:
       - CONFIG_SERVER_PASSWORD
       - OAUTH_CLIENT_SECRET
@@ -579,7 +688,21 @@ services:
       context: ./login-interface
       args:
         VITE_API_URL: ""
-    <<: *res-tiny
+    # NÃO usa *res-tiny: sob hostname único este nginx é o funil de 100% do tráfego público
+    # (o túnel entrega aqui, não no gateway), e era o componente de MENOR quota do compose —
+    # 0.25 CPU para o único salto que toda requisição atravessa.
+    cpus: 1.0
+    mem_limit: 128m
+    mem_reservation: 64m
+    environment:
+      # Aciona /docker-entrypoint.d/30-tune-worker-processes.sh da imagem oficial: ele lê a
+      # quota de CPU do cgroup e reescreve `worker_processes` de acordo. Sem isto vale o
+      # `auto` do nginx.conf, que conta as CPUs do HOST e ignora a quota — medidos 12 workers
+      # disputando uma fração de núcleo, puro custo de troca de contexto.
+      # Derivar da quota (em vez de fixar um número) mantém os dois em sincronia se o `cpus`
+      # acima mudar. NÃO passe worker_processes via `-g` no CMD: o nginx.conf base já declara
+      # a diretiva e o nginx aborta com "directive is duplicate".
+      NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE: "1"
     # ports: movido para docker-compose.override.yml (G10 / ADR-019).
     # Na base prod-safe a interface NÃO é publicada no host — o cloudflared alcança
     # interface:80 pela rede interna Docker. Em dev o override republica via WEB_HOST_PORT.
@@ -599,12 +722,10 @@ services:
     command:
       - --collect-all
       - --discovering-mode
+    # Só mongo-1 + o init (invariante de profile do ADR-024). O --discovering-mode do exporter
+    # descobre os demais membros do rs0 sozinho, quando existirem.
     depends_on:
       mongo-1:
-        condition: service_healthy
-      mongo-2:
-        condition: service_healthy
-      mongo-3:
         condition: service_healthy
       mongo-init:
         condition: service_completed_successfully
@@ -638,12 +759,10 @@ services:
       - --redis.password-file=/run/secrets/redis_exporter_json
     secrets:
       - redis_exporter_json
+    # Só redis-1 (invariante de profile do ADR-024). O exporter é multi-target por /scrape: os
+    # alvos vêm do Prometheus, e os do profile `ha` simplesmente reportam down enquanto não sobem.
     depends_on:
       redis-1:
-        condition: service_healthy
-      redis-2:
-        condition: service_healthy
-      redis-3:
         condition: service_healthy
     restart: unless-stopped
 

@@ -1,5 +1,6 @@
 package com.users.userservice.services;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -7,6 +8,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -35,9 +37,13 @@ public class AuditService {
     private static final String USER = "USER";
 
     private final IAuditLogRepository auditLogRepository;
+    private final Duration retention;
 
-    public AuditService(IAuditLogRepository auditLogRepository) {
+    public AuditService(
+            IAuditLogRepository auditLogRepository,
+            @Value("${app.audit.retention:180d}") Duration retention) {
         this.auditLogRepository = auditLogRepository;
+        this.retention = retention;
     }
 
     /** Auto-registro: não há JWT (endpoint público); o ator é o próprio usuário criado. */
@@ -74,6 +80,35 @@ public class AuditService {
         persist(log);
     }
 
+    /**
+     * Leitura em massa por um usuário autenticado: grava <b>uma entrada por titular</b> alcançado,
+     * num único {@code insert} em lote. Uma entrada agregada (com {@code targetUserId} nulo) não
+     * apareceria no histórico de titular algum — que é justamente a consulta que a trilha existe
+     * para responder.
+     */
+    @Async("auditExecutor")
+    public void recordBulkFromJwt(AuditAction action, Jwt actor, List<AuditTarget> targets) {
+        if (targets.isEmpty()) {
+            return;
+        }
+        Set<String> roles = rolesOf(actor);
+        String actorType = roles.contains(ADMIN) ? ADMIN : USER;
+        String actorUserId = actor != null ? actor.getClaimAsString("userID") : null;
+
+        List<AuditLog> logs = targets.stream().map(target -> {
+            AuditLog log = base(action, target.userId(), target.email());
+            log.setActorType(actorType);
+            log.setActorUserId(actorUserId);
+            log.setActorRoles(roles);
+            return log;
+        }).toList();
+
+        persistAll(logs);
+    }
+
+    /** Titular alcançado por uma leitura em massa. O e-mail é mascarado na montagem do registro. */
+    public record AuditTarget(String userId, String email) {}
+
     /** Operação pelo canal interno (auth-server): ator SYSTEM, sem JWT. */
     @Async("auditExecutor")
     public void recordSystem(AuditAction action, String targetUserId, String targetEmail) {
@@ -84,7 +119,10 @@ public class AuditService {
 
     private AuditLog base(AuditAction action, String targetUserId, String targetEmail) {
         AuditLog log = new AuditLog();
-        log.setTimestamp(Instant.now());
+        Instant now = Instant.now();
+        log.setTimestamp(now);
+        // Retenção decidida na escrita (ADR-022) — o índice TTL é expire-at, ver AuditLog.purgeAt.
+        log.setPurgeAt(now.plus(retention));
         log.setAction(action);
         log.setTargetUserId(targetUserId);
         log.setTargetEmail(targetEmail != null ? LogUtils.maskEmail(targetEmail) : null);
@@ -109,6 +147,20 @@ public class AuditService {
                 "| AUDIT | falha ao gravar trilha | ação: {}, target: {}",
                 log.getAction(),
                 log.getTargetUserId(),
+                e
+            );
+        }
+    }
+
+    private void persistAll(List<AuditLog> logs) {
+        try {
+            auditLogRepository.insert(logs);
+        } catch (RuntimeException e) {
+            // Isolamento de falha: a auditoria nunca derruba a operação de negócio.
+            LOGGER.error(
+                "| AUDIT | falha ao gravar trilha em lote | ação: {}, entradas: {}",
+                logs.get(0).getAction(),
+                logs.size(),
                 e
             );
         }

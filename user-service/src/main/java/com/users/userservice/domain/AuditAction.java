@@ -31,6 +31,13 @@ public enum AuditAction {
     READ_CROSS_SUBJECT,
     /** Leitura administrativa de um titular por id/e-mail (AdminController, ADR-016 — fix G1). */
     ADMIN_READ_USER,
+    /**
+     * Leitura administrativa em massa via listagem paginada (AdminController — fix G13).
+     * Emitida <b>uma vez por titular retornado na página</b>, e não uma vez por requisição:
+     * é o que faz a listagem aparecer no histórico de cada titular
+     * ({@code GET /v1/admin/users/{id}/audit-logs}), respondendo "quem acessou o meu dado?".
+     */
+    ADMIN_LIST_USERS,
     /** Concessão da role ADMIN a um titular (AdminController, ADR-014). */
     ROLE_GRANT,
     /** Revogação da role ADMIN de um titular (AdminController, ADR-014). */

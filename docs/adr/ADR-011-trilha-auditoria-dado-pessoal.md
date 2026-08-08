@@ -76,8 +76,13 @@ trace completo, inclusive ao log de borda do gateway, que é onde o IP real do c
   - **Sem endpoint de consulta** — a trilha se lia via acesso direto ao Mongo por ora (decisão de
     escopo original). Endereçado por [ADR-014](ADR-014-admin-controller-gestao-roles-auditoria.md):
     `GET /v1/admin/audit-logs` e `GET /v1/admin/users/{id}/audit-logs`, ADMIN-only, paginados.
-  - **Sem retenção/TTL** definido — a coleção cresce indefinidamente (política de retenção é trabalho
-    futuro, sensível à própria LGPD: minimização vs. prova de auditoria).
+  - ~~**Sem retenção/TTL** definido — a coleção cresce indefinidamente (política de retenção é trabalho
+    futuro, sensível à própria LGPD: minimização vs. prova de auditoria).~~
+    **Resolvido — ver [ADR-022](ADR-022-higiene-estado-persistente.md).** Retenção de 180 dias
+    (`app.audit.retention`) gravada por documento em `auditLogs.purgeAt`, com índice TTL *expire-at*,
+    mais o índice `ts_idx` que o feed geral exigia. A dívida foi contraída quando cada operação
+    gravava uma entrada; o fix do **G13** passou a gravar até 100 por requisição, e a premissa
+    deixou de valer. Entradas anteriores à mudança não têm `purgeAt` e nunca expiram.
 - **Consumidores afetados:** `UserController` e `InternalUserController` ganham dependência de
   `AuditService` e (nos reads/admin-deletes) o `@AuthenticationPrincipal Jwt`. Nenhuma mudança de
   contrato externo (mesmos endpoints/respostas).

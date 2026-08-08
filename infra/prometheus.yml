@@ -5,14 +5,40 @@ scrape_configs:
   - job_name: "microservices"
     metrics_path: "/actuator/prometheus"
 
+    # Porta 8181 = porta de management (management.server.port), não a porta de
+    # tráfego do serviço. O actuator saiu da porta pública nos quatro (gap G14);
+    # esta porta não é publicada no host, só alcançável pela rede Docker interna.
+    #
+    # DESCOBERTA POR DNS (ADR-024) para os quatro apps de domínio, que são o eixo replicável.
+    # Com `static_configs`, o nome `user-service:8181` resolve para UMA réplica por scrape
+    # (round-robin do DNS do Docker): a partir de N > 1 as séries passam a alternar entre
+    # processos diferentes a cada 5s, e a métrica deixa de significar qualquer coisa — heap de
+    # containers distintos somado como se fosse o mesmo. O tipo A devolve um target por réplica.
+    dns_sd_configs:
+      - names:
+          - authorization-server
+          - user-service
+          - notification-service
+          - gateway
+        type: A
+        port: 8181
+        refresh_interval: 15s
+
+    # Os discovery-servers seguem estáticos DE PROPÓSITO: são réplicas NOMEADAS (peers Eureka com
+    # identidade e EUREKA_PEER_URL recíprocos), não pertencem ao eixo replicável e servem o
+    # actuator na porta principal, não na 8181. discovery-server-2 só existe com --profile ha;
+    # o Prometheus marca o target como down no piso mínimo, o que é o estado correto a reportar.
     static_configs:
       - targets:
           - discovery-server-1:9091
           - discovery-server-2:9092
-          - authorization-server:8082
-          - user-service:8090
-          - notification-service:8095
-          - gateway:8181
+
+    relabel_configs:
+      # O dns_sd resolve para IP, então `instance` vira 172.x.y.z:8181 — distingue réplicas (que
+      # é o objetivo), mas não diz QUEM é. Este label preserva o nome lógico consultado.
+      # Vazio nos alvos de static_configs (discovery), que não passam por descoberta DNS.
+      - source_labels: [__meta_dns_name]
+        target_label: service
 
   - job_name: "mongodb"
     static_configs:
@@ -51,7 +77,16 @@ scrape_configs:
     basic_auth:
       username: config-client
       password_file: /run/secrets/CONFIG_SERVER_PASSWORD
-    static_configs:
-      - targets:
-          - config-server-1:8888
-          - config-server-2:8888
+    # Descoberta por DNS (ADR-024): config-server virou serviço único escalável, então o alvo
+    # não é mais um par de nomes fixos. O DNS do Docker devolve um registro A por réplica, e
+    # `--scale config-server=N` passa a render N targets sem editar este arquivo.
+    dns_sd_configs:
+      - names: ["config-server"]
+        type: A
+        port: 8888
+        refresh_interval: 15s
+    # Mesmo label do job `microservices`: sem ele o alvo aparece só como IP, que muda a cada
+    # recreate do container e não diz de quem é.
+    relabel_configs:
+      - source_labels: [__meta_dns_name]
+        target_label: service

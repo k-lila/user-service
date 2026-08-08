@@ -2,6 +2,7 @@ package com.users.notificationservice.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -96,5 +97,16 @@ class NotificationControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(buildRequest())))
                 .andExpect(status().isBadGateway());
+    }
+
+    /**
+     * Regressão: sem Spring Security neste serviço, QUALQUER path não mapeado atravessava até o
+     * catch-all {@code Exception} do advice e virava 500 + stack trace em ERROR — um scanner
+     * enchia o log de erro. O gatilho real foi {@code /actuator/**}, que saiu da 8095 quando o
+     * actuator foi para a porta de management 8181 (gap G14).
+     */
+    @Test
+    void deveRetornar404_quandoPathNaoMapeado() throws Exception {
+        mockMvc.perform(get("/actuator/health")).andExpect(status().isNotFound());
     }
 }

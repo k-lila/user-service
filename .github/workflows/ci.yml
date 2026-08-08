@@ -104,5 +104,82 @@ jobs:
       - name: Provide a dummy .env
         run: cp .env.example .env
 
+      # Piso mínimo (default), profile ha, e as duas combinações de overlay. Todas têm de
+      # continuar válidas — o piso é o que `docker compose up` faz sem argumento nenhum.
       - name: Validate compose topology
-        run: docker compose -f docker-compose.yml config -q
+        run: |
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml --profile ha config -q
+          docker compose -f docker-compose.yml -f docker-compose.override.yml config -q
+
+      # O profile só serve para alguma coisa se o piso mínimo REALMENTE não incluir os nós de
+      # redundância. Sem esta asserção, um `profiles:` esquecido num serviço novo (ou removido
+      # num refactor) faz o piso voltar a subir 26 containers sem ninguém notar — a mesma classe
+      # de bug das 19 variáveis inertes registradas em docs/CONFIG.md.
+      - name: Piso mínimo não inclui os nós do profile ha
+        run: |
+          minimo="$(docker compose -f docker-compose.yml config --services | sort)"
+          ha="$(docker compose -f docker-compose.yml --profile ha config --services | sort)"
+          esperado="discovery-server-2 mongo-2 mongo-3 redis-2 redis-3 redis-sentinel-2 redis-sentinel-3"
+          delta="$(comm -13 <(echo "$minimo") <(echo "$ha") | tr '\n' ' ' | sed 's/ $//')"
+          if [ "$delta" != "$esperado" ]; then
+            echo "[ERRO] delta piso→ha divergiu."
+            echo "  esperado: $esperado"
+            echo "  obtido:   $delta"
+            exit 1
+          fi
+          echo "[OK] piso mínimo com $(echo "$minimo" | wc -l) serviços; profile ha acrescenta: $delta"
+
+      # O eixo replicável tem de continuar replicável: nem `container_name` nem `ports:` na base
+      # para os serviços escaláveis — qualquer um dos dois faz a 2ª réplica falhar no bind.
+      - name: Serviços do eixo replicável aceitam --scale
+        run: |
+          docker compose -f docker-compose.yml config \
+            | python3 -c '
+import sys, yaml
+c = yaml.safe_load(sys.stdin)
+falhas = []
+for nome in ["gateway", "user-service", "authorization-server", "notification-service", "config-server"]:
+    svc = c["services"][nome]
+    if "container_name" in svc:
+        falhas.append(f"{nome}: container_name impede --scale")
+    if svc.get("ports"):
+        falhas.append(f"{nome}: ports na base impede --scale (mova para o override)")
+if falhas:
+    print("[ERRO] " + "; ".join(falhas)); sys.exit(1)
+print("[OK] eixo replicável sem container_name nem ports na base")
+'
+
+  # Smoke-test da topologia de login sob hostname único (ADR-023). Sobe nginx + gateway +
+  # authorization-server (menos o cloudflared, que não roda em CI) e verifica por HTTP os pontos
+  # exatos onde os elos do ADR-019 quebraram — todos descobertos em produção, nenhum pego antes
+  # do deploy. É o único job que exercita o container `interface`: nem os Testcontainers nem o
+  # compose-validate acima passam pelo nginx.
+  #
+  # Sem `needs:` — paralelo aos demais. Roda em todo push/PR: o CI não tem path-filtering em
+  # nenhum job, e o filtro deixaria passar mudança indireta (ex.: em SecurityConfig) que também
+  # afeta a cadeia (ADR-023 § Alternativas).
+  smoke-test-login:
+    name: smoke-test-login
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Envs no nível do JOB, não do passo: o passo de teardown abaixo também invoca `docker compose`
+    # com o overlay de deploy, cujos `${PUBLIC_ORIGIN:?}` / `${TUNNEL_ID:?}` são interpolados na
+    # leitura do arquivo — sem elas o próprio `down` falha.
+    env:
+      PUBLIC_ORIGIN: https://smoke-test.local
+      PUBLIC_HOST: smoke-test.local
+      TUNNEL_ID: 00000000-0000-0000-0000-000000000000
+    steps:
+      - uses: actions/checkout@v4
+
+      # O script cuida de .env e ./secrets/ (defaults de dev) e derruba a stack ao final,
+      # imprimindo `compose ps` + logs se alguma asserção reprovar.
+      - name: Smoke-test da topologia de login
+        run: bash infra/smoke-test/login-topology-smoke-test.sh
+
+      # Rede de segurança para o caso de o script ser morto (timeout do job) antes do seu próprio
+      # trap: `down -v` é idempotente, então rodar duas vezes não custa nada.
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.deploy.yml down -v

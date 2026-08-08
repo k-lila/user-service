@@ -5,6 +5,8 @@ import java.util.Set;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import lombok.Getter;
@@ -23,7 +25,14 @@ import lombok.Setter;
  * acesso de um titular".
  */
 @Document(collection = "auditLogs")
-@CompoundIndex(name = "target_ts_idx", def = "{'targetUserId': 1, 'timestamp': -1}")
+@CompoundIndexes({
+    @CompoundIndex(name = "target_ts_idx", def = "{'targetUserId': 1, 'timestamp': -1}"),
+    // Feed geral (GET /v1/admin/audit-logs), que é findAll ordenado por timestamp e não filtra
+    // por titular. O índice acima não serve: tem targetUserId no prefixo. Sem este, a ordenação
+    // vai para memória e o Mongo ABORTA a query ao passar de 32 MB de sort — falha que só
+    // aparece com a coleção já grande.
+    @CompoundIndex(name = "ts_idx", def = "{'timestamp': -1}")
+})
 @Getter
 @Setter
 public class AuditLog {
@@ -54,4 +63,19 @@ public class AuditLog {
 
     /** traceId B3 corrente, para correlação com logs/Zipkin (quando disponível). */
     private String correlationId;
+
+    /**
+     * Instante em que o Mongo deve remover a entrada — retenção da trilha (ADR-022).
+     *
+     * <p>Padrão <i>expire-at</i> ({@code expireAfterSeconds = 0}), o mesmo do
+     * {@code NotificationOutbox}: o prazo é decidido por documento na escrita, a partir de
+     * {@code app.audit.retention}. Um TTL fixo no índice prenderia a retenção ao valor usado
+     * na criação — mudá-la exigiria {@code collMod}, não configuração.
+     *
+     * <p>Documentos gravados antes desta mudança não têm o campo, e o TTL do Mongo <b>ignora</b>
+     * documento sem o campo indexado: o histórico anterior nunca é apagado. É o lado seguro
+     * numa trilha de conformidade — o dado apagado não volta.
+     */
+    @Indexed(name = "purgeAt_ttl", expireAfterSeconds = 0)
+    private Instant purgeAt;
 }

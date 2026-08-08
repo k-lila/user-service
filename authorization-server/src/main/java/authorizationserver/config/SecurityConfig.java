@@ -91,6 +91,13 @@ public class SecurityConfig {
         					"/.well-known/**",
         					"/login",
         					"/error",
+					// NÃO remova "/actuator/**" achando que é resíduo depois que o actuator foi
+					// para a porta de management (8181, gap G14): esta chain governa TAMBÉM essa
+					// porta — o contexto filho de management herda o filtro de segurança do pai.
+					// Sem esta linha o formLogin redireciona o actuator da 8181 para /login (302),
+					// o Prometheus recebe HTML e para de raspar — e o healthcheck do compose passa
+					// mesmo assim, porque `curl -f` não falha em 302 (falso healthy medido em
+					// 2026-08-05). O controle do G14 é a 8181 não ser publicada, não este matcher.
 							"/actuator/**"
 				).permitAll()
 				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.access.AccessDeniedException;
@@ -13,6 +14,7 @@ import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 class GlobalExceptionHandlerTest {
 
@@ -85,6 +87,19 @@ class GlobalExceptionHandlerTest {
         assertEquals(HttpStatus.METHOD_NOT_ALLOWED.value(), pd.getStatus());
         assertEquals("Method Not Allowed", pd.getTitle());
         assertEquals("Método não suportado", pd.getDetail());
+    }
+
+    // Regressão: /actuator/** continua no permitAll() mas deixou de ser mapeado na porta de
+    // tráfego (actuator na 8181, gap G14). Sem este handler o request atravessa a segurança, não
+    // acha recurso e cai no catch-all Exception → 500 + stack trace em ERROR a cada probe.
+    @Test
+    void deveRetornar404_quandoRecursoNaoMapeado() {
+        ProblemDetail pd = handler.handleNoResourceFound(
+                new NoResourceFoundException(HttpMethod.GET, "/actuator/health", "actuator/health"));
+
+        assertEquals(HttpStatus.NOT_FOUND.value(), pd.getStatus());
+        assertEquals("Not Found", pd.getTitle());
+        assertEquals("Recurso não encontrado", pd.getDetail());
     }
 
     @Test

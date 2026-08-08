@@ -34,6 +34,7 @@ import com.users.userservice.exceptions.SelfRoleRevocationException;
 import com.users.userservice.services.AdminService;
 import com.users.userservice.services.AdminService.RoleUpdateResult;
 import com.users.userservice.services.AuditService;
+import com.users.userservice.services.AuditService.AuditTarget;
 import com.users.userservice.services.EmailVerificationService;
 import com.users.userservice.services.RegisterService;
 
@@ -106,6 +107,41 @@ class AdminControllerTest {
     void listAllUsers_deveRetornar401_quandoSemToken() throws Exception {
         mockMvc.perform(get("/v1/admin/users"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void listAllUsers_deveAuditarUmaEntradaPorTitularRetornado() throws Exception {
+        AdminUserResponseDTO outro = buildAdminUserResponse(Set.of("USER"));
+        outro.setId("target-id-2");
+        outro.setEmail("sicrano@email.com");
+        when(adminService.listAllUsers(any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(buildAdminUserResponse(Set.of("USER")), outro)));
+
+        mockMvc.perform(get("/v1/admin/users")
+                .with(jwt()
+                        .jwt(b -> b.claim("userID", ADMIN_ID))
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isOk());
+
+        // Fix G13: a listagem não pode devolver PII de vários titulares sem rastro na trilha LGPD.
+        verify(auditService).recordBulkFromJwt(
+                eq(AuditAction.ADMIN_LIST_USERS),
+                any(),
+                eq(List.of(
+                        new AuditTarget(TARGET_ID, "fulano@email.com"),
+                        new AuditTarget("target-id-2", "sicrano@email.com"))));
+    }
+
+    @Test
+    void listAllUsers_deveAuditarListaVazia_quandoNenhumTitularRetornado() throws Exception {
+        when(adminService.listAllUsers(any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/v1/admin/users")
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isOk());
+
+        verify(auditService).recordBulkFromJwt(eq(AuditAction.ADMIN_LIST_USERS), any(), eq(List.of()));
     }
 
     @Test

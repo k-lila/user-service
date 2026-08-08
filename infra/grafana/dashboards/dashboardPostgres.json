@@ -15,6 +15,7 @@
     {
       "type": "stat",
       "title": "Postgres UP",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "pg_up"
@@ -27,34 +28,61 @@
           ]
         }
       },
-      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 0, "y": 1, "w": 4, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Headroom de conexões",
+      "description": "max_connections menos as conexões em uso. É o TETO do eixo de escala do authorization-server: cada réplica abre até AUTH_DB_POOL_SIZE (default 8) conexões, então N réplicas × 8 tem de caber aqui. É o único limite de escala cuja violação FALHA em produção em vez de apenas não ajudar — e o sintoma ('too many clients already') aparece no auth-server, longe da causa. Até esta versão o número não existia em painel nenhum, só em docs/CONFIG.md.",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "max(pg_settings_max_connections) - sum(pg_stat_activity_count)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "green", "value": 25 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 4, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Conexões (authdb)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "pg_stat_database_numbackends{datname=\"authdb\"}"
         }
       ],
-      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 9, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Locks",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "sum(pg_locks_count{datname=\"authdb\"})"
         }
       ],
-      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 14, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
       "title": "Tamanho do banco (authdb)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "pg_database_size_bytes{datname=\"authdb\"}"
@@ -65,7 +93,7 @@
           "unit": "bytes"
         }
       },
-      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 19, "y": 1, "w": 5, "h": 4 }
     },
 
     {
@@ -75,26 +103,46 @@
 
     {
       "type": "timeseries",
+      "title": "Conexões vs teto (max_connections)",
+      "description": "O painel a olhar ao escalar o authorization-server: a distância entre as duas linhas é quantas réplicas ainda cabem, a AUTH_DB_POOL_SIZE conexões cada. O Postgres é singleton (SPOF do login, sem réplica) — este teto não cresce adicionando nó, ao contrário de todo o resto do eixo replicável do ADR-024.",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(pg_stat_activity_count)",
+          "legendFormat": "em uso"
+        },
+        {
+          "expr": "pg_settings_max_connections",
+          "legendFormat": "max_connections"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 6, "w": 8, "h": 8 }
+    },
+
+    {
+      "type": "timeseries",
       "title": "Backends por banco",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "pg_stat_database_numbackends",
           "legendFormat": "{{datname}}"
         }
       ],
-      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 }
+      "gridPos": { "x": 8, "y": 6, "w": 8, "h": 8 }
     },
 
     {
       "type": "timeseries",
       "title": "Atividade por estado",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "sum(pg_stat_activity_count) by (state)",
           "legendFormat": "{{state}}"
         }
       ],
-      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 }
+      "gridPos": { "x": 16, "y": 6, "w": 8, "h": 8 }
     },
 
     {
@@ -105,6 +153,7 @@
     {
       "type": "timeseries",
       "title": "Transações/s (commit / rollback)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "rate(pg_stat_database_xact_commit{datname=\"authdb\"}[1m])",
@@ -121,6 +170,7 @@
     {
       "type": "timeseries",
       "title": "Deadlocks/s",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "rate(pg_stat_database_deadlocks{datname=\"authdb\"}[5m])",
@@ -138,6 +188,7 @@
     {
       "type": "timeseries",
       "title": "Cache hit ratio (authdb)",
+      "datasource": "Prometheus",
       "targets": [
         {
           "expr": "pg_stat_database_blks_hit{datname=\"authdb\"} / (pg_stat_database_blks_hit{datname=\"authdb\"} + pg_stat_database_blks_read{datname=\"authdb\"})",

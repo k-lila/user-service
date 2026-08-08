@@ -106,6 +106,12 @@ public class SecurityConfig {
                         // antes de autenticar (sem sessão). Sem permitAll, 401 → formulário sem
                         // estilo. Roteado pela rota auth-default-ui → lb://authorization-server.
                         "/default-ui.css",
+                        // NÃO é resíduo, apesar de o actuator já viver na porta de management
+                        // 8181 (gateway.yml): esta chain governa TAMBÉM essa porta. Remover a
+                        // linha faz /actuator/health e /actuator/prometheus na 8181 devolverem
+                        // 401 — healthcheck do compose e scrape do Prometheus caem junto
+                        // (medido no user-service em 2026-08-05, ao fechar o G14). O controle
+                        // é a 8181 não ser publicada, não este matcher.
                         "/actuator/**",
                         // /swagger-ui/**, /swagger-ui.html e /v3/api-docs/** SAÍRAM do permitAll
                         // (ADR-020): caem em anyExchange().authenticated(). O Cloudflare Access,

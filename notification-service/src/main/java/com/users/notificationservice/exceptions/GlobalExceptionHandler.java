@@ -10,6 +10,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -33,6 +34,19 @@ public class GlobalExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed");
         pd.setTitle("Validation Failed");
         pd.setProperty("errors", errors);
+        return pd;
+    }
+
+    // Path sem handler → 404, não 500. Aqui o alcance é maior que no user-service: este serviço
+    // não tem Spring Security (só o InternalTokenFilter em /internal/**), então QUALQUER path não
+    // mapeado chegava ao catch-all Exception abaixo e virava 500 + stack trace em ERROR — um probe
+    // de scanner por segundo enche o log de erro e afoga falha real. O gatilho já observado é
+    // /actuator/**, que deixou de ser servido na 8095 quando o actuator foi para a 8181 (gap G14).
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ProblemDetail handleNoResourceFound(NoResourceFoundException e) {
+        LOGGER.warn("| 404 | recurso inexistente | {}", e.getResourcePath());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "Recurso não encontrado");
+        pd.setTitle("Not Found");
         return pd;
     }
 

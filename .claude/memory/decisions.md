@@ -49,7 +49,7 @@
 
 - **Mudança de comportamento (nota de release):** bookmark/deep-link antigo para `/login` passa a abrir o **formulário do IdP** (GET), não mais a tela do SPA. Sem loop, mas login por essa via out-of-band não estabelece sessão do gateway → volta ao SPA deslogado. **Ponto de entrada correto agora é `/`.**
 
-- **Recomendação de asseguramento — PENDENTE DE DECISÃO DO HUMANO (não é dívida aceita):** as duas mitigações propostas pelo `security-reviewer` são **sub-dimensionadas** — o checklist manual de smoke-test **repete o antipadrão que causou o Elo 1** (depender de o operador ler/lembrar; foi para substituir um passo manual que o `assert-env` existe), e a asserção de `trusted-proxies` no CI cobre **um** bug, não a classe. O controle **proporcional** é um **smoke-test automatizado da topologia real** (nginx do SPA + gateway + AS/stub, num job de CI ou pré-deploy) cobrindo os cinco pontos: (a) `GET /login` retorna o form do IdP (não `index.html`); (b) `GET /default-ui.css` é `text/css`; (c) `POST /login` não é 403 pelo CSRF do gateway; (d) `Location` de `/oauth2/authorize` traz host/proto públicos (prova `trusted-proxies` sob peer real); (e) a base do compose não publica `8081`/`5173`. A camada nginx + emissão de `X-Forwarded-*` sob peer real é exatamente onde os Elos 2 e 3 viviam e onde não há teste.
+- **Recomendação de asseguramento — DECIDIDA E IMPLEMENTADA (2026-08-06, [ADR-023](../../docs/adr/ADR-023-smoke-test-automatizado-login-hostname-unico.md)):** o controle proporcional descrito abaixo foi construído — `infra/smoke-test/login-topology-smoke-test.sh` (bash+curl contra a topologia real, container efêmero na rede do compose) + job `smoke-test-login` no `ci.yml`, com as cinco asserções (a)–(e) exatamente como enumeradas. Escolhas de implementação que o texto original não previa e que **não são cosméticas**: a asserção (d) manda `X-Forwarded-For: 203.0.113.9` porque o IP do próprio container de curl é `172.x` e cairia na faixa de `trusted-proxies`, mascarando a regressão do Elo 6; ela compara o `Location` por **igualdade** (erro do endpoint de autorização redireciona para o próprio `redirect_uri`, que também começa com a origem pública — prefixo daria falso-positivo); a asserção (c) monta o cookie `AUTHSESSION` à mão porque `APP_COOKIE_SECURE=true` faz o curl recusar reenviar cookie `Secure` sobre HTTP (alternativa seria relaxar a flag num quarto compose, divergindo da topologia de produção); e a (e) checa a **ausência da chave `ports:`** via `jq`, não o número da porta, porque um `9999:8081` passaria por um grep. O script tem guarda **fail-closed**: recusa rodar com a stack no ar, já que o projeto Compose é o mesmo do deploy (`networks.default.name` fixa a rede, então `-p` não isola) e o `down -v` final apagaria os volumes de Mongo/Postgres. **Fora de escopo de propósito:** R-09 e os CSRF latentes BUG-002/004/005. Racional original preservado abaixo. — as duas mitigações propostas pelo `security-reviewer` eram **sub-dimensionadas** — o checklist manual de smoke-test **repete o antipadrão que causou o Elo 1** (depender de o operador ler/lembrar; foi para substituir um passo manual que o `assert-env` existe), e a asserção de `trusted-proxies` no CI cobre **um** bug, não a classe. O controle **proporcional** é um **smoke-test automatizado da topologia real** (nginx do SPA + gateway + AS/stub, num job de CI ou pré-deploy) cobrindo os cinco pontos: (a) `GET /login` retorna o form do IdP (não `index.html`); (b) `GET /default-ui.css` é `text/css`; (c) `POST /login` não é 403 pelo CSRF do gateway; (d) `Location` de `/oauth2/authorize` traz host/proto públicos (prova `trusted-proxies` sob peer real); (e) a base do compose não publica `8081`/`5173`. A camada nginx + emissão de `X-Forwarded-*` sob peer real é exatamente onde os Elos 2 e 3 viviam e onde não há teste.
 
 - **Pendência de verificação (a leva NÃO está verificada ponta a ponta):** os ACs só observáveis sob HTTPS + proxy reais seguem **não confirmados** — AC-01/02/03/04, **AC-24**, AC-B0A-01/02/04, AC-B0B-02. O rebuild + `down -v` + verificação no browser vêm a seguir; AC-24 (cookies `Secure`+`SameSite=Lax`, sem `state`/PKCE mismatch) e AC-B0B-02 (`Location` público) são os de maior risco residual. Até isso acontecer, considerar a leva **implementada e revisada, mas não validada em produção**.
 
@@ -373,7 +373,7 @@
 - **CRÍTICO (resolver antes do release, não-explorável) — devolvido ao techlead:**
   - `docs/SECURITY.md` contradiz a si mesmo sobre G10: linha 180 declara G10 **fechado**, mas linhas 126-127 ("ADR-010 hoje ainda não plenamente verdadeira: ver G10") e 231-234 (⚠️ "Isto ainda não é verdade hoje: o docker-compose.yml publica 8081:8081... mover os ports: para o override é pré-requisito") permaneceram **stale**, afirmando G10 aberto. Falha parcial de AC-17. Fonte-de-verdade autocontraditória sobre a fronteira de confiança de rede — corrigir os dois trechos para refletir G10 fechado.
 - **Observações / dívidas confirmadas (classificação correta, não redescobertas):**
-  - Sem teste/ambiente/CI exercitando a topologia de hostname único → controles ADR-010/018/019 só têm verificação manual no browser. Gap de asseguramento (não vulnerabilidade). Controle proporcional sugerido: checklist de smoke-test no runbook + asserção mínima no CI (render do overlay de deploy + presença de `trusted-proxies` no `gateway.yml`). Tech-debt.
+  - ~~Sem teste/ambiente/CI exercitando a topologia de hostname único → controles ADR-010/018/019 só têm verificação manual no browser.~~ **FECHADO em 2026-08-06 (ADR-023):** `infra/smoke-test/login-topology-smoke-test.sh` + job `smoke-test-login` no CI exercitam a cadeia real a cada push/PR. O "controle sugerido" original (checklist no runbook + presença de `trusted-proxies` no YAML) foi **descartado** — o checklist repete o antipadrão do Elo 1 e a asserção de YAML cobre um bug, não a classe: `trusted-proxies` presente no arquivo não prova que o `X-Forwarded-Host` chega ao auth-server, que é o que a asserção (d) verifica sob peer real.
   - Comentário stale em `RateLimitIntegrationTest.java` (diz que `POST /login` é bloqueado por CSRF — BUG-001 já corrigido nesta leva); teste usa GET, permanece válido. Cosmético.
   - BUG-002 (P3, `for-enabled:false` colapsa lockout do auth-server só em deploy SEM Cloudflare), BUG-004/005 (CSRF latente em `/oauth2/authorize` e `/connect/logout`, inertes hoje), CGNAT (balde compartilhado, pré-existente), R-09 (rede flat) — todos confirmados como dívida aceita corretamente classificada.
   - `assert-env`/`cloudflared` usam tags mutáveis (`alpine:3`/`latest`) — supply-chain, pré-existente para cloudflared; baixo risco no init-container efêmero.
@@ -479,3 +479,209 @@
 - **Causa 2 (achado novo, não fechado) — paradoxo circular do self-service de reenvio.** O cadastro não dispara e-mail: `RegisterService:68` seta `emailVerified=false` e nada mais; o único chamador de `issueVerificationEmail()` é `EmailVerificationService.doResend():183`. Isso é deliberado e já documentado. O que **não** estava documentado: passada a carência de 24h, `POST /v1/users/resend-verification` fica inalcançável — resolve o titular pelo `userID` do JWT e exige sessão, mas o login já está bloqueado por `DisabledException`. O caminho self-service é acessível exatamente enquanto é desnecessário e some quando passa a ser necessário; sobra só `POST /v1/admin/users/{id}/resend-verification`. Registrado em `docs/SECURITY.md` (linha do gap SMTP), **não** corrigido — religar o envio no cadastro reverteria decisão recente cujo racional não foi apurado e exigiria ADR + `senso-critico`.
 - **Verificado sadio:** `API_BASE_URL=https://app.k-lila.com.br` → o link de verificação apontaria para a origem pública correta, não `localhost`. Isolamento de falha íntegro (`NotificationDispatchService` captura tudo → outbox `FAILED`, cadastro nunca quebra). Base zerada (0 usuários, 0 registros em `notificationOutbox`) — sem backlog de e-mails perdidos a recuperar nesta subida.
 - **Tipo:** diagnóstico (sem correção).
+
+## [2026-08-05] · user-service · fechamento do G13 (listagem administrativa não auditada)
+
+- **Gatilho:** pergunta aberta do operador sobre próximos passos com o sistema já online via Cloudflare Tunnel. Escolhido o G13 entre as opções apresentadas; implementação **direta** (fora do pipeline de agentes, decisão explícita do operador).
+- **Defeito:** `AdminController.listAllUsers` era o único método de leitura do controller sem chamada ao `AuditService` — devolvia `Page<AdminUserResponseDTO>` (PII de vários titulares) deixando só um `LOGGER.info`, que é log operacional, não trilha LGPD. Desde o ADR-021 (que removeu `GET /v1/users`) era a **única** superfície de listagem do sistema: um token ADMIN comprometido exfiltrava a base inteira sem rastro.
+- **Decisão de modelagem — uma entrada por titular retornado, não uma agregada por requisição.** O `AuditLog` tem `targetUserId` singular e o índice `(targetUserId, timestamp desc)` serve `GET /v1/admin/users/{id}/audit-logs`. Uma entrada agregada (`targetUserId=null`) registraria o evento mas **não apareceria no histórico de titular algum** — registraria a leitura sem responder "quem acessou o *meu* dado?", que é a pergunta que a trilha existe para responder. As alternativas (agregada; híbrida com array de IDs) foram descartadas por isso e porque ambas exigiriam campo novo no schema → ADR.
+- **Sem ADR, deliberadamente:** nenhum campo novo no `AuditLog` nem no `AuditLogResponseDTO`; a mudança é um valor novo de enum (aditivo) e um método novo de serviço. O critério aplicado foi "ADR se o schema mudar" — declarado antes de implementar, não depois.
+- **Implementação:** `AuditAction.ADMIN_LIST_USERS`; `AuditService.recordBulkFromJwt(action, jwt, List<AuditTarget>)` + record aninhado `AuditTarget(userId, email)` (segue o precedente de `AdminService.RoleUpdateResult`); `persistAll` com `insert` em **lote** e o mesmo isolamento de falha do `persist`; página vazia retorna sem tocar o repositório.
+- **Dívida assumida no fechamento (registrada em `docs/SECURITY.md`):** volume. Uma página no teto (`MAX_AUDIT_PAGE_SIZE=100`) grava 100 entradas numa coleção que segue **sem TTL** — a dívida do ADR-011 ficou mais cara. Se crescer demais, a saída é TTL/arquivamento, **não** voltar à entrada agregada. Os filtros aplicados (`active`/`name`/`email`) **não** são registrados: exigiriam campo novo, e os titulares alcançados já são o dado forense relevante.
+- **Guardas:** `AuditLogIntegrationTest.listagemAdministrativa_deveAparecerNoHistoricoDeCadaTitular` é o teste que prova a decisão de modelagem (consulta por `findByTargetUserId` acha a listagem) — é ele que falha se alguém "otimizar" para uma entrada agregada. Mais `AdminControllerTest` (entrada por titular; página vazia) e `AuditServiceTest` (lote único, e-mail mascarado, isolamento de falha, no-op em lista vazia). Suíte do user-service: 283 testes verdes, gate JaCoCo OK.
+- **Tipo:** fechamento de gap de segurança/LGPD.
+
+## [2026-08-05] · infra · fechamento do G14 + 2 correções documentais no SECURITY.md
+
+- **Gatilho:** relatório de gaps pedido pelo operador. O relatório encontrou, além dos gaps já registrados, **três divergências doc↔código**; o operador pediu as correções (item 2) junto do fechamento do G14 (item 3). Implementação direta, fora do pipeline de agentes.
+- **Decisões declaradas antes de implementar:** (a) porta de management **8181 uniforme** nos quatro serviços — containers distintos, sem colisão, e uma convenção só para memorizar; (b) `"/actuator/**"` removido do `permitAll()` dos três SecurityConfig, **incluindo o resíduo já inerte do gateway**; (c) **sem ADR** — nenhum contrato de API, schema ou claim muda, e o caminho de correção já estava escrito na própria linha do G14. Mesmo critério do G13 na véspera.
+- **O gap estava subcontado e isso já era sabido.** O G14 nomeava `authorization-server` e `notification-service`; o `user-service` estava idêntico (`SecurityConfig:86`). `security-reviewer` (entrada de 2026-08-04, "Observação") e `senso-critico` registraram literalmente "G14 deve incluir o `user-service`" — e o achado **morreu na memória**, nunca chegou ao `SECURITY.md`. Variante do post-mortem do G1: lá a doc dizia fechado o que o código deixava aberto; aqui a doc descrevia um gap **menor** que o real. **Lição operacional:** o escopo de um gap verifica-se varrendo a superfície no código, não relendo o texto do gap — a mesma regra que já valia para "fechado".
+- **Baseline medido antes de mexer (prova de que o gap era real, não teórico):** de dentro de um container qualquer da rede, `curl http://{user-service:8090,authorization-server:8082,notification-service:8095}/actuator/health` → **200** nos três, anônimo, e `/actuator/prometheus` devolvia o dump de métricas completo. É exatamente o cenário R-09 + override de dev.
+- **Severidade em perspectiva (registrar para não inflar em releitura):** a exposure sempre foi só `health, info, metrics, prometheus` — nunca `env`/`heapdump`/`threaddump`/`beans`. Não havia vazamento de segredo nem de memória; o gap era de **reconhecimento** (topologia, hostnames internos, volume de tráfego).
+- **Resíduo aceito:** a porta 8181 **não tem autenticação** — o controle é ela não ser publicada em compose algum + a rede Docker ser interna. Sob rede compartilhada com terceiros isso não bastaria (é o que o R-09 já descreve).
+- **Fora do escopo, deliberadamente:** `management.server.port: -1` nos `application.yml` de teste de user-service e auth-server. O gateway precisa disso por causa do `RANDOM_PORT`; esses dois rodam em `webEnvironment = MOCK` **e** desligam o config-server (`spring.cloud.config.enabled: false`), então a propriedade nova nem chega neles — seria proteção para cenário que não ocorre.
+- **`ServedConfigSecretLeakTest` não cobre isto:** filtra só o prefixo `springdoc.` (linha 50). Adicionar `management.*` ao filtro exigiria repensar as marcas de segredo (`port` não é segredo) — não feito.
+- **Descoberta lateral, não tratada:** o stack em execução usa `docker-compose.yml + docker-compose.deploy.yml` e o `notification-service` está **healthy** — ou seja, o `MailHealthIndicator` passa e o SMTP do deploy **não** é mais o placeholder (commit `645c242`, "SMTP real"). O `docs/SECURITY.md` continua descrevendo o SMTP como placeholder bloqueante, com o efeito colateral do container `unhealthy`. **Provável quarta divergência doc↔código**, do mesmo tipo das duas corrigidas aqui — verificar contra os secrets antes de reescrever a linha do gap.
+- **Verificação:** suítes verdes nos 5 módulos (user-service 283, auth-server 77, gateway 72, notification 12, config-server 6), gates JaCoCo OK; `docker compose config -q` na base+override e na base+deploy.
+- **Tipo:** fechamento de gap de segurança + correção documental.
+- **ERRO DE PREMISSA CORRIGIDO EM VOO (o achado mais valioso desta leva): `"/actuator/**"` no `permitAll()` NÃO é resíduo — é load-bearing.** O plano previa removê-lo dos três SecurityConfig como defesa em profundidade, na premissa (minha, por leitura estática) de que a linha ficara inerte com o actuator noutra porta. **Falso:** a chain de segurança do contexto **pai** governa **também** a porta de management (o contexto filho herda o filtro). Medido ao subir: user-service → **401** em `/actuator/health` e `/actuator/prometheus` na 8181, container `unhealthy`, Prometheus DOWN. Revertido nos três, com comentário de aviso em cada arquivo.
+- **Agravante que quase passou: falso healthy no authorization-server.** Lá o `formLogin` redireciona (**302 → /login**) em vez de 401, e `curl -f` **não falha em 3xx** — o container reportava `healthy` enquanto o actuator não servia nada e o Prometheus recebia `text/html`. Se o teste tivesse sido só `docker compose ps`, a regressão teria passado. **Lição:** healthcheck com `curl -f` não distingue "saudável" de "redirecionado para o login"; ao mexer em segurança de rota de health, medir o **código HTTP e o corpo**, não o status do container.
+- **Por que nenhum teste pegou:** nenhum dos 450 testes sobe a porta de management (user-service e auth-server rodam `webEnvironment = MOCK` e desligam o config-server). Suíte verde + `docker compose config -q` deram sinal verde num estado que quebrava o actuator dos dois serviços. Foi a subida real que pegou — e foi por pouco: o operador tinha escolhido "recriar agora" em vez de deixar para depois.
+- **Efeito colateral novo, NÃO tratado (decidir depois):** na porta de tráfego, `/actuator/**` agora devolve **500** no user-service e no notification-service (404 limpo só no auth-server). É o mesmo defeito latente já conhecido do 405: o catch-all `Exception` do `@RestControllerAdvice` engole a exceção de "sem handler" antes do `DefaultHandlerExceptionResolver`. Não vaza nada (corpo é ProblemDetail genérico), mas polui métrica de 5xx e mente sobre a causa. Caminho: handler dedicado para `NoResourceFoundException`, como já se fez para `HttpRequestMethodNotSupportedException`.
+- **Verificação end-to-end no stack de deploy real (base + deploy overlay, domínio público no ar):** baseline 200 anônimo nos três → depois 404/500 sem corpo de métrica; 8181 responde 200 nos três; 6/6 targets do job `microservices` UP (agora `:8181`); `label_values(jvm_memory_used_bytes, application)` segue listando os 6 serviços (dashboards intactos); site público OK (`/` 200, `/v1/users/me` 401 sem sessão, `/oauth2/authorization/gateway-client` 302); `/actuator/health` pela borda pública devolve o `index.html` do SPA (try_files), não o actuator.
+
+## [2026-08-06] · user-service · notification-service · infra · Bloco 2: retry do outbox, 404 em path não mapeado, 19 vars inertes
+
+- **Gatilho:** implementação do "Bloco 2" do plano de capacidade, com o pedido explícito de incorporar os **dois achados fora do escopo** do Bloco 1. O primeiro (`MANAGEMENT_TRACING_SAMPLING_PROBABILITY` documentada mas inerte) já fora corrigido pontualmente; aqui foi **generalizado**. O segundo (500 em `/actuator/**` na porta de tráfego) estava registrado na entrada de 2026-08-05 como "efeito colateral novo, NÃO tratado (decidir depois)" — **fechado agora**, pelo caminho que aquela entrada já apontava.
+- **Fora de escopo por decisão do operador:** réplicas do `cloudflared` (fica em 1 — HA de processo não compensa num deploy de máquina única, onde as réplicas morrem juntas) e métrica/contador do poller.
+
+### 1. `OutboxRetryService` — emenda ao ADR-015
+
+- **Restrição descoberta na exploração, que mudou o desenho:** o outbox persiste **só o `tokenHash`**; o token em claro nunca é salvo. Um poller **não consegue reenviar o e-mail original** — não tem o link. O retry **obrigatoriamente emite um token novo**, marcando o registro anterior como `SUPERSEDED`. Quem revisar isto tem de saber: não é escolha de conveniência, é consequência da decisão de segurança do próprio ADR-015.
+- **Por que reverter o descarte original do ADR-015.** O argumento era "a UX já provê reenvio manual, tornando inútil o scan periódico". Ele pressupõe que o titular **saiba** que precisa pedir — e ele não sabe: um outbox `FAILED` é indistinguível de um e-mail atrasado. Passada a carência de 24h, a conta ficava permanentemente inacessível. Duas mudanças de contexto desde então: o envio automático no cadastro foi removido, e o SMTP real entrou em operação (commit `645c242`), transformando "notification-service fora" em modo de falha observável. O texto original foi **tachado, não apagado** — o histórico da decisão fica legível.
+- **Armadilha de design não-óbvia (o ponto mais fácil de "otimizar" errado):** o teto de tentativas é contado sobre o **número de registros** do par (titular, tipo), via `countByUserIdAndType`, e **não** sobre o campo `attempts`. Cada retry cria um registro **novo** com `attempts=0` e `createdAt` fresco — qualquer limite ancorado no registro individual (contador **ou** janela de tempo sobre `createdAt`) **nunca expira** e a varredura reemite para sempre. Contar registros é auto-limitante e não exige campo novo (**sem mudança de schema**, portanto sem ADR próprio). Efeito colateral aceito: reenvios manuais consomem o mesmo orçamento.
+- **Fail-CLOSED no Redis — o único ponto do sistema assim, e é intencional.** Cache, rate limit e revogação de token são fail-open porque um Redis fora não pode barrar autenticação. Aqui o inverso: sem o lock `SETNX` (`outbox_retry:lock`) confirmado, a varredura **não roda**. Falhar aberto com N instâncias significaria N e-mails duplicados por ciclo, e pular um ciclo de 5 min não custa nada. Há teste dedicado a essa assimetria — se alguém "uniformizar" para fail-open, ele falha.
+- **ShedLock descartado:** `SETNX`+TTL com o `StringRedisTemplate` já injetado resolve, sem dependência nova. Segue o precedente do `ResendRateLimitService`/`LoginAttemptService`.
+- **Único acréscimo de infraestrutura:** índice composto `type_status_createdAt` em `notificationOutbox` — o existente (`userId_type_status`) tem `userId` no prefixo e não serve a uma busca por (tipo, status), que viraria COLLSCAN.
+
+### 2. `NoResourceFoundException` → 404 (user-service + notification-service)
+
+- **Medido antes de mexer:** `user-service:8090/actuator/health` → **500**, `notification-service:8095/actuator/health` → **500**, `notification-service:8095/foo` → **500**; auth-server e gateway já devolviam 404. Causa exata do log: `NoResourceFoundException: No static resource actuator/health`.
+- **É a mesma raiz do 405 já documentada no arquivo:** o advice não estende `ResponseEntityExceptionHandler`, e o `ExceptionHandlerExceptionResolver` roda **antes** do `DefaultHandlerExceptionResolver` — o catch-all `Exception` intercepta o que o Spring traduziria sozinho. **Regra geral para o futuro:** toda exceção que o Spring traduziria por conta própria precisa de handler explícito nesses dois advices.
+- **No notification-service o alcance era maior:** sem Spring Security, **qualquer** path não mapeado caía no catch-all — cada probe de scanner virava stack trace em ERROR, afogando erro real no log.
+- **Não confundir com o G14:** `"/actuator/**"` continua no `permitAll()` e **tem de continuar** (a chain do pai governa a 8181 — ver a entrada de 2026-08-05). O que mudou é só o status devolvido na porta de tráfego.
+
+### 3. As 19 variáveis inertes — generalização do achado do Bloco 1
+
+- **Método:** varredura de todo `${VAR}` lido pelos YAMLs do config-server, menos o que aparece em qualquer `environment:` dos três compose, menos o que chega como Docker secret via `configtree:` (caminho legítimo — é como o SMTP chega, e ignorá-lo teria produzido falso positivo). Resultado: **19 variáveis**, todas com linha própria no `docs/CONFIG.md`.
+- **Não era cosmético.** O `CONFIG.md` dava instruções **impossíveis de cumprir**: `TERMS_VERSION` ("bump quando a política mudar" — exposição LGPD, é o que prova qual texto cada titular aceitou), `TRUSTED_CLIENT_IP_HEADER` ("trocar em deploy não-Cloudflare", ADR-010), `LOCKOUT_MAX_ATTEMPTS`/`LOCKOUT_DURATION` (anti-brute-force imutável sem rebuild), e `GATEWAY_TRUSTED_PROXIES`, que o `.env.example` convidava a descomentar sem efeito algum.
+- **Lição, que é a mesma do G1 e do G14 em outra roupa:** corrigir **o caso visível** em vez da **classe** foi exatamente o que deixou o problema sobreviver ao Bloco 1. O certo é varrer a superfície no código assim que um exemplar aparece.
+- **Armadilha na correção:** nunca escrever `${VAR:-}`. O default vazio injeta string vazia e **sobrescreve** o default do YAML em vez de deixá-lo valer — regressão silenciosa. O padrão adotado é espelhar o default do YAML no compose, ao preço de o default existir em dois lugares.
+- **Verificação que faltou no Bloco 1 e agora existe:** `docker compose config | grep VAR` confirma valor resolvido e não-vazio; e o override foi provado de fato (`TERMS_VERSION=v2` → `v2` no config resolvido), não só assumido.
+- **Tipo:** correção de bug latente + fechamento de dívida documental + reversão de decisão de ADR.
+
+---
+
+## [2026-08-06] · authorization-server · user-service · Bloco 3: higiene do estado persistente (ADR-022)
+
+- **Gatilho:** implementação do "Bloco 3" do plano de capacidade. Escopo original tinha 4 itens; o operador **removeu o cache local do epoch de revogação** e **descartou a paginação por cursor** do feed de auditoria (mudança de contrato para otimizar caso de uso inexistente). Retenção da trilha fixada em **180 dias** por decisão do operador.
+- **Tema comum dos 3 itens implementados**, que justificou um ADR único em vez de três emendas: estado persistente que **cresce sem limite** ou que é escrito sob **checagem que a concorrência atravessa**. Nenhum aparece em dev; todos aparecem com N instâncias e tempo passando.
+
+### 1. Race no seed do `gateway-client`
+
+- **Confirmado no schema:** `oauth2_registered_client` tem `PRIMARY KEY (id)` e **nenhuma constraint sobre `client_id`**. O seed é `findByClientId → save`, então N instâncias gravam N linhas.
+- **O que torna isso perigoso é que nada quebra.** Todos os hashes BCrypt validam o mesmo segredo (o salt difere, a validação não), então o login continua funcionando; `findByClientId` passa a devolver `result.get(0)` de query **sem `ORDER BY`**. A duplicata só aparece meses depois, ao tentar reconciliar `redirectUri`.
+- **Descoberta durante o teste (o primeiro teste falhou e ensinou algo):** `JdbcRegisteredClientRepository.save()` chama `assertUniqueIdentifiers`, que lança **`IllegalArgumentException`** para `client_id` duplicado. Isso **não resolve a corrida** — é ele próprio um check-then-act. Duas consequências: (a) o teste tem de fazer `INSERT` **cru**, não `repository.save()`, senão testa a biblioteca e não a constraint; (b) o `catch` do seed precisa cobrir **as duas** exceções — `IllegalArgumentException` (a outra instância commitou antes do assert) e `DuplicateKeyException` (ambas passaram pelo assert e o índice barrou o INSERT). Cobrir só `DuplicateKeyException` deixaria de fora o interleaving **mais provável**.
+- **Guarda contra mascarar erro real:** o `catch` relê `findByClientId` e **propaga** se o client não estiver lá — senão um `RegisteredClient` malformado faria o serviço subir sem cliente OAuth nenhum, em silêncio. Há teste para o rethrow.
+- **Ordem que importa:** a constraint fecha a brecha; o `catch` só a torna benigna. `catch` sem constraint seria mais uma checagem em corrida.
+
+### 2. Retenção e índice de `auditLogs`
+
+- **Padrão *expire-at* (`purgeAt` + `expireAfterSeconds=0`), não TTL fixo no índice** — o mesmo idioma do `notificationOutbox`. TTL fixo prende a retenção ao valor da criação do índice: mudá-la viraria `collMod`, operação de banco, em vez de configuração.
+- **Documentos antigos não têm `purgeAt` e o TTL do Mongo os ignora** — o histórico anterior nunca é apagado. Lado seguro numa trilha de conformidade.
+- **Índice `ts_idx` `{timestamp:-1}`:** o feed geral (`GET /v1/admin/audit-logs`) é `findAll` ordenado por `timestamp` e o `target_ts_idx` **não o serve** (tem `targetUserId` no prefixo). Sem índice o sort vai para memória e o Mongo **aborta aos 32 MB** — falha que não aparece em teste e só surge com a coleção grande, isto é, quando a trilha é mais necessária. **Mesma classe de erro** do índice do outbox corrigido no Bloco 2.
+- **A dívida do ADR-011 foi contraída sob premissa que deixou de valer:** quando escrita, cada operação gravava **uma** entrada; o fix do G13 passou a gravar até 100 por requisição.
+- **Retenção é decisão de conformidade, não técnica** — está registrado no ADR e no `CONFIG.md`: se o prazo legal for maior, ajustar **antes** de a primeira entrada expirar.
+
+### 3. Purga do estado OAuth (`OAuthStatePurgeService`)
+
+- **Medido antes de mexer:** 8 de 8 linhas de `oauth2_authorization` com access **e** refresh expirados, intocadas. Não havia **um único `@Scheduled`** no módulo (o auth-server ganhou `@EnableScheduling`).
+- **O critério de morte é o `GREATEST` das seis colunas de expiração.** Filtrar por `access_token_expires_at` — a escolha óbvia — apagaria autorizações com **refresh token vivo**, deslogando usuários ativos a cada ciclo. Há teste que falha se o predicado degenerar para uma coluna só.
+- **`COALESCE(..., 'epoch')` + disjunção `IS NOT NULL`:** nulo significa "grant não usado", não "nunca expira", daí o COALESCE; mas isso tornaria uma linha **toda-nula** elegível, e o `DELETE` alcançaria estado vivo — daí a guarda. As duas cláusulas são interdependentes.
+- **Sem índice para o predicado, deliberadamente:** é expressão sobre seis colunas (só índice de expressão serviria) e a própria purga mantém a tabela **limitada**. Índice seria custo de escrita permanente para ganho nenhum. Registrado no ADR para não voltar como "otimização esquecida".
+- **Fail-closed no lock**, como o `OutboxRetryService` — mas por motivo diferente: aqui o dano de rodar concorrente não é e-mail duplicado, é duas transações disputando as mesmas linhas. Pular um ciclo não custa nada.
+- **Dívida:** purga sem métrica (só o log `| OAUTH-PURGE |`); e numa base que **já** tenha duplicatas de `client_id` a criação do índice único falha e o `continue-on-error: true` a engole em silêncio.
+- **Tipo:** fechamento de dívida de ciclo de vida de dados + correção de bug latente de concorrência.
+
+---
+
+## Elasticidade — piso mínimo e eixos de escala (ADR-024, 2026-08-07)
+
+### 1. O que motivou
+
+Auditoria de escalabilidade a pedido do operador ("dado mais hardware, o projeto escala?"). A
+resposta foi: **a camada de aplicação já escalava** — sem estado em memória, `@Scheduled` com lock
+`SETNX`, seed protegido por índice único, `instanceId` único por container (verificado no registro
+Eureka do ambiente rodando). O que faltava era infraestrutura e registro, não arquitetura. Mas a
+topologia era **fixa nas duas direções**: não encolhia (26 serviços, ~10 GB) e não crescia com
+segurança.
+
+### 2. Os três bloqueios reais (medidos, não supostos)
+
+- **Pool JDBC no default de 10 contra `max_connections=100`.** Medido no ambiente: 10 do pool + 6
+  de exporter/internas, ~84 livres → a ~9ª réplica de auth-server o Postgres recusa conexão. O
+  sintoma aparece **longe da causa** e **só sob a escala que deveria estar ajudando**. É o único
+  item que faz o scale-out *falhar* em vez de apenas não ajudar.
+- **`static_configs` no Prometheus.** `user-service:8181` resolve para UMA réplica por scrape; com
+  N > 1 as séries alternam a cada 5s e o `dashboardJVM` soma heap de processos distintos. Escalar
+  às cegas.
+- **`upstream` estático no `config-lb`.** O nginx resolve no start e **recusa iniciar** se um nome
+  não resolver — com `config-server-1/2` hardcoded, o piso mínimo era literalmente impossível.
+  Foi o achado que mudou o desenho: `config-server` virou serviço único escalável.
+
+### 3. O princípio, e por que ele decide o formato do piso
+
+**Encolher é remover nó; crescer é adicionar nó — nunca reconfigurar cliente.** Daí o piso ser
+*degenerado* e não *simplificado*: replica set `rs0` de **um membro** (não Mongo standalone) e
+**um** Sentinel (não Redis direto). `MONGODB_URI` e `spring.data.redis.sentinel.*` ficam idênticos
+do piso ao topo, e o ADR-008 vale sem emenda. O piso agressivo foi rejeitado justamente por
+transformar o caminho de volta ao HA em "reconfigurar cliente".
+
+### 4. `rs.initiate` não bastava — o erro que quase passou
+
+`rs.initiate` roda **uma vez por volume**. Parametrizar a lista de membros não resolveria nada:
+subir o piso com 1 membro e ligar `--profile ha` depois **não adicionaria membro nenhum** —
+`AlreadyInitialized`, e dois containers Mongo ociosos ao lado. Crescer exige `rs.reconfig`, daí o
+`infra/mongo/rs-reconcile.sh`.
+
+Ele decide os membros **por resolução DNS**, não por env, para não acoplar o profile a uma variável
+que se esquece de setar junto — a classe de bug das 19 variáveis inertes de 2026-08-06. E **só
+cresce, nunca encolhe**: remover membro por lookup que falhou significaria que uma falha
+transitória de DNS num restart derrubaria o quorum.
+
+### 5. Invariante que evitou apostar na versão do Compose
+
+**Nenhum serviço fora do profile `ha` declara `depends_on` para um dentro dele.** O comportamento
+do Compose nesse caso variou entre versões; a regra torna a questão irrelevante em vez de testar a
+versão instalada. Obrigou a remover esperas que, revistas, nunca deveriam existir: `sentinel-1`
+esperava `redis-2/3` (o Sentinel descobre réplicas pelo `INFO` do master), `mongodb-exporter`
+esperava `mongo-2/3` (tem `--discovering-mode`), e os 4 apps esperavam nós de redundância quando um
+de cada basta.
+
+### 6. Deixado de fora, com motivo
+
+- **`readPreference=secondaryPreferred`** para usar os secundários do piso `ha`. Global é
+  perigoso: lag de replicação faria `/internal/users/email/{email}` devolver 404 logo após o
+  cadastro, e esse 404 **conta no lockout** por desenho do ADR-021 — atraso de replicação viraria
+  conta bloqueada por 15 min. Se for feito, só nas leituras que toleram staleness.
+- **Autoscaler e Swarm:** decisão do operador. Num host único o teto de RAM chega antes do
+  benefício, e Swarm reescreveria os três compose (a seção de recursos usa `cpus`/`mem_limit`
+  justamente por não ser Swarm).
+
+### 7. Dívidas contraídas
+
+- **Bug encontrado E CORRIGIDO na verificação — replicação Eureka.** A auto-referência do
+  `discovery-server-1` (para evitar WARN contra peer inexistente no piso mínimo) fazia o `-2`
+  servir registry **sem AUTHORIZATION-SERVER**: replicação de peer no Eureka é **push**, e o fetch
+  client-side popula o cache do nó como CLIENTE, não o registry que ele SERVE. Resultado: 503 em
+  `/login` em toda réplica de gateway que sorteasse o `-2`. O piso `ha` estava quebrado pela
+  metade e os dois nós estavam `healthy` o tempo todo. **"Componente healthy" não é evidência de
+  cluster funcionando.** Corrigido para apontar sempre ao par; os ~11 WARN/min do piso mínimo
+  ficam **não silenciados** de propósito — default errado quebra, default barulhento só incomoda.
+- **Janela de ~10s ao matar réplica abruptamente:** medido 3 falhas em 60 requisições com
+  `docker stop` (o `resolver valid=10s` do nginx mantém o IP morto em cache). Com
+  `docker compose scale` (parada graciosa: SIGTERM → 35s → desregistro no Eureka), **0 falhas em
+  45**. Encolher pelo caminho suportado é limpo; matar container não é.
+- **Nada verifica que produção subiu com `--profile ha`.** O `up` do piso mínimo é silencioso e
+  bem-sucedido; o único sinal é a contagem de containers. Registrado em `SECURITY.md`.
+- **Tipo:** mudança de topologia + fechamento de dívida de escalabilidade. Sem mudança de contrato
+  de API.
+
+### 8. Encolhimento e dashboards (2026-08-07)
+
+- **Guarda de maioria no `rs-reconcile.sh` é fail-CLOSED, e isso é escolha.** A config do `rs0`
+  vive no volume: depois de um ciclo `--profile ha` ela fica com 3 membros mesmo sem mongo-2/3, e
+  mongo-1 sozinho vira SECONDARY que **recusa escrita** — com leitura OK e healthcheck verde. O
+  script saía com **sucesso** nesse estado. Agora compara configurados × alcançáveis e sai com
+  erro; como `user-service` depende dele por `service_completed_successfully`, a aplicação **não
+  sobe** contra um Mongo somente-leitura. **Por quê falhar e não avisar:** um aviso deixaria a
+  aplicação aceitar cadastros que morrem em 500, longe da causa. O caso transitório (mongo-2 ainda
+  fora do DNS na subida do `ha`) se auto-resolve pelo `restart: on-failure` que já existia.
+- **A armadilha estava armada no ambiente, não era hipótese.** Verificado antes de qualquer
+  conserto: 3 membros configurados / 1 saudável, `isWritablePrimary: false`, `insertOne` falhando
+  com `NotWritablePrimary`. Encolhimento depois validado ponta a ponta com preservação de Mongo e
+  Postgres; Redis **não** preserva (sem volume nomeado — o `VOLUME /data` da imagem é anônimo por
+  container). Runbook em `docs/CONFIG.md`.
+- **Regra de dashboard: threshold que assume o topo da escala é bug.** O `dashboardRedis` ficava
+  **vermelho permanente na topologia default** (contava os 6 nós do `ha`; o piso tem 2). Um
+  dashboard vermelho por desenho treina quem o vê a ignorá-lo. Critério de aceite adotado: **o
+  piso mínimo saudável tem de renderizar verde nos cinco dashboards** — verificado avaliando cada
+  query com threshold contra o Prometheus.
+- **Validação de PromQL não pode ser por inspeção.** Meu primeiro validador em lote reportou "0
+  queries vazias" e estava errado: `pg_settings_max_connections - sum(pg_stat_activity_count)`
+  retorna **vazio** (operação binária entre vetores com conjuntos de labels diferentes não casa).
+  Só a consulta direta ao Prometheus pegou. Corrigido para `max(...) - sum(...)`, que descarta os
+  labels dos dois lados. **Toda query de dashboard nova deve ser executada, não lida.**
+- **`count(process_uptime_seconds{...})` super-conta por até 5 min** após remover réplica (janela
+  de lookback do PromQL mantém a série da réplica morta). Medido; não é defeito da query. Anotado
+  na `description` do painel para ninguém ler 4 depois de um scale-down e achar que falhou.

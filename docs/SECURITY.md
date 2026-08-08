@@ -38,6 +38,21 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   expõem métricas, traces, hostnames internos e topologia. Também **não** há regra de ingress para
   eles no túnel (`infra/cloudflared/config.yml` roteia só `interface:80`), então não são alcançáveis
   de fora. **Não regredir** para `- "3000:3000"`: republica na LAN inteira.
+- **Actuator fora da porta de tráfego (fecha o G14):** os **quatro** serviços Spring de domínio
+  (gateway, user-service, authorization-server, notification-service) servem `/actuator/**` numa
+  porta de management dedicada — `management.server.port: 8181`, hardcoded no YAML de cada um,
+  **nunca publicada** em nenhum compose (base, override de dev ou deploy). O Prometheus raspa
+  `:8181` pela rede interna e os healthchecks do compose apontam para lá. A porta **é o controle**,
+  e é o único: ela não tem autenticação própria. **Não regredir:** publicar `8181` num compose
+  reabre o G14. A porta é hardcoded de propósito — como env, um `.env` errado devolveria o actuator
+  à porta pública sem ninguém notar.
+  > **Armadilha verificada (2026-08-05): `"/actuator/**"` no `permitAll()` dos SecurityConfig
+  > NÃO é resíduo — é load-bearing.** A chain de segurança do contexto pai governa **também** a
+  > porta de management (o contexto filho herda o filtro). Tentar "limpar" essa linha agora que o
+  > actuator saiu da porta de tráfego derruba o próprio actuator: medido no user-service → **401**
+  > em `/actuator/health` e `/actuator/prometheus` na 8181 (container `unhealthy`, Prometheus para
+  > de raspar); e no authorization-server → **302** para `/login`, com o agravante de o healthcheck
+  > continuar **passando** (`curl -f` não falha em 3xx) — falso healthy, métricas mudas.
 - **Rate limiting no gateway** (token bucket via Redis): LOW (registro/IP), MED (OAuth2/IP),
   HIGH (autenticados/user).
 - **CSRF no gateway** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`;
@@ -90,9 +105,9 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   administrativa de PII por id/e-mail** (`ADMIN_READ_USER`, ADR-016); o `/me`/leitura do próprio
   dado não é auditado. O valor `READ_CROSS_SUBJECT` está `@Deprecated` e não é mais emitido — a
   leitura de PII de terceiro virou ADMIN-only —, mas **permanece no enum** para desserializar
-  registros históricos. **Lacuna:** a *listagem* administrativa (`GET /v1/admin/users`) **não é
-  auditada**, e desde o ADR-021 é a única superfície que devolve PII de vários titulares de uma
-  vez — um ADMIN pagina a base sem deixar rastro na trilha.
+  registros históricos. A *listagem* administrativa (`GET /v1/admin/users`) — desde o ADR-021 a
+  única superfície que devolve PII de vários titulares de uma vez — **também é auditada**, com
+  `ADMIN_LIST_USERS` e **uma entrada por titular retornado** (fix do G13, ver a seção de gaps).
   `targetEmail` mascarado; `correlationId` = traceId B3 (o IP do cliente vive no log de borda do
   gateway, ADR-010). Escrita assíncrona e isolada de falha (dívida consciente detalhada na seção
   **LGPD**). **Consulta via API (ADR-014):** `GET /v1/admin/audit-logs` (feed geral) e
@@ -131,6 +146,22 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   refresh). `key-prefix` deve casar entre os serviços.
 
 ## Gaps de segurança conhecidos (dívida aceita)
+
+> **PISO MÍNIMO NÃO É HA (2026-08-07, ADR-024).** Desde a adoção do piso mínimo, `docker compose
+> up` sem argumento sobe **um** nó Mongo, **um** Redis e **um** Sentinel. Isso é elasticidade
+> (subir pequeno, crescer depois), **não** redundância: não há failover, e a perda de qualquer um
+> dos três derruba o serviço até o restart. A confusão é fácil e cara porque a topologia *parece*
+> a de antes — o replica set `rs0` e o Sentinel continuam lá, só que degenerados (um membro, um
+> sentinel), justamente para que a configuração dos clientes não mude ao crescer.
+>
+> **Para qualquer ambiente que precise sobreviver à perda de um nó, suba com `--profile ha`.** Não
+> há verificação automática disso: o `up` do piso mínimo é silencioso e bem-sucedido. O único
+> sinal é a contagem de containers (19 vs. 26) e `rs.status().members.length` (1 vs. 3).
+>
+> Vale notar o que **não** mudou: o `auth-postgres` já era e continua sendo instância única nos
+> dois pisos — é o SPOF do login (sem ele não há autenticação nova nem refresh), e réplica de
+> verdade exige uma segunda máquina. No host único o remédio disponível é backup/PITR, ainda não
+> implementado.
 
 > **"Sem TLS em prod": fechado (2026-07-28).** Deixou de ser dívida com a migração para **named
 > tunnel + domínio fixo**: a Cloudflare termina TLS numa origem **estável**, e o que antes era
@@ -247,13 +278,71 @@ tabela de dívida aceita). Os controles já ativos **não** regrediram; estes s�
 > contabilidade do circuito; o fallback continua sendo invocado (o `getAndApplyFallback` do Spring
 > Cloud captura `Throwable` sem filtro). As duas correções são interdependentes.
 
+> **G14 — `/actuator/**` sem guarda fora do gateway (MÉDIO): fechado (2026-08-05).**
+> Só o gateway isolava o actuator numa porta de management própria. Nos outros três o
+> `/actuator/**` respondia na **porta de tráfego**: `permitAll()` explícito no
+> `authorization-server` (8082) e no `user-service` (8090), e no `notification-service` (8095) sem
+> guarda alguma — o serviço não tem Spring Security e o `InternalTokenFilter` cobre só
+> `/internal/*`. Qualquer container da rede (R-09) e, sob o override de dev, qualquer host da LAN
+> lia `/actuator/metrics` e `/actuator/prometheus`: topologia, hostnames internos e volume de
+> tráfego. **Fechamento:** `management.server.port: 8181` nos três (mesmo padrão e mesma porta do
+> gateway — containers distintos, sem colisão), porta **não publicada** em nenhum compose;
+> `infra/prometheus.yml` raspa `:8181` nos quatro; healthchecks do compose apontam para 8181.
+> **Medido, não deduzido:** antes, de qualquer container da rede, `/actuator/health` respondia
+> **200** anônimo nos três e `/actuator/prometheus` devolvia o dump completo de métricas; depois,
+> a porta de tráfego responde 404/500 e o corpo não carrega métrica alguma.
+>
+> **Tentativa de defesa em profundidade que foi revertida — e por quê.** A intenção era também
+> tirar `"/actuator/**"` do `permitAll()` dos SecurityConfig, para que reverter a porta não
+> reabrisse o acesso anônimo em silêncio. **Não funciona:** a chain do contexto pai governa
+> também a porta de management, então remover a linha derruba o actuator na 8181 (user-service
+> 401 + `unhealthy`; auth-server 302 com healthcheck em falso-positivo). Revertido, e a linha
+> ficou **anotada nos três arquivos** como load-bearing. Registro do custo: a hipótese "essa linha
+> é resíduo inerte" veio de leitura estática e só caiu ao subir o sistema — é o tipo de premissa
+> que teste de unidade não pega, porque nenhum teste sobe a porta de management.
+>
+> **Correção de escopo registrada junto.** O gap foi escrito nomeando **dois** serviços; o
+> `user-service` estava na mesma situação (`SecurityConfig:86`) e ficou de fora. O achado não era
+> novo — `security-reviewer` e `senso-critico` o registraram em `.claude/memory/decisions.md`
+> (2026-08-04, "G14 deve incluir o `user-service`") e ele **nunca chegou a este documento**. É a
+> variante do post-mortem do G1: lá a doc afirmava fechado o que o código deixava aberto; aqui a
+> doc descrevia um gap menor do que o real. Mesma lição — **o escopo de um gap verifica-se
+> varrendo a superfície no código, não relendo o texto do gap**.
+>
+> **Severidade em perspectiva (não regredir a análise):** a exposure dos quatro serviços sempre
+> foi só `health, info, metrics, prometheus` — nunca `env`, `heapdump`, `threaddump` ou `beans`.
+> Não havia vazamento de segredo ou de memória; o gap era de reconhecimento. **Resíduo aceito:** a
+> porta de management não tem autenticação — o controle é ela não ser publicada e a rede Docker ser
+> interna. Numa rede compartilhada com terceiros (o que R-09 já cobre), isso não bastaria.
+> **Não afetado:** os discovery-servers seguem servindo o actuator na porta principal (9091/9092),
+> e o config-server tem controle próprio (HTTP Basic, com `/actuator/health` aberto).
+
+> **G13 — Listagem administrativa não auditada (MÉDIO): fechado (2026-08-05).**
+> `GET /v1/admin/users` devolvia PII paginada de vários titulares sem emitir nada na trilha LGPD
+> — só as leituras por id/e-mail auditavam. Desde o ADR-021 é a **única** superfície de listagem
+> do sistema, então um ADMIN (ou um token ADMIN comprometido) exfiltrava a base inteira sem
+> rastro. **Fechamento:** ação nova `ADMIN_LIST_USERS`, emitida por
+> `AuditService.recordBulkFromJwt` a partir do `AdminController.listAllUsers`.
+>
+> **Decisão de modelagem — uma entrada por titular retornado, não uma agregada por requisição.**
+> O `AuditLog` tem `targetUserId` singular e o índice `(targetUserId, timestamp desc)` serve
+> `GET /v1/admin/users/{id}/audit-logs`; uma entrada agregada (`targetUserId=null`) registraria o
+> evento mas **não apareceria no histórico de titular algum** — ou seja, registraria a leitura sem
+> responder "quem acessou o *meu* dado?", que é a pergunta que a trilha existe para responder.
+> Guarda automatizada: `AuditLogIntegrationTest.listagemAdministrativa_deveAparecerNoHistoricoDeCadaTitular`.
+>
+> **Dívida assumida no fechamento:** volume. Uma página no teto (`MAX_AUDIT_PAGE_SIZE=100`) grava
+> 100 entradas — num único `insert` em lote, mas numa coleção que segue **sem TTL** (dívida do
+> ADR-011, agora mais cara). Se a coleção crescer demais, a saída é TTL/arquivamento, **não**
+> voltar à entrada agregada. Os filtros aplicados (`active`/`name`/`email`) **não** são
+> registrados: exigiriam campo novo no schema, e os titulares alcançados já são o dado forense
+> relevante.
+
 | Gap | Severidade | Cenário de exploração | Caminho de correção |
 | --- | --- | --- | --- |
 | **G5 — `/v1/admin/**` sem 2FA nem tier dedicado** | MÉDIO | As rotas admin caem no tier MED por-usuário genérico; não há step-up auth/2FA nem rate-limit mais restritivo para mutações destrutivas (`DELETE /v1/admin/users/del/{id}` hard-delete). Combinado com a ausência de revogação ativa de token, o blast radius de um token ADMIN comprometido é alto. | 2FA/step-up para ADMIN e/ou tier dedicado para deletes |
 | **G4 — CORS pattern curinga (risco operacional)** | BAIXO | `CORSConfig` usa `setAllowedOriginPatterns(allowedOrigins)` + `allowCredentials(true)`. Seguro hoje (default `localhost:5173`, não-wildcard), mas como vem de `CORS_ALLOWED_ORIGINS`, um pattern curinga setado por engano em prod vira exfiltração cross-origin **com credenciais**. | Validar/rejeitar pattern curinga quando `allowCredentials=true` |
 | **G8 — Sem invalidação de sessões concorrentes** | BAIXO | Não há limite/registro de sessões simultâneas; um usuário pode manter N sessões ativas e o logout encerra só a corrente. Combinado com a ausência de revogação ativa, sessões antigas não são revogáveis centralmente. | Limitar/registrar sessões concorrentes (Spring Session) |
-| **G13 — Listagem administrativa não auditada** | MÉDIO | `GET /v1/admin/users` devolve PII paginada de vários titulares e **não emite `ADMIN_READ_USER`** — só as leituras por id/e-mail auditam. Desde o ADR-021 é a única superfície de listagem do sistema, então um ADMIN (ou um token ADMIN comprometido) exfiltra a base inteira sem deixar rastro na trilha LGPD. Dívida herdada do ADR-011/ADR-014, tornada mais relevante por ser agora o único caminho. | Emitir `ADMIN_READ_USER` (ou ação própria, ex. `ADMIN_LIST_USERS`) na listagem, com o filtro aplicado no payload de auditoria |
-| **G14 — `/actuator/**` sem guarda fora do gateway** | MÉDIO | Só o gateway isola o actuator em porta de management própria (8181, não publicada). No **authorization-server** `/actuator/**` está em `permitAll()` (`SecurityConfig`); no **notification-service** não há Spring Security algum e o `InternalTokenFilter` cobre só `/internal/*` — o actuator responde na mesma porta 8095, publicada em `0.0.0.0` pelo override de dev. `/actuator/metrics` e `/prometheus` expõem topologia, hostnames internos e volume de tráfego. O ADR-021 tirou o `/v3/api-docs` do notification-service, mas **não** fecha isto. | `management.server.port` separado nos demais módulos (padrão que o gateway já usa), com ajuste em `infra/prometheus.yml` e nos compose |
 | **R-09 — Rede flat Docker (dívida aceita, ADR-019)** | BAIXO | Um container hostil na mesma rede Docker (`user-service-net`) alcança `gateway:8081` diretamente e pode forjar `X-Forwarded-*`, independentemente de `trusted-proxies` (que só protege contra peers externos) e do G10. Resíduo pré-existente — ADR-010 não cobre a rede interna. Mitigação atual: o modelo de ameaça assume que todos os containers da rede são do projeto. | Rede Docker isolada por serviço (network segmentation) em prod |
 
 > **G12 — `OAUTH_CLIENT_SECRET` servido publicamente pelo Swagger (ALTO): fechado (2026-08-04, [ADR-020](adr/ADR-020-swagger-atras-da-sessao.md)).**
@@ -287,6 +376,24 @@ tabela de dívida aceita). Os controles já ativos **não** regrediram; estes s�
 > `script-src`, registrada em G3) deixou de valer para rota pública.
 
 > **G10 — Portas do host publicadas na base do compose: fechado (2026-08-03, [ADR-019](adr/ADR-019-correcao-elos-login-hostname-unico.md)).** Os dois blocos `ports:` (`8081:8081` do gateway e `${WEB_HOST_PORT:-5173}:80` da interface) foram movidos para `docker-compose.override.yml`. A base prod-safe não publica mais nenhuma porta de aplicação no host — a premissa do ADR-010 é agora verdadeira na topologia base. G10 era pré-requisito do `trusted-proxies` (os dois controles são interdependentes: RFC1918 amplo seria inseguro com as portas abertas). **Dívida residual aceita:** rede flat Docker (R-09, adicionada na tabela abaixo).
+
+> **Gap de asseguramento da topologia de hostname único: fechado (2026-08-06, [ADR-023](adr/ADR-023-smoke-test-automatizado-login-hostname-unico.md)).**
+> Não era vulnerabilidade, e sim a **ausência de barreira**: os quatro elos do ADR-019 (Elo 2
+> `trusted-proxies`, Elo 3 `/login` e `/default-ui.css` no nginx, Elo 6 XFF reescrevendo
+> `remoteAddress`, BUG-001 CSRF do gateway barrando `POST /login`) foram **todos** descobertos ao
+> vivo, em produção — os controles ADR-010/018/019 só tinham verificação manual no browser, depois
+> do deploy. Nenhuma camada de teste exercitava a cadeia: unitários e `@WebMvcTest` batem no
+> controller, os Testcontainers nunca sobem o container `interface`, o `compose-validate` valida
+> sintaxe YAML, e o dev local vai direto a `localhost:8082`.
+> **Fechamento:** `infra/smoke-test/login-topology-smoke-test.sh` + job `smoke-test-login` no CI —
+> sobe a topologia de deploy (menos o `cloudflared`) e valida 5 asserções HTTP contra ela, a cada
+> push/PR. A mitigação originalmente proposta (checklist manual de smoke-test) foi **rejeitada**
+> por repetir o antipadrão que causou o Elo 1: depender de o operador lembrar de rodar algo — o
+> mesmo motivo pelo qual o `assert-env` existe como invariante forçada em vez de comentário.
+> **Escopo residual, de propósito:** R-09 (rede flat) e os CSRF latentes BUG-002/BUG-004/BUG-005
+> continuam fora — são riscos de outra natureza, não bugs de roteamento pegáveis por asserção HTTP
+> contra a topologia normal. Detalhes das asserções em
+> [docs/TESTES.md](TESTES.md#smoke-test-da-topologia-de-login-adr-023).
 
 **G9 — Scan transitivo de dependências pendente.** As versões diretas (Spring Boot 4.0.3 /
 Spring Cloud 2025.1.0 / Java 21) não têm CVE conhecida no patch level, mas o scan **transitivo**
@@ -381,8 +488,10 @@ controles já implementados e o que ainda falta.
 | **Notificação de incidente** | ⚠️ Parcial | A auditoria (`auditLogs`) e a observabilidade sustentam a investigação; falta **plano** formal de resposta/notificação e alertas (Alertmanager) sobre os SLOs. |
 
 **Dívida da trilha de auditoria (consciente):** escrita assíncrona → risco de perda em crash antes do
-flush; a listagem (`GET /v1/users`) não é auditada; sem retenção/TTL definidos. O endpoint de
-consulta já existe (`GET /v1/admin/audit-logs` e `.../users/{id}/audit-logs`, ADMIN-only,
+flush; **sem retenção/TTL definidos** — dívida que ficou mais cara com o fix do G13, já que uma
+listagem no teto de página grava 100 entradas. (A cláusula "a listagem `GET /v1/users` não é
+auditada" saiu daqui em 2026-08-05: essa rota não existe desde o ADR-021, e a listagem
+administrativa que a substituiu é auditada.) O endpoint de consulta já existe (`GET /v1/admin/audit-logs` e `.../users/{id}/audit-logs`, ADMIN-only,
 [ADR-014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md)) — fecha parcialmente a dívida
 original. Detalhe e racional em [ADR-011](adr/ADR-011-trilha-auditoria-dado-pessoal.md).
 

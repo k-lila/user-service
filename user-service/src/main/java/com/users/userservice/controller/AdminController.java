@@ -25,6 +25,7 @@ import com.users.userservice.dtos.UpdateRolesRequestDTO;
 import com.users.userservice.services.AdminService;
 import com.users.userservice.services.AdminService.RoleUpdateResult;
 import com.users.userservice.services.AuditService;
+import com.users.userservice.services.AuditService.AuditTarget;
 import com.users.userservice.services.EmailVerificationService;
 import com.users.userservice.services.RegisterService;
 
@@ -71,7 +72,8 @@ public class AdminController {
             @RequestParam(required = false) Boolean active,
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String email,
-            Pageable pageable) {
+            Pageable pageable,
+            @AuthenticationPrincipal Jwt jwt) {
         LOGGER.info(
             "| GET | ADMIN listagem | página: {}x{}, active: {}",
             pageable.getPageSize(),
@@ -79,6 +81,15 @@ public class AdminController {
             active
         );
         Page<AdminUserResponseDTO> users = adminService.listAllUsers(active, name, email, pageable);
+        // Fix G13: a listagem é leitura de PII de vários titulares e precisa deixar rastro na
+        // trilha LGPD — uma entrada por titular da página, para aparecer no histórico de cada um.
+        auditService.recordBulkFromJwt(
+            AuditAction.ADMIN_LIST_USERS,
+            jwt,
+            users.getContent().stream()
+                    .map(user -> new AuditTarget(user.getId(), user.getEmail()))
+                    .toList()
+        );
         return ResponseEntity.ok(users);
     }
 

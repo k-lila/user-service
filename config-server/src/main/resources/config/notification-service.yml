@@ -7,6 +7,13 @@ spring:
     timeout-per-shutdown-phase: 30s
   application:
     name: notification-service
+  threads:
+    virtual:
+      # O NotificationController bloqueia até JavaMailSender.send() retornar, e os timeouts de
+      # socket SMTP abaixo são de 10s cada — é o bloqueio mais longo do ecossistema. Em virtual
+      # thread essa espera deixa de custar uma thread de plataforma do Tomcat. Sem JDBC no
+      # serviço, não há o risco de pinning que manteve o authorization-server fora.
+      enabled: true
   mail:
     host: ${SMTP_HOST:localhost}
     port: ${SMTP_PORT:1025}
@@ -53,9 +60,14 @@ internal:
     token: ${INTERNAL_API_TOKEN}
 
 eureka:
+  # Timings de convergência — mesmos valores dos demais serviços (racional em user-service.yml).
   client:
     service-url:
       defaultZone: ${EUREKA_URI:http://localhost:9091/eureka}
+    registry-fetch-interval-seconds: 10
+  instance:
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
 
 logging:
   pattern:
@@ -67,6 +79,13 @@ logging:
 # a ausência da dependência não é.
 
 management:
+  # Actuator numa porta de management interna (não publicada no host): a porta de
+  # tráfego (8095) deixa de servir /actuator/**, fechando o acesso anônimo a
+  # /prometheus e /metrics (gap G14). Aqui é o ÚNICO controle — este serviço não tem
+  # Spring Security (o InternalTokenFilter cobre só /internal/*). O Prometheus
+  # continua raspando por esta porta na rede interna (ver infra/prometheus.yml).
+  server:
+    port: 8181
   tracing:
     enabled: true
     propagation:

@@ -17,6 +17,21 @@
           "text": "user-service",
           "value": "user-service"
         }
+      },
+      {
+        "name": "instance",
+        "label": "réplica",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(jvm_memory_used_bytes{application=\"$application\"}, instance)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -29,10 +44,25 @@
 
     {
       "type": "stat",
-      "title": "Uptime",
+      "title": "Réplicas",
+      "description": "Quantos processos deste serviço estão de pé. O eixo replicável do ADR-024 cresce por `--scale <svc>=N`, e o Prometheus descobre um target por réplica via dns_sd_configs (tipo A na porta de management 8181). Réplica nova leva ~25s para receber tráfego: ~14s de boot mais a convergência do Eureka (fetch 10s) e do cache do Spring Cloud LoadBalancer (5s). ATENÇÃO ao encolher ou recriar: a série da réplica removida continua sendo contada por até 5 min (a janela de lookback do PromQL), então este número fica transitoriamente ALTO — medido, e não um defeito da query. Se precisar do valor exato na hora, confira os targets ativos em /targets no Prometheus.",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "max(process_uptime_seconds{application=\"$application\"})"
+          "expr": "count(process_uptime_seconds{application=\"$application\"})"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 1, "w": 4, "h": 4 }
+    },
+
+    {
+      "type": "stat",
+      "title": "Uptime (réplica mais nova)",
+      "description": "min, não max, DE PROPÓSITO. Com N réplicas o max mostra a mais antiga e esconde exatamente a que reiniciou; o min denuncia crash-loop e mostra a réplica nova entrando na rotação.",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "min(process_uptime_seconds{application=\"$application\",instance=~\"$instance\"})"
         }
       ],
       "fieldConfig": {
@@ -40,15 +70,16 @@
           "unit": "s"
         }
       },
-      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 4, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
-      "title": "CPU do Processo",
+      "title": "CPU do Processo (pior réplica)",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "max(process_cpu_usage{application=\"$application\"})"
+          "expr": "max(process_cpu_usage{application=\"$application\",instance=~\"$instance\"})"
         }
       ],
       "fieldConfig": {
@@ -63,29 +94,31 @@
           }
         }
       },
-      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 9, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
-      "title": "Threads vivas",
+      "title": "Threads vivas (pior réplica)",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "max(jvm_threads_live_threads{application=\"$application\"})"
+          "expr": "max(jvm_threads_live_threads{application=\"$application\",instance=~\"$instance\"})"
         }
       ],
-      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 14, "y": 1, "w": 5, "h": 4 }
     },
 
     {
       "type": "stat",
-      "title": "Classes carregadas",
+      "title": "Classes carregadas (pior réplica)",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "max(jvm_classes_loaded_classes{application=\"$application\"})"
+          "expr": "max(jvm_classes_loaded_classes{application=\"$application\",instance=~\"$instance\"})"
         }
       ],
-      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+      "gridPos": { "x": 19, "y": 1, "w": 5, "h": 4 }
     },
 
     {
@@ -95,15 +128,17 @@
 
     {
       "type": "timeseries",
-      "title": "Heap usado vs máximo",
+      "title": "Heap usado por réplica vs teto",
+      "description": "O painel ANTIGO comparava sum(usado) com sum(máximo). Com 3 réplicas os dois lados triplicam: a razão se preserva e uma réplica a 95% de heap desaparece na média das outras duas — o dado por réplica estava sendo coletado e descartado na visualização. Agora cada réplica é uma série, comparada com UMA linha de teto (o limite é o mesmo para todas, vem do -XX:MaxRAMPercentage=60 sobre o mem_limit).",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(jvm_memory_used_bytes{application=\"$application\",area=\"heap\"})",
-          "legendFormat": "usado"
+          "expr": "sum by (instance) (jvm_memory_used_bytes{application=\"$application\",instance=~\"$instance\",area=\"heap\"})",
+          "legendFormat": "{{instance}}"
         },
         {
-          "expr": "sum(jvm_memory_max_bytes{application=\"$application\",area=\"heap\"})",
-          "legendFormat": "máximo"
+          "expr": "max(sum by (instance) (jvm_memory_max_bytes{application=\"$application\",instance=~\"$instance\",area=\"heap\"}))",
+          "legendFormat": "teto (por réplica)"
         }
       ],
       "fieldConfig": {
@@ -116,11 +151,12 @@
 
     {
       "type": "timeseries",
-      "title": "Non-heap usado",
+      "title": "Non-heap usado por réplica",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(jvm_memory_used_bytes{application=\"$application\",area=\"nonheap\"})",
-          "legendFormat": "non-heap"
+          "expr": "sum by (instance) (jvm_memory_used_bytes{application=\"$application\",instance=~\"$instance\",area=\"nonheap\"})",
+          "legendFormat": "{{instance}}"
         }
       ],
       "fieldConfig": {
@@ -134,9 +170,11 @@
     {
       "type": "timeseries",
       "title": "Memória por pool",
+      "description": "Mantém a quebra por pool (não por réplica) porque aqui a pergunta é diagnóstica — QUAL região está crescendo. Quebrar por réplica junto produziria pools × réplicas séries. Para ver um processo isolado, escolha a réplica no dropdown.",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(jvm_memory_used_bytes{application=\"$application\"}) by (id)",
+          "expr": "sum(jvm_memory_used_bytes{application=\"$application\",instance=~\"$instance\"}) by (id)",
           "legendFormat": "{{id}}"
         }
       ],
@@ -156,9 +194,11 @@
     {
       "type": "timeseries",
       "title": "GC — pausas/s",
+      "description": "Quebrado por coletor/causa, não por réplica, pelo mesmo motivo de 'Memória por pool'. Use o dropdown de réplica para isolar um processo.",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(rate(jvm_gc_pause_seconds_count{application=\"$application\"}[1m])) by (action, cause)",
+          "expr": "sum(rate(jvm_gc_pause_seconds_count{application=\"$application\",instance=~\"$instance\"}[1m])) by (action, cause)",
           "legendFormat": "{{action}} ({{cause}})"
         }
       ],
@@ -168,9 +208,10 @@
     {
       "type": "timeseries",
       "title": "GC — tempo gasto/s",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(rate(jvm_gc_pause_seconds_sum{application=\"$application\"}[1m])) by (action, cause)",
+          "expr": "sum(rate(jvm_gc_pause_seconds_sum{application=\"$application\",instance=~\"$instance\"}[1m])) by (action, cause)",
           "legendFormat": "{{action}} ({{cause}})"
         }
       ],
@@ -189,15 +230,12 @@
 
     {
       "type": "timeseries",
-      "title": "Threads (vivas / daemon)",
+      "title": "Threads vivas por réplica",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "max(jvm_threads_live_threads{application=\"$application\"})",
-          "legendFormat": "vivas"
-        },
-        {
-          "expr": "max(jvm_threads_daemon_threads{application=\"$application\"})",
-          "legendFormat": "daemon"
+          "expr": "jvm_threads_live_threads{application=\"$application\",instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
         }
       ],
       "gridPos": { "x": 0, "y": 32, "w": 8, "h": 8 }
@@ -206,9 +244,10 @@
     {
       "type": "timeseries",
       "title": "Threads por estado",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "sum(jvm_threads_states_threads{application=\"$application\"}) by (state)",
+          "expr": "sum(jvm_threads_states_threads{application=\"$application\",instance=~\"$instance\"}) by (state)",
           "legendFormat": "{{state}}"
         }
       ],
@@ -217,15 +256,17 @@
 
     {
       "type": "timeseries",
-      "title": "CPU (processo / sistema)",
+      "title": "CPU do processo por réplica",
+      "description": "Uma réplica com CPU destoante das demais sob a mesma carga é o sinal de que o balanceamento não está uniforme — cruze com 'RPS por réplica' no dashboard HTTP. O caminho via Eureka distribui em round-robin exato; o via DNS (nginx do SPA e config-lb) é enviesado, porque a ordem dos endereços resolvidos fica fixa durante a janela do `valid=10s`.",
+      "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "max(process_cpu_usage{application=\"$application\"})",
-          "legendFormat": "processo"
+          "expr": "process_cpu_usage{application=\"$application\",instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
         },
         {
-          "expr": "max(system_cpu_usage{application=\"$application\"})",
-          "legendFormat": "sistema"
+          "expr": "max(system_cpu_usage{application=\"$application\",instance=~\"$instance\"})",
+          "legendFormat": "sistema (host)"
         }
       ],
       "fieldConfig": {
