@@ -142,3 +142,53 @@
   nenhum AC o decompõe (só o DoD item 8 o pegaria, tarde). Recomendar verificação explícita:
   `Set-Cookie SESSION` com Secure+Lax no callback e ausência de `authorization_request_not_found`/state mismatch.
 - **Status:** RESOLVIDO (2026-08-03, revisão FASE 6 `full` → APPROVED_WITH_OBSERVATIONS). B-A: humano decidiu manter PUBLIC_HOST com asserção de coerência (`assert-env`, `docker-compose.deploy.yml`), README/DOMINIO/deploy.yml no escopo. B-B: R-00 usa `db.getSiblingDB('user-db')`. Críticos C-A (premissa CSV vs JSON array) e C-B (dois filtros SCG) corrigidos; AC-24 (quarto elo) e R-09 (rede flat) incorporados. PENDENTE (não bloqueia merge, mas gate): ACs só observáveis sob HTTPS/proxy reais (AC-01/02/03/04, AC-24, AC-B0A-01/02/04, AC-B0B-02) a confirmar no browser pós-rebuild.
+
+
+## [2026-08-07] BLOCK-006 · TASK-REVALIDACAO-EMISSAO · authorization-server + gateway
+- **Origem:** senso-critico (revisão adversarial da spec, workflow feature.md FASE 2, rodada 1/2)
+- **Severidade:** BLOQUEADOR (P0)
+- **Agente responsável:** product-manager (correção da spec `.claude/memory/spec-TASK-REVALIDACAO-EMISSAO.md`)
+- **Referência:** B-1 = AC-18/AC-19 + gateway/.../config/SecurityConfig.java:132-134 + filter/RevocationWebFilter.java:47,54 + test/.../AbstractGatewayIntegrationTest.java:37; B-2 = AC-25/R-02 + infra/smoke-test/login-topology-smoke-test.sh:354-385; B-3 = AC-15 × AC-16; B-4 = AC-09/R-09 + listeners/LoginAttemptListener.java:44-49
+- **Descrição:**
+  B-1 (segundo decoder sequestra o resource server) — o gateway não declara `ReactiveJwtDecoder`;
+  ele vem da autoconfig `ReactiveOAuth2ResourceServerJwtConfiguration`, que é
+  `@ConditionalOnMissingBean(ReactiveJwtDecoder.class)`. Declarar o decoder leniente da correção (5)
+  como bean desse tipo DESLIGA a autoconfig e o resource server passa a aceitar bearer JWT
+  **expirado**. `RevocationWebFilter` injeta por tipo (ambiguidade) e os testes de integração
+  MOCKAM o decoder — nenhum teste atual pegaria. Exigir AC: decoder leniente NÃO resolvível como o
+  `ReactiveJwtDecoder` do resource server + teste de que bearer expirado continua 401.
+  B-2 (AC-25 não é acionável; R-02 fica aberto) — "asserções REVISITADAS" não é verificável e a
+  instrução está fora do Gherkin. Após o fix a asserção (d) (igualdade com `${PUBLIC_ORIGIN}/login`,
+  script:381) passa tanto com o fix correto quanto com "invalida toda sessão sempre". Exigir sexta
+  asserção de caminho feliz no script: registrar titular (`POST /v1/users/register`, dentro da
+  carência do ADR-015) → `POST /login` real → `GET /oauth2/authorize` com aquele `AUTHSESSION` →
+  302 cujo `Location` começa com `${PUBLIC_ORIGIN}/login/oauth2/code/gateway-client` e contém
+  `code=`. Viável: o script já sobe user-service+mongo-1 (:197-200) e já extrai AUTHSESSION+_csrf (:299-316).
+  B-3 (contradição interna sobre o instante do teto) — AC-15 diz que o teto (AC-16) usa o carimbo
+  de autenticação com fallback `getCreationTime()`; AC-16 diz que compara `getCreationTime()`. Os
+  dois divergem sempre que a sessão nasceu anônima (CSRF + saved request) antes do login, que é o
+  caminho normal do BFF. Fixar um.
+  B-4 (a re-derivação pode ZERAR o lockout) — R-09 é falso positivo no eixo do incremento
+  (`LoginAttemptListener:38-42` só conta `AuthenticationFailureBadCredentialsEvent` do
+  `ProviderManager`), mas `:44-49` **zera** o contador em `AuthenticationSuccessEvent`
+  (`loginSucceeded`). A correção (3) adiciona listener nesse mesmo evento; se a re-derivação usar
+  `AuthenticationManager`, toda visita a `/oauth2/authorize` anula o lockout do ADR-010 sem prova de
+  senha. Exigir AC negativo: contador do par (conta, IP) inalterado após N acessos e nenhum evento
+  de autenticação publicado.
+- **Críticos (não bloqueiam o handoff):** C-1 R-04 sem AC e sem o teto de 5 min do TTL de
+  `authByEmail` (CacheConfig.java:48); C-2 AC-18 satisfeito por decoder mockado (R-11 sem rede);
+  C-3 nenhum AC exige o filtro exercitado na filter chain real (ordem na chain não é mencionada →
+  fix inerte com build verde); C-4 escopo do filtro só por negativas (a chain @Order(1) casa TODO o
+  `endpointsMatcher` do SAS); C-5 tipo do atributo de sessão não fixado por AC (precedente ADR-021,
+  `SerializationException`); C-6 troca do próprio e-mail passa a deslogar (RegisterService:102-116),
+  sem AC; C-7 "teto absoluto" depende do TTL do refresh token, que não é congelado (AC-21 congela só
+  grant types; não há `tokenSettings` no repo → defaults do SAS); C-8 sem AC de observabilidade das
+  decisões do filtro; C-9 AC-22 não exige as envs no anchor `x-spring-app-env`/`.env.example`.
+- **Verificado OK (não re-litigar):** R-08 confirmado JÁ MITIGADO (`authorization-server.yml:173-174`,
+  `ignoreExceptions: [feign.FeignException$NotFound]`); todas as referências arquivo:linha da spec
+  conferem; contrato Feign `IUserClient`↔`InternalUserController` e claims do JWT inalterados
+  (TokenCustomizerConfig intocado, DoD-10); invariante "auth-server não acessa Mongo" preservada;
+  chaves de cache e `revoke:user:{userID}` sem mudança; cookies/namespaces de sessão inalterados;
+  AC-09 (ignorar `accountNonLocked`) é correto e necessário (`AuthorizationService.java:99`).
+- **Pendência de pipeline:** `security-reviewer` (FASE 5) obrigatório — `security_surface_touched: true`.
+- **Status:** RESOLVIDO (2026-08-07, FASE 2 rodada 2/2 -> APPROVED_WITH_OBSERVATIONS). B-1 fechado por AC-31+AC-30 (o par; AC-31 sozinho passaria no cenario que ele visa). B-2 por AC-25(f), verificada como implementavel com o CODE_CHALLENGE :65 e a extracao de AUTHSESSION/_csrf :304-306 ja existentes. B-3 por AC-16 reescrito. B-4 por AC-32+AC-38+AC-08. Seis restricoes escritas seguem a FASE 3 e uma pendencia humana (P-01) gateia o merge — ver decisions.md [2026-08-07].

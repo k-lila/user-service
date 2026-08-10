@@ -117,6 +117,14 @@ security:
   revocation:
     enabled: ${TOKEN_REVOCATION_ENABLED:true}
     key-prefix: ${TOKEN_REVOCATION_KEY_PREFIX:revoke:user:}
+    # JWKS lido pelo RevocationTokenReader (ADR-025), que verifica ASSINATURA e ignora `exp` para
+    # extrair userID/iat do access token da sessão. Antes, a checagem usava o decoder do resource
+    # server e, com o token expirado, era pulada inteira (fail-open observado 3× em 35 min).
+    # Endereço INTERNO de propósito: o JWT é validado pela rede Docker, como AUTH_ISSUER_URI.
+    # ATENÇÃO: um valor errado aqui não quebra nada visível — o decoder falha sempre, o filtro cai no
+    # fail-open e a correção fica INERTE COM BUILD VERDE. O WARN "falha na checagem de borda" com a
+    # causa é o sinal a procurar.
+    jwk-set-uri: ${REVOCATION_JWK_SET_URI:${AUTH_ISSUER_URI:http://localhost:8082}/oauth2/jwks}
 
 eureka:
   # Timings de convergência — mesmos valores dos demais serviços (racional em user-service.yml).

@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 
@@ -13,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
@@ -59,6 +62,37 @@ class RegisteredClientSeedIntegrationTest extends AbstractAuthIntegrationTest {
         // ASSERT — nenhuma duplicação
         assertEquals(1, registrosAntes, "a subida do contexto deve ter semeado exatamente um registro");
         assertEquals(1, contarRegistros(), "reexecutar o seed não deve duplicar o gateway-client");
+    }
+
+    @Test
+    void deveCongelarGrantTypes_paraQueNovoGrantQuebreOBuild() {
+        // AC-21 (ADR-025). A re-derivação na emissão cobre o caminho do AUTHORIZATION_CODE; o
+        // REFRESH_TOKEN é coberto pelo RevocationRefreshGuard (ADR-017). Um TERCEIRO grant type
+        // entraria sem passar por nenhum dos dois — este teste é o que transforma "ninguém percebeu"
+        // em build vermelho até alguém estender a cobertura.
+        RegisteredClient cliente = new JdbcRegisteredClientRepository(jdbcTemplate).findByClientId(CLIENT_ID);
+
+        assertNotNull(cliente);
+        assertEquals(
+                Set.of(AuthorizationGrantType.AUTHORIZATION_CODE, AuthorizationGrantType.REFRESH_TOKEN),
+                cliente.getAuthorizationGrantTypes(),
+                "grant types do gateway-client congelados: acrescentar um exige estender a cobertura do ADR-025");
+    }
+
+    @Test
+    void deveCongelarTokenSettings_queDefinemAGranularidadeDoTetoDeVida() {
+        // AC-21 (ADR-025). O teto de vida da sessão do IdP NÃO é absoluto: quem renova por
+        // refresh_token não passa pelo /oauth2/authorize, então a granularidade real do teto é ≈ a
+        // vida do refresh token. Estes são hoje os defaults do SAS (não há tokenSettings no
+        // repositório); congelá-los é o que impede a granularidade de mudar sem ninguém notar — e é
+        // por isso que a ADR-025 DECLARA a granularidade em vez de dizer "teto absoluto".
+        RegisteredClient cliente = new JdbcRegisteredClientRepository(jdbcTemplate).findByClientId(CLIENT_ID);
+
+        assertNotNull(cliente);
+        assertEquals(Duration.ofMinutes(60), cliente.getTokenSettings().getRefreshTokenTimeToLive(),
+                "mudar a vida do refresh token muda a granularidade do teto do ADR-025");
+        assertTrue(cliente.getTokenSettings().isReuseRefreshTokens(),
+                "reuseRefreshTokens afeta por quanto tempo uma credencial pré-revogação sobrevive");
     }
 
     @Test

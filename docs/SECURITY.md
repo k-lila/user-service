@@ -141,9 +141,41 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   abortam o grant `refresh_token` (`invalid_grant`) quando a revogação é mais recente que o refresh token
   apresentado — sem isso o gateway renovaria o access token silenciosamente, perpetuando credenciais
   válidas. **Fail-open** (erro de Redis → não bloqueia; disponibilidade sobre rigor), toggle
-  `security.revocation.enabled`. **Invariante:** revogação força re-autenticação (re-login re-deriva
-  roles e aplica o gate de e-mail/`active`, ADR-015). Janela residual ≈ segundos (era *indefinida* via
-  refresh). `key-prefix` deve casar entre os serviços.
+  `security.revocation.enabled`. **Invariante corrigida (2026-08-08, ADR-025):** a revogação invalida
+  token vivo e refresh — mas **não bastava para forçar re-autenticação**. Enquanto a sessão do IdP
+  vivesse, o `/oauth2/authorize` reemitia credencial nova com `iat = agora`, e como as três checagens
+  daqui comparam `iat < epoch`, todas aprovavam por construção. Quem força a re-autenticação de fato é
+  a **re-derivação na emissão** (abaixo). Janela residual ≈ segundos (era *indefinida* via refresh).
+  `key-prefix` deve casar entre os serviços.
+- **Re-derivação do estado do titular na emissão ([ADR-025](adr/ADR-025-revalidacao-estado-emissao.md)
+  — fecha o SSO silencioso sobre estado obsoleto):** o `AuthorizationEndpointRevalidationFilter`
+  (chain `@Order(1)`, após o `SecurityContextHolderFilter`, matcher positivo derivado de
+  `AuthorizationServerSettings.getAuthorizationEndpoint()`) re-deriva o titular por
+  `AuthorizationService.loadUserByUsername` — o **mesmo** método do form login, o que herda de graça o
+  gate de `active`, o de e-mail com carência (ADR-015) e a distinção 404 × indisponibilidade
+  (ADR-021). Compara **existência × `enabled` × authorities** (incluindo a authority `USER_ID:`, sem a
+  qual um delete + re-registro com o mesmo e-mail cunharia token apontando para documento
+  inexistente); divergindo, **invalida** a sessão em vez de atualizá-la in-place. `accountNonLocked`
+  fica fora **de propósito** — se conta bloqueada invalidasse sessão viva, errar cinco senhas
+  derrubaria a sessão de terceiro e o lockout do ADR-010 viraria DoS. A chamada é **direta** ao
+  `UserDetailsService`, nunca via `AuthenticationManager`: este publicaria `AuthenticationSuccessEvent`
+  e o `LoginAttemptListener` **zeraria o lockout sem prova de senha**. Complementos: **teto de vida**
+  da sessão (`security.session.max-lifetime`, 8h) ancorado no **instante de autenticação** carimbado
+  na sessão (não em `getCreationTime()`, que no BFF mede também a sessão anônima) — granularidade real
+  ≈ 60 min, a vida do refresh token, porque quem renova por refresh não passa pelo authorize; e
+  **degradação por epoch** quando o user-service está fora (fail-open no Redis). Toggle
+  `security.session.revalidation.enabled` é **reversão operacional**, não modo de operação: em `false`
+  o sistema volta ao comportamento vulnerável. Toda invalidação loga o motivo
+  (`NOT_FOUND | DISABLED | AUTHORITIES_DIVERGED | MAX_LIFETIME | REVOKED_EPOCH`), e **`NOT_FOUND` é
+  ambíguo por desenho** — titular eliminado *ou* titular que trocou o e-mail.
+- **Fim do fail-open da borda com token expirado (ADR-025):** o `RevocationWebFilter` passou a ler
+  `userID`/`iat` por um `RevocationTokenReader` que verifica **assinatura** e ignora `exp`. Antes, com
+  o access token da sessão vencido (observado 3× em 35 min de uso normal) a decodificação lançava e a
+  checagem de revogação era **pulada inteira**. **Invariante:** o leitor leniente **nunca** é bean de
+  `ReactiveJwtDecoder` — seria `@ConditionalOnMissingBean` desligando a autoconfig, e o gateway
+  passaria a aceitar **bearer expirado**; a garantia é o par "exatamente um bean daquele tipo" **+**
+  asserção comportamental de que esse bean rejeita `exp` no passado (a primeira, sozinha, passa no
+  cenário catastrófico). Fail-open permanece para assinatura inválida/JWKS inalcançável.
 
 ## Gaps de segurança conhecidos (dívida aceita)
 
@@ -198,6 +230,22 @@ Achados levantados na **auditoria de segurança ad hoc de 2026-06-21** (`securit
 **conscientes** — estes aguardam **correção** ou uma **decisão explícita de aceitação** (quando
 um item for tratado, mova-o para "controles ativos"; se for conscientemente aceito, mova-o para a
 tabela de dívida aceita). Os controles já ativos **não** regrediram; estes são gaps novos.
+
+> **G15 — Troca de senha não invalida nada (MÉDIO, identificado em 2026-08-07, NÃO ratificado como
+> dívida aceita).** `RegisterService.java:105-109` (`updateUser`) apenas regrava o hash: **sem** epoch
+> de revogação, **sem** invalidar a sessão do IdP, **sem** invalidar a sessão do gateway e **sem**
+> derrubar tokens vivos. Consequência: **trocar a senha não expulsa quem já está dentro** — inclusive
+> um atacante com sessão ativa, que é precisamente o caso de uso de trocar a senha. Um titular que
+> suspeita de comprometimento e troca a senha fica com a sensação de ter fechado a porta sem tê-la
+> fechado.
+>
+> Identificado durante a [ADR-025](adr/ADR-025-revalidacao-estado-emissao.md) e deliberadamente
+> **fora** do escopo dela, para não misturar duas correções de segurança num commit. A correção
+> provável é barata (gravar o epoch de revogação em `updateUser` quando a senha muda, como
+> `updateUserRoles`/`deactivateUser`/`deleteUser` já fazem) — mas é decisão de produto quanto a
+> deslogar o próprio autor da troca, e por isso não foi tomada aqui. Registrado também no inventário
+> das sete cópias em [docs/CONVENCOES.md](CONVENCOES.md), que é onde a lacuna fica visível para quem
+> for mexer em estado de autorização.
 
 > **G1 — IDOR de leitura de PII (ALTO): correção incompleta em 2026-06-21, fechado de fato em
 > 2026-08-04 ([ADR-016](adr/ADR-016-leitura-pii-restrita-admin.md) + [ADR-021](adr/ADR-021-remocao-listagem-publica-usuarios.md)).**

@@ -159,6 +159,42 @@ class AdminFlowIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void deveRefletirRoleNovaNaReDerivacaoSeguinte_aposMutacaoEEviction() {
+        // AC-36 (ADR-025) — CRUZAMENTO mutação → eviction → re-derivação, não a re-derivação isolada.
+        //
+        // Por que este teste existe: a re-derivação que o filtro do authorization-server faz na
+        // emissão é tão fresca quanto a eviction de `authByEmail`. Se a eviction se perder, o filtro
+        // re-deriva estado OBSOLETO, conclui "sessão íntegra" e o defeito volta em silêncio — com o
+        // filtro aparentando funcionar. O TTL de 5 min do cache limita a janela, não a fecha.
+        //
+        // A direção testada é a PERIGOSA (revogação de ADMIN): conceder tarde é incômodo, revogar
+        // tarde é o incidente.
+        UserResponseDTO registrado = registerService.registerUser(
+                buildDTO("Admin Temporario", "admin.temp@email.com", "senha123"));
+        String id = registrado.getId();
+        String email = registrado.getEmail();
+        adminService.updateUserRoles(id, Set.of("USER", "ADMIN"), "outro-admin-id");
+
+        // Popula o cache pelo MESMO caminho que o canal interno usa (getUserByEmail é @Cacheable):
+        // duas chamadas porque o cache só é populado a partir da segunda.
+        authenticationService.getUserByEmail(email);
+        AuthDTO antes = authenticationService.getUserByEmail(email);
+        assertThat(antes.getRoles()).contains("ADMIN");
+        assertThat(cacheManager.getCache("authByEmail").get(email)).isNotNull();
+
+        adminService.updateUserRoles(id, Set.of("USER"), "outro-admin-id");
+
+        // Awaitility, não read-after-write direto: o RedisCache.put/evict tem visibilidade eventual
+        // (precedente registrado na memória do projeto — asserção imediata é flaky por construção).
+        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
+            AuthDTO redeirvado = authenticationService.getUserByEmail(email);
+            assertThat(redeirvado.getRoles())
+                    .as("a leitura SEGUINTE do canal interno tem de refletir a revogação de ADMIN")
+                    .containsExactly("USER");
+        });
+    }
+
+    @Test
     void deveLerTitularPorIdEPorEmail_incluindoInativo_naLeituraAdministrativa() {
         UserResponseDTO ativo = registerService.registerUser(
                 buildDTO("Fulano", "fulano@email.com", "senha123"));

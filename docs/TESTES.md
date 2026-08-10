@@ -215,6 +215,7 @@ caro de manter e mais frágil sem cobrir nada a mais.
 | (b) | `GET /default-ui.css` é `text/css` | Elo 3 |
 | (c) | `POST /login` (com `_csrf` real do auth-server) não é 403 e redireciona para `/login?error` | BUG-001 |
 | (d) | `Location` de `/oauth2/authorize` é **exatamente** `${PUBLIC_ORIGIN}/login` | Elo 2 + Elo 6 |
+| (f) | com sessão **íntegra**, `/oauth2/authorize` emite o `authorization_code` | ADR-025 |
 
 ```bash
 # A guarda fail-closed do script recusa rodar com a stack no ar — derrube-a antes (ato explícito):
@@ -252,6 +253,22 @@ distingue esse 400 na mensagem de falha, para não mandar ninguém caçar um Elo
   sobre HTTP. Montar o header evita relaxar a flag e mantém a topologia idêntica à de produção.
 - **A asserção (e) checa a ausência da chave `ports:` via `jq`, não o número da porta** — um
   `9999:8081` passaria por um grep de número e continuaria publicando o gateway no host.
+- **(d) e (f) são um par indivisível (ADR-025).** Depois da re-derivação na emissão, (d) passa
+  **tanto com o fix correto quanto com a sua pior regressão** — *"o filtro invalida toda sessão,
+  sempre"* —, porque nos dois casos o authorize **sem** sessão vai ao login. (d) prova o caminho sem
+  sessão; só (f) prova que **com** sessão íntegra o código é emitido. Remover uma devolve a
+  ambiguidade. Isso não é hipotético: durante a implementação da ADR-025, comparar o conjunto **cru**
+  de authorities reprovou toda sessão (o Spring Security 7 acrescenta `FACTOR_PASSWORD` ao token do
+  login, ausente no `UserDetails` re-derivado) — exatamente esta regressão.
+- **(f) assere `[?&]code=` por regex e a AUSÊNCIA de `error=`, nunca prefixo + substring.** `"code="`
+  casaria dentro de `error=invalid_request&error_description=...code_challenge...`, fazendo a asserção
+  passar justamente quando o código **não** foi emitido; e o redirect de erro também começa no
+  `redirect_uri`, então o prefixo sozinho não prova nada. **Enfraquecer (f) para prefix match devolve
+  o buraco que ela veio tampar.**
+- **(f) registra um titular novo por execução** (`POST /v1/users/register`, e-mail com timestamp) e
+  faz login real. Funciona **sem SMTP** porque o cadastro nasce `emailVerified=false` mas dentro da
+  **carência de 24h** da ADR-015 — se um dia a carência for removida ou encurtada, (f) para de passar
+  no CI e o motivo será este, não o filtro.
 
 **Manutenção:** quem editar `login-interface/nginx.conf`, `gateway/.../GatewayRouter.java` ou os
 `SecurityConfig` de gateway/auth-server tem de revisitar as asserções — é a consequência negativa

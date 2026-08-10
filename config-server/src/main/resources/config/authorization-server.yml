@@ -119,6 +119,23 @@ security:
   revocation:
     enabled: ${TOKEN_REVOCATION_ENABLED:true}
     key-prefix: ${TOKEN_REVOCATION_KEY_PREFIX:revoke:user:}
+  # Sessão do IdP (ADR-025). O incidente de 2026-08-07 mostrou que a sessão do AUTHSESSION era a
+  # única das sete cópias de estado de autorização SEM mecanismo de invalidação: com ela viva, o
+  # /oauth2/authorize refabricava credencial limpa a partir de estado obsoleto (nove
+  # authorization_code após um hard-delete, zero autenticações).
+  session:
+    # Teto de vida medido a partir do INSTANTE DE AUTENTICAÇÃO, não de getCreationTime() — no BFF a
+    # sessão nasce antes do login (CSRF + saved request) e ancorar na criação faria um login legítimo
+    # nascer vencido. Os 30 min do Spring Session são de INATIVIDADE e cada autorização os renova.
+    # GRANULARIDADE REAL ≈ 60 min (vida do refresh token, defaults do SAS): quem renova por
+    # refresh_token não passa pelo authorize. Não chame isto de "teto absoluto".
+    max-lifetime: ${SESSION_MAX_LIFETIME:8h}
+    revalidation:
+      # REVERSÃO OPERACIONAL, não configuração suportada. O raio de um defeito na re-derivação é
+      # "ninguém consegue logar"; com a propriedade servida pelo config-server o rollback é restart,
+      # sem rebuild (precedente: TOKEN_REVOCATION_ENABLED). Em `false` o sistema volta ao
+      # comportamento vulnerável do incidente — é botão de emergência, não modo de operação.
+      enabled: ${SESSION_REVALIDATION_ENABLED:true}
 
 # CORS (C12): necessário para o Swagger-UI trocar o code pelo token via fetch cross-origin.
 # Origem do Swagger/borda (distinta da origem do SPA no gateway). Default dev http://localhost:8081.

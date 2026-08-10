@@ -63,6 +63,14 @@ x-spring-app-env: &spring-app-env
   MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
   REDIS_SENTINEL_MASTER: mymaster
   REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+  # ADR-025. As três PRECISAM estar aqui, e não só no .env.example: sem repasse explícito a
+  # propriedade nasce DOCUMENTADA E INERTE — foi o que aconteceu com
+  # MANAGEMENT_TRACING_SAMPLING_PROBABILITY, que ficou no .env.example sem env_file e sem
+  # environment:, e o deploy rodou a 100% de sampling independentemente do .env.
+  # Os defaults repetem os dos YAMLs do config-server; ausência da variável no .env não impede o boot.
+  SESSION_MAX_LIFETIME: ${SESSION_MAX_LIFETIME:-8h}
+  SESSION_REVALIDATION_ENABLED: ${SESSION_REVALIDATION_ENABLED:-true}
+  REVOCATION_JWK_SET_URI: ${REVOCATION_JWK_SET_URI:-http://authorization-server:8082/oauth2/jwks}
   # Coletor e heap EXPLÍCITOS: sem estes flags a JVM decide sozinha e decide mal em container
   # pequeno (SerialGC + heap de 25% = 256MiB). MaxRAMPercentage 60 e não 70: o overhead
   # non-heap medido (metaspace + code cache + stacks + buffers) é ~150MiB, e 70% de 1024MiB

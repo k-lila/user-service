@@ -267,8 +267,14 @@ login. Não há `@RestController` neste serviço: a configuração **é** a API.
 
 | Ordem | Cobre | Papel |
 |---|---|---|
-| `@Order(1)` | endpoints do protocolo OAuth2/OIDC | `OAuth2AuthorizationServerConfigurer` + CORS + entry point que manda navegação `TEXT_HTML` para `/login` |
+| `@Order(1)` | endpoints do protocolo OAuth2/OIDC | `OAuth2AuthorizationServerConfigurer` + CORS + entry point que manda navegação `TEXT_HTML` para `/login` + **`AuthorizationEndpointRevalidationFilter`** (ADR-025) |
 | `@Order(2)` | o resto | `permitAll` de `/oauth2/**`, `/.well-known/**`, `/login`, `/error`, `/actuator/**`; `formLogin` |
+
+O filtro de re-derivação vive na `@Order(1)` **depois** do `SecurityContextHolderFilter` — antes
+dele o `SecurityContextHolder` está vazio e o filtro vira no-op silencioso com build verde. E o
+matcher dele é **positivo**, derivado de `AuthorizationServerSettings.getAuthorizationEndpoint()`:
+a `@Order(1)` casa **todo** o `endpointsMatcher` do SAS (incluindo `/oauth2/token` e
+`/connect/logout` via `oidc()`), então sem o recorte o filtro atuaria no back-channel e no logout.
 
 **Configuração — as cinco classes que carregam decisão:**
 
@@ -518,11 +524,23 @@ Daí em diante, em paralelo:
   gateway      RevocationWebFilter        → 401 + invalida a sessão   (borda, imediato)
   user-service RevocationTokenValidator   → token rejeitado           (autoritativo)
   auth-server  RevocationRefreshGuard     → invalid_grant no refresh  (fecha a renovação)
+  auth-server  AuthorizationEndpointRevalidationFilter
+                                          → invalida a sessão do IdP  (fecha a EMISSÃO, ADR-025)
 ```
 
-Todas as três são **fail-open**: outage de Redis não bloqueia autenticação. A revogação
-**força re-autenticação** — não muta a sessão viva; o re-login re-deriva roles e reaplica os
-gates de e-mail e `active`.
+Todas são **fail-open**: outage de Redis não bloqueia autenticação. A invalidação não muta a sessão
+viva — o re-login re-deriva roles e reaplica os gates de e-mail e `active`.
+
+> **Corrigido em 2026-08-09 — não reintroduza a frase antiga.** Este parágrafo dizia que "a
+> revogação **força re-autenticação**". Não força, e a diferença custou um incidente: as três
+> checagens originais comparam `iat < epoch`, então enquanto a sessão do IdP vivesse o
+> `/oauth2/authorize` reemitia credencial com `iat = agora` e **todas aprovavam por construção**
+> (medido: nove `authorization_code` emitidos após um hard-delete, zero autenticações). O epoch
+> torna a revogação eficaz sobre credenciais **já emitidas**; quem impede a emissão de novas é a
+> quarta linha acima, a re-derivação do estado do titular na emissão
+> ([ADR-025](adr/ADR-025-revalidacao-estado-emissao.md)). O inventário das sete cópias de estado de
+> autorização, com dono e mecanismo de invalidação de cada uma, está em
+> [CONVENCOES.md](CONVENCOES.md).
 
 ### 6.5 Operação administrativa auditada
 
@@ -614,13 +632,14 @@ alterar.
 | `gateway/routing/GatewayRouter.java` | [002](adr/ADR-002-padrao-bff.md) · [015](adr/ADR-015-verificacao-email-cadastro.md) · [018](adr/ADR-018-rota-logout-front-channel-borda.md) · [019](adr/ADR-019-correcao-elos-login-hostname-unico.md) · [023](adr/ADR-023-smoke-test-automatizado-login-hostname-unico.md) |
 | `gateway/config/SecurityConfig.java` | [002](adr/ADR-002-padrao-bff.md) · [007](adr/ADR-007-sessao-redis-cookies-distintos.md) · [019](adr/ADR-019-correcao-elos-login-hostname-unico.md) · [020](adr/ADR-020-swagger-atras-da-sessao.md) |
 | `gateway/config/RateLimiterConfig.java`, `util/ClientIpResolver.java` | [010](adr/ADR-010-resolucao-ip-cliente-confiavel.md) |
-| `gateway/filter/RevocationWebFilter.java` | [017](adr/ADR-017-revogacao-ativa-token.md) |
+| `gateway/filter/RevocationWebFilter.java`, `security/RevocationTokenReader.java` | [017](adr/ADR-017-revogacao-ativa-token.md) · [025](adr/ADR-025-revalidacao-estado-emissao.md) |
 | `authorization-server/config/OAuth2ClientConfig.java` | [003](adr/ADR-003-estado-oauth-postgresql.md) · [022](adr/ADR-022-higiene-estado-persistente.md) |
 | `authorization-server/config/JWKConfig.java` | [005](adr/ADR-005-chave-jwk-persistente.md) |
 | `authorization-server/config/TokenCustomizerConfig.java` | [017](adr/ADR-017-revogacao-ativa-token.md) |
-| `authorization-server/config/SecurityConfig.java` | [007](adr/ADR-007-sessao-redis-cookies-distintos.md) · [019](adr/ADR-019-correcao-elos-login-hostname-unico.md) |
-| `authorization-server/services/AuthorizationService.java` | [015](adr/ADR-015-verificacao-email-cadastro.md) · [021](adr/ADR-021-remocao-listagem-publica-usuarios.md) |
-| `authorization-server/services/LoginAttemptService.java` | [010](adr/ADR-010-resolucao-ip-cliente-confiavel.md) |
+| `authorization-server/config/SecurityConfig.java` | [007](adr/ADR-007-sessao-redis-cookies-distintos.md) · [019](adr/ADR-019-correcao-elos-login-hostname-unico.md) · [025](adr/ADR-025-revalidacao-estado-emissao.md) |
+| `authorization-server/filter/AuthorizationEndpointRevalidationFilter.java`, `session/AuthenticationInstantAttribute.java`, `listeners/AuthenticationInstantListener.java` | [025](adr/ADR-025-revalidacao-estado-emissao.md) |
+| `authorization-server/services/AuthorizationService.java` | [015](adr/ADR-015-verificacao-email-cadastro.md) · [021](adr/ADR-021-remocao-listagem-publica-usuarios.md) · [025](adr/ADR-025-revalidacao-estado-emissao.md) |
+| `authorization-server/services/LoginAttemptService.java`, `listeners/LoginAttemptListener.java` | [010](adr/ADR-010-resolucao-ip-cliente-confiavel.md) · [025](adr/ADR-025-revalidacao-estado-emissao.md) (o guard `instanceof UsernamePasswordAuthenticationToken` é load-bearing — não relaxe) |
 | `authorization-server/services/OAuthStatePurgeService.java` | [022](adr/ADR-022-higiene-estado-persistente.md) |
 | `authorization-server/clients/UserClientFallbackFactory.java` | [004](adr/ADR-004-resiliencia-feign-circuit-breaker.md) · [021](adr/ADR-021-remocao-listagem-publica-usuarios.md) |
 | `user-service/controller/UserController.java` | [001](adr/ADR-001-leitura-somente-ativos.md) · [013](adr/ADR-013-remocao-rotas-admin-delete-user-controller.md) · [016](adr/ADR-016-leitura-pii-restrita-admin.md) · [021](adr/ADR-021-remocao-listagem-publica-usuarios.md) |
@@ -759,14 +778,22 @@ authorization-server/
     │   ├── TokenCustomizerConfig.java       # ⚠️ ARQUIVO CRÍTICO — claims do JWT
     │   ├── FeignConfig.java · FeignTracingConfig.java · CORSConfig.java
     ├── dtos/AuthDTO.java                    # ESPELHADO no user-service
+    ├── filter/
+    │   └── AuthorizationEndpointRevalidationFilter.java  # re-deriva o titular na EMISSÃO (ADR-025)
+    │                                        #   NÃO é @Component: bean de Filter seria auto-registrado
+    │                                        #   pelo Boot em TODO path, inclusive na porta de management
     ├── listeners/
     │   ├── LoginAttemptListener.java        # alimenta o contador de lockout
+    │   ├── AuthenticationInstantListener.java  # carimba o instante de autenticação (ADR-025)
     │   └── AuthFailureListener.java         # só log
+    ├── session/
+    │   └── AuthenticationInstantAttribute.java  # Long epoch millis — tipo é requisito (ADR-025)
     ├── services/
     │   ├── AuthorizationService.java        # UserDetailsService: lockout → e-mail → BCrypt
     │   ├── LoginAttemptService.java         # contador Redis por (conta, IP)
     │   ├── OAuthStatePurgeService.java      # @Scheduled 6h, lock fail-CLOSED
-    │   └── RevocationRefreshGuard.java      # bloqueia refresh de token revogado
+    │   └── RevocationRefreshGuard.java      # epoch de revogação: refresh (ADR-017) + caminho
+    │                                        #   degradado da re-derivação (ADR-025)
     └── util/ClientIpResolver.java · LogUtils.java
 ```
 
@@ -782,11 +809,15 @@ authorization-server/src/main/resources/
 authorization-server/src/test/java/authorizationserver/
 ├── clients/     UserClientFallbackFactoryTest
 ├── config/      TokenCustomizerConfigTest
+├── filter/      AuthorizationEndpointRevalidationFilterTest
 ├── integration/ AbstractAuthIntegrationTest ← base do módulo
 │                OAuth2AuthorizationCodeFlowIntegrationTest · LoginLockoutIntegrationTest
 │                RedisSessionIntegrationTest · AuthsessionSecureCookieIntegrationTest
 │                RegisteredClientSeedIntegrationTest · UserServiceCircuitBreakerIntegrationTest
-├── listeners/   LoginAttemptListenerTest
+│                AuthorizeRevalidationIntegrationTest · SessionMaxLifetimeIntegrationTest (ADR-025)
+│                AuthorizationChainStructureIntegrationTest ← ordem do filtro na chain REAL
+│                RevalidationKillSwitchIntegrationTest ← fio @Value→construtor do toggle
+├── listeners/   LoginAttemptListenerTest · AuthenticationInstantListenerTest
 ├── services/    AuthorizationServiceTest · LoginAttemptServiceTest
 │                OAuthStatePurgeServiceTest · RevocationRefreshGuardTest
 └── util/        ClientIpResolverTest
@@ -809,6 +840,11 @@ gateway/
     │   ├── RateLimitLogFilter.java          # HIGHEST_PRECEDENCE
     │   ├── RevocationWebFilter.java         # HIGHEST_PRECEDENCE + 50; fail-open
     │   └── CorrelationIdFilter.java         # X-Correlation-ID = traceId B3
+    ├── security/
+    │   └── RevocationTokenReader.java       # lê userID/iat verificando assinatura e IGNORANDO exp
+    │                                        #   ⚠️ NUNCA é bean de ReactiveJwtDecoder: desligaria a
+    │                                        #   autoconfig e o resource server aceitaria bearer
+    │                                        #   expirado (@ConditionalOnMissingBean) — ADR-025
     └── util/ClientIpResolver.java           # reativo (ServerHttpRequest) — gêmeo do auth-server
 ```
 
@@ -821,6 +857,9 @@ gateway/src/test/java/com/users/gateway/
 │                GatewayRoutingIntegrationTest · GatewaySecurityIntegrationTest
 │                GatewayOAuth2FlowIntegrationTest · GatewayAdminRouteIntegrationTest
 │                RateLimitIntegrationTest · XForwardedHeadersIntegrationTest
+│                JwtDecoderStrictnessIntegrationTest ← bearer expirado segue 401 (ADR-025);
+│                  NÃO herda a base, que mocka o ReactiveJwtDecoder
+├── security/    RevocationTokenReaderTest
 └── util/        ClientIpResolverTest
 ```
 
