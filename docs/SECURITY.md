@@ -549,6 +549,14 @@ original. Detalhe e racional em [ADR-011](adr/ADR-011-trilha-auditoria-dado-pess
 
 ## Como manter este documento
 
+> **Regra que governa todas as outras: o critério de "fechado" verifica-se contra o CÓDIGO, nunca
+> contra outro documento.** Ela não é abstrata — foi extraída de dois erros reais deste repositório.
+> O **G1** foi declarado fechado com base nas Consequências de um ADR, enquanto `GET /v1/users`
+> seguiu por seis semanas devolvendo PII de toda a base ativa a qualquer `USER`. O **G14** foi
+> escrito nomeando só auth-server e notification-service quando o user-service estava igual — e a
+> correção de escopo existia na memória dos agentes desde 2026-08-04 sem nunca chegar ao documento.
+> Antes de mover um item para "fechado", abra o arquivo e o método.
+
 - Ao **fechar** um gap, mova-o de "gaps" para "controles ativos" (ou remova) e registre em
   `.claude/memory/decisions.md`.
 - Um achado em **"Gaps recém-identificados (a tratar)"** tem dois destinos: ao ser **corrigido**

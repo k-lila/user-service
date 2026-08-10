@@ -508,7 +508,7 @@ restart.
 > **Por que o `interface` saiu da classe do `config-lb`.** Os dois são nginx, mas têm papéis
 > opostos sob hostname único: o `config-lb` só balanceia duas instâncias de config-server na
 > rede interna, enquanto o `interface` é o **funil de 100% do tráfego público** — o túnel
-> entrega nele, não no gateway (ver `CLAUDE.md § Deploy via Cloudflare Tunnel`). Era o serviço
+> entrega nele, não no gateway (ver [SECURITY.md § Estado atual do deploy](SECURITY.md)). Era o serviço
 > de menor quota do compose no único salto que toda requisição atravessa. O serviço também
 > declara **`NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE: "1"`**, que aciona o
 > `/docker-entrypoint.d/30-tune-worker-processes.sh` da imagem oficial: ele lê a quota de CPU do

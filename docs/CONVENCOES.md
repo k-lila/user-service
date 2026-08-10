@@ -58,6 +58,19 @@ Dois canais internos existem hoje: `/internal/users/email/{email}` (auth-server 
 
 ## As sete cópias do estado de autorização (ADR-025)
 
+**O epoch de revogação por usuário (`revoke:user:{userID}` no Redis) é a fonte ÚNICA**, com
+`key-prefix` **idêntico** nos três serviços: o user-service grava; gateway, user-service e
+auth-server leem. A checagem é **fail-open** — outage de Redis não bloqueia a autenticação. Não
+troque por introspection por-request nem por denylist de `jti`: nenhuma das duas cobre "revogar
+todos os tokens de um usuário", que é o caso de uso.
+
+> **Autocorreção registrada (2026-08-08).** A revogação, **sozinha, não forçava re-autenticação** —
+> ao contrário do que a documentação deste projeto afirmou até essa data. Enquanto a sessão do IdP
+> vivesse, o `/oauth2/authorize` reemitia credencial nova com `iat = agora`, e as três checagens
+> (`iat < epoch`) aprovavam **por construção**. Quem força a re-autenticação de fato é a
+> **re-derivação na emissão** (ADR-025). O registro fica aqui porque a afirmação errada sobreviveu
+> meses sem ser contestada, e apagá-la em silêncio perderia a lição.
+
 O estado de autorização de um titular existe **hoje em sete lugares**. Cada um precisa de um dono e de
 um mecanismo de invalidação **declarados** — a ADR-025 nasceu porque uma delas (a sessão do IdP) não
 tinha nenhum, e sozinha refabricava credencial nova e limpa a partir de estado obsoleto: nove

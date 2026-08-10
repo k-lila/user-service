@@ -380,6 +380,25 @@ O `RevocationWebFilter` existe porque o BFF autentica **por sessão**, não por 
 do resource server não pega o tráfego do SPA. O user-service continua sendo a camada
 autoritativa; aqui o ganho é rejeição imediata na borda.
 
+**Token expirado deixou de ser fail-open (ADR-025).** A decodificação usava o decoder do resource
+server, que valida `exp` — então com o access token da sessão vencido (3× em 35 min de uso normal,
+ou seja, o caminho **comum**) a checagem inteira era pulada. Hoje `userID`/`iat` vêm do
+`RevocationTokenReader`, que verifica **assinatura** e ignora `exp`.
+
+> **Invariante — leia antes de mexer no `RevocationTokenReader`.** Esse leitor **nunca** é bean de
+> `ReactiveJwtDecoder`, sob qualifier nenhum. O gateway não declara esse bean (vem da autoconfig,
+> `@ConditionalOnMissingBean`); declará-lo desligaria a autoconfig e faria o resource server
+> **aceitar bearer expirado**. Pior: `AbstractGatewayIntegrationTest:37` **mocka** o decoder, então
+> nenhum teste antigo pegaria a regressão.
+>
+> A guarda é um **par**, e só o par funciona: (1) "existe exatamente um bean de
+> `ReactiveJwtDecoder`" **e** (2) asserção comportamental de que esse bean rejeita `exp` no passado,
+> com JWKS real via WireMock, sem herdar o mock. **A primeira sozinha passa no cenário
+> catastrófico** — por isso não basta.
+>
+> Detalhe correlato: `security.revocation.jwk-set-uri` errado **não quebra nada visível**. Cai no
+> fail-open, e a correção fica inerte com o build verde.
+
 ### 4.4 notification-service — o bounded context de notificação
 
 Stateless: sem Mongo, sem Redis, sem Postgres, **sem Spring Security** e **sem springdoc**. Um
@@ -594,8 +613,8 @@ com serializer Jackson por tipo (`CacheConfig`). Evicção explícita em toda mu
 raspadas por `dns_sd_configs` (é o que dá **um target por réplica**); logs SLF4J parametrizados
 em formato de pipe com `traceId`/`spanId` no MDC e PII mascarada por `LogUtils.maskEmail()`.
 No gateway, o MDC só é populado com `spring.reactor.context-propagation: auto` — sem isso o log
-da borda sai com `traceId=` vazio. Detalhes em [LOGS.md](LOGS.md) e no
-[CLAUDE.md § Observabilidade](../CLAUDE.md).
+da borda sai com `traceId=` vazio. Detalhes em [LOGS.md](LOGS.md) e em
+[OBSERVABILIDADE.md](OBSERVABILIDADE.md).
 
 **Resiliência:** os dois saltos Feign têm circuit breaker Resilience4j nomeado (`configs.*`, não
 `instances.*` — com group habilitado este último é inerte) e fallback factory. Timeout 3s,
