@@ -99,6 +99,11 @@ Cada linha aqui era uma entrada longa. A fonte de verdade é o ADR.
 - **Verificação:** `mvn -f <módulo>/pom.xml verify` exit 0 nos 5; jacoco 0.8.15 resolveu pelo parent. "All coverage checks have been met" nos 3 de domínio (testes mantidos: user-service 136, auth-server 51, gateway 38). Cobertura de LINE medida (via jacoco.csv, já com exclusões): user-service 98,3%, auth-server 95,4%, gateway 100% — nenhum teste faltante a escrever. config-server 81,8% / discovery-server 33,3% (sem gate). Docs em `docs/TESTES.md` (nova §Cobertura (JaCoCo)).
 - **Tech-debt / observações:** (a) duplicação do bloco JaCoCo nos POMs é o custo aceito de não ter agregador — se um POM-pai for criado no futuro, mover para `pluginManagement`; (b) a regra `check` não distingue classe nova/alterada (intent do CLAUDE.md) de classe legada — o gate é por bundle do módulo; o discernimento por classe segue manual/senso-critico; (c) prova de que o gate "morde" (forçar <70% reprovar) não foi exercida destrutivamente — a execution `check` rodou e avaliou a regra (não "skipped"), confirmando que está ativa.
 - **Tipo:** decisão.
+- **SUPERADA EM 2026-08-10:** o POM pai foi criado. O item (a) do tech-debt acima está **fechado** —
+  o bloco JaCoCo foi para o `pluginManagement`/`plugins` do pai exatamente como aquele item previa, e
+  `config-server`/`discovery-server` passaram a desligar o `check` herdado com `<phase>none</phase>`,
+  preservando o report-only. O item (b) segue aberto por desenho. O texto acima fica como registro do
+  que se decidiu na época — a decisão "sem agregador" **não** descreve mais o estado do repositório.
 
 ## [2026-06-15] documentação · ADRs retroativos essenciais
 - **Decisão:** formalizados 6 ADRs retroativos para decisões estruturais já implementadas e em produção no blueprint, que existiam sem registro formal (`docs/adr/` só tinha o TEMPLATE + ADR-001). Os ADRs são a fonte canônica; esta entrada só aponta:
