@@ -231,21 +231,25 @@ Achados levantados na **auditoria de segurança ad hoc de 2026-06-21** (`securit
 um item for tratado, mova-o para "controles ativos"; se for conscientemente aceito, mova-o para a
 tabela de dívida aceita). Os controles já ativos **não** regrediram; estes são gaps novos.
 
-> **G15 — Troca de senha não invalida nada (MÉDIO, identificado em 2026-08-07, NÃO ratificado como
-> dívida aceita).** `RegisterService.java:105-109` (`updateUser`) apenas regrava o hash: **sem** epoch
-> de revogação, **sem** invalidar a sessão do IdP, **sem** invalidar a sessão do gateway e **sem**
-> derrubar tokens vivos. Consequência: **trocar a senha não expulsa quem já está dentro** — inclusive
-> um atacante com sessão ativa, que é precisamente o caso de uso de trocar a senha. Um titular que
-> suspeita de comprometimento e troca a senha fica com a sensação de ter fechado a porta sem tê-la
-> fechado.
+> **G15 — Troca de senha não invalidava nada (era MÉDIO; identificado em 2026-08-07, FECHADO em
+> 2026-08-10 pela [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md)).**
+> `RegisterService.updateUser` apenas regravava o hash: **sem** epoch de revogação, **sem** invalidar
+> a sessão do IdP, **sem** invalidar a sessão do gateway e **sem** derrubar tokens vivos. Consequência:
+> **trocar a senha não expulsava quem já estava dentro** — inclusive um atacante com sessão ativa,
+> que é precisamente o caso de uso de trocar a senha.
 >
-> Identificado durante a [ADR-025](adr/ADR-025-revalidacao-estado-emissao.md) e deliberadamente
-> **fora** do escopo dela, para não misturar duas correções de segurança num commit. A correção
-> provável é barata (gravar o epoch de revogação em `updateUser` quando a senha muda, como
-> `updateUserRoles`/`deactivateUser`/`deleteUser` já fazem) — mas é decisão de produto quanto a
-> deslogar o próprio autor da troca, e por isso não foi tomada aqui. Registrado também no inventário
-> das sete cópias em [docs/CONVENCOES.md](CONVENCOES.md), que é onde a lacuna fica visível para quem
-> for mexer em estado de autorização.
+> **Correção:** `updateUser` grava o epoch quando a senha **ou** o e-mail muda (só o nome não revoga),
+> seguindo o padrão já usado em `updateUserRoles`/`deactivateUser`/`deleteUser`. As duas decisões de
+> produto que estavam pendentes foram tomadas no ADR-026: o **autor da troca também é deslogado** (o
+> epoch é por titular, não por sessão) e a **troca de e-mail entra**, o que derruba o desligamento de
+> ~1h (via P-01 da ADR-025) para ~segundos. Coberto por 6 testes unitários novos em
+> `RegisterServiceTest` — o arquivo declarava o mock `TokenRevocationService` desde sempre e **nunca o
+> verificava** — e por teste de integração com Redis real.
+>
+> **Ressalva verificada contra o código, não contra documento:** o motivo logado na invalidação da
+> sessão do IdP continua sendo `NOT_FOUND`, **não** `REVOKED_EPOCH` — este último só é emitido no ramo
+> degradado do `AuthorizationEndpointRevalidationFilter` (user-service indisponível). A ambiguidade do
+> `NOT_FOUND` registrada na ADR-025 **permanece**: o epoch mudou a latência, não o motivo.
 
 > **G1 — IDOR de leitura de PII (ALTO): correção incompleta em 2026-06-21, fechado de fato em
 > 2026-08-04 ([ADR-016](adr/ADR-016-leitura-pii-restrita-admin.md) + [ADR-021](adr/ADR-021-remocao-listagem-publica-usuarios.md)).**

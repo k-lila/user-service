@@ -68,19 +68,19 @@ tinha nenhum, e sozinha refabricava credencial nova e limpa a partir de estado o
 | 1 | MongoDB `users` | user-service | **Fonte de verdade** — nada a invalidar |
 | 2 | Cache Redis `usersById`/`usersByEmail`/`authByEmail` | user-service | Evict explícito nas mutações + TTL 5 min |
 | 3 | **Sessão do IdP** (`AUTHSESSION`, `authserver:session:sessions:*`) | auth-server | Re-derivação na emissão + teto de vida (**ADR-025**) — antes: **NENHUM** |
-| 4 | Claims do access token | auth-server emite; gateway/user-service checam | Epoch de revogação (ADR-017) |
-| 5 | Refresh token | auth-server | `RevocationRefreshGuard` (ADR-017) |
+| 4 | Claims do access token | auth-server emite; gateway/user-service checam | Epoch de revogação (ADR-017; escrito também na troca de senha/e-mail — ADR-026) |
+| 5 | Refresh token | auth-server | `RevocationRefreshGuard` (ADR-017 + ADR-026) |
 | 6 | PostgreSQL `oauth2_authorization` | auth-server | Só purga por expiração (ADR-022) |
 | 7 | Sessão do gateway (`SESSION`, `gateway:session`) | gateway | `RevocationWebFilter` (ADR-017 + correção do `exp`, ADR-025) |
 
 **Lacunas conhecidas** (listadas de propósito — um inventário que só mostra o que **está** coberto não
 impede a oitava cópia de entrar, e impede menos ainda que a lacuna já existente seja esquecida):
 
-- **Troca de senha não invalida nada.** `RegisterService.java:105-109` apenas regrava o hash: sem
-  epoch de revogação, sem invalidar a sessão do IdP, sem invalidar a sessão do gateway e sem derrubar
-  tokens vivos. Consequência: **trocar a senha não expulsa quem já está dentro** — inclusive um
-  atacante com sessão ativa, que é precisamente o caso de uso de trocar a senha. Gap **identificado e
-  registrado**, fora do escopo da ADR-025 (ver `docs/SECURITY.md`).
+- ~~**Troca de senha não invalida nada.**~~ **Fechada em 2026-08-10 pela
+  [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md)** (gap G15). `RegisterService.updateUser`
+  grava o epoch de revogação quando a senha **ou** o e-mail muda, derrubando as cópias #4 e #5 — e,
+  por consequência, a #7 no `RevocationWebFilter` e a #3 na re-derivação da ADR-025. Trocar só o nome
+  não revoga. O autor da troca também é deslogado (o epoch é por titular, não por sessão).
 - **Eliminação push ausente:** não há canal para o auth-server apagar sessões/registros de um titular
   sob demanda; a ADR-025 reduz o resíduo (a sessão órfã fica inerte e morre no primeiro contato), não
   o zera. ADR própria, futura.
@@ -89,6 +89,11 @@ impede a oitava cópia de entrar, e impede menos ainda que a lacuna já existent
 > mecanismo de invalidação** nesta tabela, no mesmo commit. Esta correção foi o **quarto remendo da
 > mesma família** (ADR-017 cobriu #4 e #5, o filtro de borda cobriu #7, a ADR-025 cobriu #3); a tabela
 > existe para que não haja um quinto pela mesma razão.
+>
+> A [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md) **não** é esse quinto remendo, e a distinção
+> importa: ela não descobriu uma cópia sem dono, fechou uma lacuna que esta tabela já declarava por
+> escrito. É a tabela funcionando como pretendido — o gap foi encontrado por leitura do inventário,
+> não por incidente.
 
 ## Credenciais e roles
 

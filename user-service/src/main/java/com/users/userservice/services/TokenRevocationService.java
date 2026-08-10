@@ -13,8 +13,8 @@ import org.springframework.stereotype.Service;
  * Revogação ativa de token por usuário (fecha o gap "Ausência de revogação ativa de token",
  * ADR-017). Mantém no Redis um "epoch de revogação" por titular — o instante (millis) a partir do
  * qual todo access token emitido <b>antes</b> dele deve ser rejeitado. É escrito em cada evento que
- * deveria invalidar sessões vivas (revogação de role, desativação, hard-delete), junto das evictions
- * de cache já existentes nesses pontos.
+ * deveria invalidar sessões vivas (revogação de role, desativação, hard-delete, e troca de senha ou
+ * de e-mail — ADR-026), junto das evictions de cache já existentes nesses pontos.
  *
  * <p>O validador dos resource servers ({@code RevocationTokenValidator}) e o guard de refresh do
  * authorization-server comparam o {@code iat} do token a este epoch. A chave expira sozinha após
