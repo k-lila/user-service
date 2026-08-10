@@ -16,12 +16,11 @@ x-res-app: &res-app # nós Mongo (os apps Spring usam *res-jvm — ver abaixo)
   mem_limit: 1024m
   mem_reservation: 512m
 # Perfil dos 4 apps Spring, SEPARADO do *res-app de propósito: com cpus 1.0 a JVM enxerga
-# "Effective CPU Count = 1" e a ergonomia a classifica como *client-class machine*, escolhendo
-# UseSerialGC (stop-the-world, thread única). O G1 forçado em JAVA_TOOL_OPTIONS (ver
-# x-spring-app-env) só rende se houver core sobrando para a marcação concorrente — daí 2.0.
-# Também alivia o throttling do CFS (1.0 = 25ms de CPU por período de 100ms), que era a outra
-# metade das caudas de latência. Não fundir de volta com *res-app: os nós Mongo não precisam
-# disso e o bump dobraria a quota deles sem motivo.
+# "Effective CPU Count = 1", a ergonomia a classifica como *client-class machine* e escolhe
+# UseSerialGC (stop-the-world, thread única). O G1 forçado em JAVA_TOOL_OPTIONS só rende com core
+# sobrando para a marcação concorrente — daí 2.0, que também alivia o throttling do CFS (1.0 =
+# 25ms de CPU por período de 100ms), a outra metade das caudas de latência. Não fundir de volta
+# com *res-app: os nós Mongo não precisam disso e o bump dobraria a quota deles sem motivo.
 x-res-jvm: &res-jvm # apps Spring (auth-server / user-service / notification / gateway)
   # Parametrizado para o eixo replicável (ADR-024): estes números foram calibrados para UM
   # processo por serviço, e valem POR RÉPLICA. Num host de 12 vCPU / 15 GB, seis réplicas a
@@ -84,12 +83,11 @@ x-spring-app-env: &spring-app-env
   # auth-server e user-service compartilham a chave de revogação no Redis, e um prefixo divergente
   # faz a revogação silenciosamente não pegar (ADR-017).
   #
-  # ATENÇÃO ao mexer aqui e nos blocos por-serviço abaixo: o default do compose ESPELHA o default
-  # do YAML do config-server e os dois têm de continuar iguais. Nunca escreva `${VAR:-}` — o
-  # default vazio injeta string vazia no container e SOBRESCREVE o default do YAML, em vez de
-  # deixá-lo valer. Foi a ausência dessas linhas que manteve 19 variáveis documentadas no
-  # docs/CONFIG.md inertes: sem `env_file` e fora de todo `environment:`, setá-las no .env não
-  # chegava a container nenhum.
+  # ATENÇÃO ao mexer aqui e nos blocos por-serviço abaixo: o default do compose ESPELHA o do YAML
+  # do config-server e os dois têm de continuar iguais. Nunca escreva `${VAR:-}` — o default vazio
+  # injeta string vazia no container e SOBRESCREVE o default do YAML em vez de deixá-lo valer.
+  # Sem estas linhas a variável fica documentada e inerte: foi o que manteve 19 do docs/CONFIG.md
+  # sem efeito algum, por estarem fora de `env_file` e de todo `environment:`.
   TOKEN_REVOCATION_ENABLED: ${TOKEN_REVOCATION_ENABLED:-true}
   TOKEN_REVOCATION_KEY_PREFIX: "${TOKEN_REVOCATION_KEY_PREFIX:-revoke:user:}"
   SESSION_TIMEOUT: ${SESSION_TIMEOUT:-30m}
@@ -142,10 +140,10 @@ volumes:
   auth_db_data:
 
 # Docker secrets (0.3 RELATORIOA): segredos fora do .env plano, montados em /run/secrets/<NOME>.
-# Gere os arquivos uma vez com `infra/secrets/gen-secrets.sh` antes do `docker compose up`
-# (./secrets/ é gitignorado). Consumo por serviço:
-#   - Spring (config/discovery/auth/user/gateway): spring.config.import=configtree:/run/secrets/
-#     (o nome do arquivo é exatamente o placeholder ${...} resolvido na config servida)
+# Gere os arquivos uma vez com `infra/secrets/gen-secrets.sh` antes do `up` (./secrets/ é
+# gitignorado). Consumo por serviço:
+#   - Spring: spring.config.import=configtree:/run/secrets/ (o nome do arquivo é exatamente o
+#     placeholder ${...} resolvido na config servida)
 #   - postgres / mongo: convenção nativa *_FILE da imagem oficial
 #   - redis / sentinel: command/healthcheck leem o arquivo via $(cat ...)
 #   - grafana: GF_SECURITY_ADMIN_PASSWORD__FILE ; prometheus: basic_auth.password_file
@@ -221,13 +219,11 @@ services:
   # Config Server — eixo REPLICÁVEL (ADR-024): 1 instância no piso, N por --scale
   # ──────────────────────────────────────────────
 
-  # Serviço ÚNICO e escalável, e não mais o par nomeado config-server-1/config-server-2.
-  # Por que mudou (ADR-024): sendo stateless (qualquer instância serve o mesmo
-  # classpath:/config), o config-server pertence ao eixo replicável — quantidade é
-  # `--scale config-server=N`, não linha nova no compose. O par nomeado custava duas coisas:
-  #   (a) BLOQUEAVA O PISO MÍNIMO — o `upstream` estático do config-lb listava os dois nomes, e
-  #       o nginx recusa iniciar se um deles não resolve ("host not found in upstream");
-  #   (b) passar de 2 exigia editar arquivo, em vez de um argumento de linha de comando.
+  # Serviço ÚNICO e escalável, não o par nomeado config-server-1/2 (ADR-024): sendo stateless
+  # (qualquer instância serve o mesmo classpath:/config), quantidade é `--scale config-server=N`,
+  # não linha nova no compose. O par nomeado (a) BLOQUEAVA O PISO MÍNIMO, porque o `upstream`
+  # estático do config-lb listava os dois nomes e o nginx recusa iniciar se um não resolve; e
+  # (b) exigia editar arquivo para passar de 2.
   # NÃO acrescente container_name nem ports: aqui — qualquer um dos dois quebra o --scale.
   config-server:
     # Contexto de build = raiz, e não o diretório do módulo: desde o POM pai o <parent> dos filhos
@@ -288,24 +284,19 @@ services:
       <<: *spring-config
       SERVER_PORT: 9091
       EUREKA_HOSTNAME: discovery-server-1
-      # Aponta para o PAR, não para si mesmo — e isso é obrigatório, não preferência.
+      # Aponta para o PAR, nunca para si mesmo — obrigatório, não preferência (ADR-024).
+      # Auto-referenciar no piso mínimo, para calar o WARN de replicação contra um peer que não
+      # existe, NÃO funciona: o fetch client-side de um servidor Eureka popula o cache que ele usa
+      # como CLIENTE, não o registry que ele SERVE a terceiros. Medido: com a auto-referência o
+      # discovery-server-2 servia um registry sem AUTHORIZATION-SERVER, e todo gateway que buscasse
+      # nele respondia 503 em /login. Replicação de peer no Eureka é push; sem esta linha o nó 2
+      # nunca recebe o push.
       #
-      # A tentação (ADR-024, corrigida na verificação) é auto-referenciar no piso mínimo para não
-      # registrar falha de replicação contra um peer que não existe, deixando o discovery-server-2
-      # apontar para cá e se manter atualizado por fetch. NÃO FUNCIONA: o fetch client-side de um
-      # servidor Eureka popula o cache que ele usa como CLIENTE, não o registry que ele SERVE a
-      # terceiros. Medido: com a auto-referência, o discovery-server-2 servia um registry sem
-      # AUTHORIZATION-SERVER, e todo gateway que buscasse nele respondia 503 em /login
-      # ("No servers available for service: authorization-server"). Replicação de peer no Eureka é
-      # push; sem esta linha, o nó 2 nunca recebe o push.
-      #
-      # O custo é WARN de replicação no piso mínimo, onde o peer não existe: MEDIDO em ~11
-      # linhas/min (ReplicationTaskProcessor + RetryableEurekaHttpClient). Deliberadamente NÃO
-      # silenciado — é exatamente a mensagem que denuncia falha de replicação no piso `ha`, e
-      # suprimi-la esconderia o bug acima em vez de corrigi-lo. A polaridade importa: o default
-      # errado quebra o sistema, o default barulhento só incomoda. Quem roda o piso mínimo e quer
-      # silêncio faz opt-in explícito: EUREKA_PEER_URL=http://discovery-server-1:9091/eureka
-      # (auto-referência) — seguro SÓ com um nó, e catastrófico com dois.
+      # O custo é ~11 linhas/min de WARN no piso mínimo, onde o peer não existe. Deliberadamente
+      # NÃO silenciado: é a mesma mensagem que denuncia falha de replicação no profile `ha`, e
+      # suprimi-la esconderia o bug acima. A polaridade importa — o default errado quebra o
+      # sistema, o barulhento só incomoda. Quem quer silêncio faz opt-in explícito:
+      # EUREKA_PEER_URL=http://discovery-server-1:9091/eureka, seguro SÓ com um nó.
       EUREKA_PEER_URL: ${EUREKA_PEER_URL:-http://discovery-server-2:9092/eureka}
     secrets:
       - CONFIG_SERVER_PASSWORD
@@ -636,9 +627,9 @@ services:
       <<: *spring-app-env
       SERVER_PORT: 8095
       # Remetente exibido nos e-mails de verificação. Os demais SMTP_* (host/porta/credenciais)
-      # chegam por Docker secret via configtree — estes três timeouts, não: são de socket, não
-      # segredo, e sem eles o default do Jakarta Mail é INFINITO (thread do Tomcat presa para
-      # sempre num SMTP travado). Valores em ms.
+      # chegam por Docker secret via configtree; estes três timeouts não, por não serem segredo —
+      # e sem eles o default do Jakarta Mail é INFINITO, prendendo uma thread do Tomcat para sempre
+      # num SMTP travado. Valores em ms.
       APP_MAIL_FROM: ${APP_MAIL_FROM:-no-reply@users.local}
       SMTP_CONNECTION_TIMEOUT: ${SMTP_CONNECTION_TIMEOUT:-10000}
       SMTP_READ_TIMEOUT: ${SMTP_READ_TIMEOUT:-10000}
@@ -730,13 +721,12 @@ services:
     mem_limit: 128m
     mem_reservation: 64m
     environment:
-      # Aciona /docker-entrypoint.d/30-tune-worker-processes.sh da imagem oficial: ele lê a
-      # quota de CPU do cgroup e reescreve `worker_processes` de acordo. Sem isto vale o
-      # `auto` do nginx.conf, que conta as CPUs do HOST e ignora a quota — medidos 12 workers
-      # disputando uma fração de núcleo, puro custo de troca de contexto.
-      # Derivar da quota (em vez de fixar um número) mantém os dois em sincronia se o `cpus`
-      # acima mudar. NÃO passe worker_processes via `-g` no CMD: o nginx.conf base já declara
-      # a diretiva e o nginx aborta com "directive is duplicate".
+      # Aciona /docker-entrypoint.d/30-tune-worker-processes.sh da imagem oficial: lê a quota de
+      # CPU do cgroup e reescreve `worker_processes`. Sem isto vale o `auto` do nginx.conf, que
+      # conta as CPUs do HOST e ignora a quota — medidos 12 workers disputando uma fração de
+      # núcleo. Derivar da quota mantém os dois em sincronia se o `cpus` acima mudar. NÃO passe
+      # worker_processes via `-g` no CMD: o nginx.conf já declara a diretiva e o nginx aborta
+      # com "directive is duplicate".
       NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE: "1"
     # ports: movido para docker-compose.override.yml (G10 / ADR-019).
     # Na base prod-safe a interface NÃO é publicada no host — o cloudflared alcança
