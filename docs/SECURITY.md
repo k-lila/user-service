@@ -458,6 +458,27 @@ repositórios com métodos derivados parametrizados) e **timing attack no token 
 e-mail** (G7 — a comparação ocorre sobre o **hash** SHA-256 no índice do Mongo, com token de 256
 bits de entropia; o `X-Internal-Token`, esse sim, usa `MessageDigest.isEqual` constant-time).
 
+### Melhorias abertas do `senso-critico` / `security-reviewer`
+
+Itens levantados nas revisões adversariais da ADR-025 (2026-08-09) e da ADR-014. **Nenhum é
+bloqueante**; todos foram deliberadamente não-corrigidos na tarefa em que apareceram. Migraram para
+cá em 2026-08-10, na poda do `.claude/memory/decisions.md` — antes existiam **só** naquele log, que
+nenhuma pessoa lê ao auditar segurança.
+
+| ID | Item | Onde |
+|---|---|---|
+| **MELH-SEC-01** | Kill switch silencioso: desligar a re-derivação por config não emite WARN nem métrica — o sistema volta ao comportamento pré-ADR-025 sem sinal algum | `AuthorizationEndpointRevalidationFilter.java:146-150` |
+| **MELH-SEC-02** | `SESSION_MAX_LIFETIME=0` desativa o teto de vida da sessão **em silêncio**, sem log de aviso | idem `:217-222` |
+| **MELH-SEC-03** | O caminho de fail-open só é observável por WARN; sugerido contador Micrometer para alertabilidade | — |
+| **MELH-SEC-04** | Amplificação do canal interno: cada `/oauth2/authorize` passou a gerar 1 chamada interna + 1 entrada `READ_INTERNAL_CREDENTIAL` na trilha. Monitorar volume | — |
+| **MELH-06-01** | `domainAuthorities()` é allow-list por prefixo (`ROLE_`/`USER_ID:`) sem guarda de completude — uma authority nova com prefixo diferente é ignorada em silêncio na comparação | — |
+| **AC-28** | Logout ponta a ponta não tem teste automatizado; sugerida asserção (g) no smoke-test do ADR-023 | — |
+| **M1** | Filtro `name`/`email` do `GET /v1/admin/users` usa regex case-insensitive **sem índice** que o sirva → collection scan. Vetor de exaustão de recurso numa rota ADMIN | `AdminService.java:74,77` |
+
+Duas limitações de coleta, também aceitas: o `redis-exporter` é **SPOF de scrape** (um processo
+coleta os seis alvos) e o seed único do `mongodb-exporter` cria dependência de `mongo-1`. Ver
+[OBSERVABILIDADE.md](OBSERVABILIDADE.md).
+
 ## Estado atual do deploy (borda Cloudflare)
 
 O deploy é na **própria máquina**, exposto via **Cloudflare Tunnel**. O estado atual é o
