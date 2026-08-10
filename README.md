@@ -347,7 +347,7 @@ roda no GitHub Actions quatro frentes em paralelo:
 
 | Job                 | O que roda                                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `backend` (matrix)  | `mvn -B verify` por módulo (6 serviços) — dispara o gate de cobertura JaCoCo; integração via Testcontainers no Docker do runner |
+| `backend` (matrix)  | `mvn -B -pl <módulo> -am verify` por módulo (6 serviços) — dispara o gate de cobertura JaCoCo; integração via Testcontainers no Docker do runner |
 | `frontend`          | `npm ci` + `npm run coverage` no `login-interface` — Vitest com threshold de 80%                                                |
 | `compose-validate`  | `docker compose -f docker-compose.yml config -q` — valida a topologia base                                                      |
 | `smoke-test-login`  | sobe nginx + gateway + authorization-server (topologia de deploy, sem `cloudflared`) e valida 5 asserções HTTP da cadeia de login — [ADR-023](docs/adr/ADR-023-smoke-test-automatizado-login-hostname-unico.md) |
@@ -356,8 +356,14 @@ O `smoke-test-login` é o único job que exercita o container `interface`: os Te
 sobem o nginx e o `compose-validate` só valida sintaxe YAML. É também o mais lento — builda 4
 imagens do zero. Detalhes e execução local em [docs/TESTES.md](docs/TESTES.md#smoke-test-da-topologia-de-login-adr-023).
 
-Não há POM-pai agregador, por isso o back-end roda como **matrix** (um job por módulo).
+Há POM-pai agregador na raiz, então `mvn verify` ali constrói os seis — mas o back-end **continua
+rodando como matrix**, um job por módulo, de propósito: um job único serializaria os seis builds
+com Testcontainers, e o wall-clock passaria do módulo mais lento para a soma de todos.
 Os relatórios (Surefire/Failsafe, JaCoCo, cobertura do Vitest) são publicados como artefatos do run.
+
+> **Não renomeie o job `backend` nem os valores da matriz.** Os contextos de branch protection
+> abaixo referenciam `backend (<módulo>)` literalmente — renomear derruba o gate de merge sem
+> nenhum erro visível.
 
 **Gate de merge (branch protection):** a `main` exige todos os checks acima verdes antes de
 aceitar merge. Para (re)aplicar a regra via API (precisa de admin no repo):
@@ -390,10 +396,13 @@ gh api -X PUT repos/k-lila/user-service/branches/main/protection \
 Requerem Java 21 + Maven 3.9+ no host:
 
 ```bash
+# tudo — os seis módulos, a partir da raiz
+mvn test
+
 # user-service — unitários + controllers + integração
 # (integração usa Testcontainers: requer Docker rodando)
-cd user-service && mvn test
+mvn -pl user-service -am test
 
 # authorization-server — unitários
-cd authorization-server && mvn test
+mvn -pl authorization-server -am test
 ```

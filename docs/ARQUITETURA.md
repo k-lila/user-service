@@ -151,9 +151,12 @@ com.users.<modulo>/
 
 Três fatos estruturais que fogem do gabarito e são fáceis de tropeçar:
 
-**Não existe módulo `commons` nem POM agregador.** Cada módulo tem `pom.xml` independente e é
-buildado sozinho (é assim que a matrix do CI roda). O preço é código **duplicado por cópia**
-entre módulos:
+**Existe POM pai/agregador na raiz, mas não existe módulo `commons`** — e a distinção é
+deliberada. O pai centraliza **versões e configuração de build** (Spring Boot/Cloud, gate JaCoCo,
+pins de springdoc/wiremock/feign-micrometer); ele **não** compartilha código. A duplicação de
+classes entre módulos é uma **decisão mantida**, não uma pendência: extrair um `commons` criaria
+acoplamento de release entre serviços que hoje evoluem sozinhos, por um punhado de classes
+pequenas. O preço assumido é código **duplicado por cópia**:
 
 | Classe | Onde vive duplicada |
 |---|---|
@@ -662,7 +665,7 @@ alterar.
 
 # Parte II — Árvore de arquivos anotada
 
-Monorepo de seis módulos Maven **independentes** (não há POM agregador na raiz), um SPA e a
+Monorepo de seis módulos Maven sob um **POM pai/agregador na raiz**, um SPA e a
 infraestrutura. Podas aplicadas: `node_modules/`, `target/`, `.git/`, `dist/`, `coverage/`.
 
 ## Raiz
@@ -675,7 +678,8 @@ user-service/                          # raiz do monorepo (homônima do módulo 
 ├── docker-compose.override.yml        # deltas de dev (republica portas); auto-carregado no `up`
 ├── docker-compose.deploy.yml          # overlay Cloudflare Tunnel; observabilidade em 127.0.0.1
 ├── .env / .env.example                # contrato de variáveis (o .env real é gitignorado)
-├── .dockerignore / .gitignore
+├── pom.xml                             # POM pai/agregador: versões, gate JaCoCo, pins
+├── .dockerignore / .gitignore          # .dockerignore é FAIL-CLOSED (nega tudo, readmite o build)
 ├── secrets/                           # Docker secrets montados em /run/secrets/ — GITIGNORADO,
 │                                      #   gerado por infra/secrets/gen-secrets.sh (ADR-009).
 │                                      #   19 arquivos: credenciais, par JWK, SMTP_*, túnel
@@ -693,7 +697,7 @@ user-service/                          # raiz do monorepo (homônima do módulo 
 
 ```
 user-service/
-├── Dockerfile · pom.xml
+├── pom.xml
 └── src/main/java/com/users/userservice/
     ├── UserServiceApplication.java          # @EnableFeignClients + @EnableScheduling
     ├── clients/                             # saída Feign → notification-service
@@ -764,7 +768,7 @@ user-service/src/test/
 
 ```
 authorization-server/
-├── Dockerfile · pom.xml · .gitattributes · .mvn/wrapper/
+├── pom.xml
 └── src/main/java/authorizationserver/       # ⚠️ raiz de pacote SEM "com.users"
     ├── AuthorizationServerApplication.java
     ├── clients/
@@ -827,7 +831,7 @@ authorization-server/src/test/java/authorizationserver/
 
 ```
 gateway/
-├── Dockerfile · pom.xml
+├── pom.xml
 └── src/main/java/com/users/gateway/
     ├── GatewayApplication.java
     ├── routing/GatewayRouter.java           # ⚠️ tabela de rotas; ordem de declaração importa
@@ -867,7 +871,7 @@ gateway/src/test/java/com/users/gateway/
 
 ```
 notification-service/
-├── Dockerfile · pom.xml                     # ⚠️ SEM springdoc — não reintroduzir (ADR-021)
+├── pom.xml                                  # ⚠️ SEM springdoc — não reintroduzir (ADR-021)
 └── src/main/java/com/users/notificationservice/
     ├── NotificationServiceApplication.java
     ├── config/
@@ -888,7 +892,7 @@ Não há `src/test/resources` — o serviço é stateless e não tem teste de in
 
 ```
 config-server/
-├── Dockerfile · pom.xml
+├── pom.xml
 └── src/main/
     ├── java/com/users/configserver/
     │   ├── ConfigServerApplication.java     # @EnableConfigServer, profile native
@@ -903,7 +907,7 @@ config-server/src/test/java/com/users/configserver/
                                                               ↑ guarda vazamento de segredo
 
 discovery-server/
-├── Dockerfile · pom.xml
+├── pom.xml
 └── src/main/java/com/users/discoveryserver/DiscoveryServerApplication.java   # @EnableEurekaServer
 ```
 
@@ -934,6 +938,9 @@ espelho como no back-end. A camada de acesso HTTP chama-se `api/`, não `service
 
 ```
 infra/
+├── docker/Dockerfile.jvm               # Dockerfile ÚNICO dos 6 módulos Spring, param. por ARG
+│                                       #   MODULE. Contexto de build = raiz (o <parent> dos
+│                                       #   filhos precisa estar dentro do contexto)
 ├── prometheus.yml                      # alvos: dns_sd na 8181 + 3 exporters + config-server (Basic)
 ├── secrets/gen-secrets.sh              # gera ./secrets/ — PRÉ-REQUISITO do 1º up (ADR-009)
 ├── jwk/gen-keys.sh                     # gera o par RSA de assinatura do JWT (ADR-005)
@@ -999,7 +1006,9 @@ docs/
 5. **DTO converte a si mesmo** por método estático; não há camada de mapper.
 6. **Classe duplicada entre módulos tem gêmea** — ver a tabela em
    [§3](#3-anatomia-comum-de-um-serviço). Alterou uma, verifique a outra: o build não acusa.
-7. **Ao acrescentar um serviço**, o gabarito mínimo é `Dockerfile` + `pom.xml` independente +
+7. **Ao acrescentar um serviço**, o gabarito mínimo é `pom.xml` herdando do POM pai + entrada em
+   `<modules>` na raiz + bloco `build:` no compose apontando para `infra/docker/Dockerfile.jvm`
+   com `args: MODULE: <servico>` (não se cria Dockerfile novo) +
    `application.yml` com `spring.config.import` + entrada em
    `config-server/.../config/<servico>.yml` + registro no Eureka + alvo no `infra/prometheus.yml`
    (porta de management **8181**, nunca a de tráfego) + `management.server.port: 8181`. O

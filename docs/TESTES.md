@@ -108,29 +108,34 @@ Testes unitários e de integração respondem perguntas diferentes e são comple
 
 Os testes de integração sobem containers Docker via Testcontainers — Docker deve estar disponível na máquina. Os testes rápidos (unitários e de controller) não têm essa dependência.
 
-> **Não há pom agregador na raiz do repositório** — `mvn test` na raiz e `mvn test -pl <módulo>` **não funcionam**. Use `mvn -f <módulo>/pom.xml test` (ou rode `mvn test` dentro do diretório do módulo).
+> **Há POM pai/agregador na raiz** — `mvn test` na raiz roda os seis módulos, e `-pl <módulo> -am`
+> roda um só (o `-am` inclui o pai). Os comandos são executados **a partir da raiz**. Rodar `mvn`
+> dentro do diretório do módulo continua funcionando, porque o `<parent>` aponta para `../pom.xml`.
 
 ```bash
+# Tudo — os seis módulos (serializado; a CI paraleliza por matrix)
+mvn test
+
 # user-service — suite completa (unitários + controller + integração)
-mvn -f user-service/pom.xml test
+mvn -pl user-service -am test
 
 # user-service — apenas testes rápidos, sem Docker (unitários + controller)
-mvn -f user-service/pom.xml test -Dtest="!*IntegrationTest"
+mvn -pl user-service -am test -Dtest="!*IntegrationTest"
 
 # user-service — apenas integração
-mvn -f user-service/pom.xml test -Dtest="*IntegrationTest"
+mvn -pl user-service -am test -Dtest="*IntegrationTest"
 
 # authorization-server — suite completa (unitários + integração)
-mvn -f authorization-server/pom.xml test
+mvn -pl authorization-server -am test
 
 # authorization-server — apenas integração (OAuth2, lockout, circuit breaker, seed, sessão; Postgres+Redis+WireMock)
-mvn -f authorization-server/pom.xml test -Dtest="*IntegrationTest"
+mvn -pl authorization-server -am test -Dtest="*IntegrationTest"
 
 # notification-service — suite completa (unitários + controller; stateless, sem integração própria)
-mvn -f notification-service/pom.xml test
+mvn -pl notification-service -am test
 
 # Classe específica
-mvn -f user-service/pom.xml test -Dtest=UserControllerTest
+mvn -pl user-service -am test -Dtest=UserControllerTest
 ```
 
 ```bash
@@ -150,15 +155,15 @@ cd login-interface && npm run coverage
 | ------- | ----------- |
 | Durante desenvolvimento | `!*IntegrationTest` — feedback em segundos; `npm test` no front |
 | Antes do commit | Suite completa do módulo alterado |
-| CI (pull request) | Suite completa de cada módulo (`mvn -f <módulo>/pom.xml test`) + `npm run test:run` no front |
+| CI (pull request) | Suite completa de cada módulo (`mvn -B -pl <módulo> -am verify`, um job por módulo) + `npm run test:run` no front |
 
 ---
 
 ## Cobertura (JaCoCo)
 
 A cobertura do back-end é medida pelo `jacoco-maven-plugin` (versão herdada do
-`spring-boot-starter-parent`, sem pin manual). Como **não há POM agregador**, o plugin é
-declarado **em cada módulo** — o `prepare-agent` injeta o `argLine` que o Surefire consome
+`spring-boot-starter-parent`, sem pin manual). O plugin é declarado **uma vez, no POM pai da
+raiz**, e herdado pelos seis — o `prepare-agent` injeta o `argLine` que o Surefire consome
 (todos os testes, inclusive os de integração com Testcontainers, rodam no Surefire — não há
 Failsafe), e o `report` gera o HTML em `<módulo>/target/site/jacoco/index.html` na fase `verify`.
 
@@ -176,16 +181,19 @@ da métrica — os testes de integração (`@SpringBootTest`) sobem o contexto e
 **`config-server` e `discovery-server` são report-only** — geram o relatório (`prepare-agent` +
 `report`), mas **sem a regra `check`**: são código de framework (Eureka/Config Server puros,
 fora do escopo de teste deliberado), não de domínio, e um gate de 70% ali seria artificial.
+Como agora o `check` vem herdado do pai, esses dois o **desligam** no próprio POM movendo a
+execution para a fase `none` — se essa sobrescrita sumir, os dois passam a ser reprovados por um
+gate que nunca foi para eles.
 
 O gate é disparado por **`mvn verify`** (não por `mvn test`). A CI invoca
 `mvn verify`, então o gate de cobertura roda automaticamente a cada PR.
 
 ```bash
 # roda os testes, gera o relatório e aplica o gate (módulo de domínio)
-mvn -f user-service/pom.xml verify
+mvn -pl user-service -am verify
 
 # só o relatório, sem reprovar (útil para medir antes de ajustar testes)
-mvn -f user-service/pom.xml org.jacoco:jacoco-maven-plugin:prepare-agent test org.jacoco:jacoco-maven-plugin:report
+mvn -pl user-service -am org.jacoco:jacoco-maven-plugin:prepare-agent test org.jacoco:jacoco-maven-plugin:report
 # leia: user-service/target/site/jacoco/index.html (linha "Total", coluna Lines)
 ```
 

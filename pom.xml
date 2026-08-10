@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.0.3</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+
+	<groupId>com.users</groupId>
+	<artifactId>users-platform</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<packaging>pom</packaging>
+	<name>users-platform</name>
+	<description>Blueprint de sistema de usuários — agregador dos seis módulos Maven</description>
+
+	<!--
+		POM pai/agregador. Antes dele, os seis módulos eram projetos Maven independentes: a versão
+		do Spring Boot e do Spring Cloud era mantida à mão em seis lugares, e o bloco JaCoCo estava
+		replicado por cópia. Sincronizadas por disciplina, não por estrutura — o que não sobrevive a
+		um fork feito por outra pessoa, que é o caso de uso deste repositório.
+
+		Consequência a conhecer: os módulos deixaram de ser construíveis isoladamente sem este
+		arquivo. É por isso que o build Docker passou a usar contexto de raiz
+		(infra/docker/Dockerfile.jvm), e não mais o diretório do módulo.
+	-->
+	<modules>
+		<module>config-server</module>
+		<module>discovery-server</module>
+		<module>authorization-server</module>
+		<module>user-service</module>
+		<module>gateway</module>
+		<module>notification-service</module>
+	</modules>
+
+	<properties>
+		<java.version>21</java.version>
+		<spring-cloud.version>2025.1.0</spring-cloud.version>
+		<springdoc.version>3.0.0</springdoc.version>
+		<wiremock.version>3.13.1</wiremock.version>
+		<feign-micrometer.version>13.6</feign-micrometer.version>
+	</properties>
+
+	<!--
+		Únicas duas dependências presentes nos SEIS módulos. Qualquer outra é de subconjunto e fica
+		no filho — em especial springdoc, que NÃO pode subir para cá: o notification-service não tem
+		springdoc no classpath por decisão do ADR-021/ADR-006, e herdá-lo republicaria o canal
+		interno (/internal/**) em /v3/api-docs. O pin de versão vive em dependencyManagement, que
+		não instala nada.
+	-->
+	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+	</dependencies>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-dependencies</artifactId>
+				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<!-- testcontainers.version vem do spring-boot-dependencies, herdado do parent Boot. -->
+			<dependency>
+				<groupId>org.testcontainers</groupId>
+				<artifactId>testcontainers-bom</artifactId>
+				<version>${testcontainers.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<!-- Pins antes repetidos à mão em cada módulo que os usava. -->
+			<dependency>
+				<groupId>org.springdoc</groupId>
+				<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+				<version>${springdoc.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springdoc</groupId>
+				<artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
+				<version>${springdoc.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.wiremock</groupId>
+				<artifactId>wiremock-standalone</artifactId>
+				<version>${wiremock.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.github.openfeign</groupId>
+				<artifactId>feign-micrometer</artifactId>
+				<version>${feign-micrometer.version}</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
+	<build>
+		<pluginManagement>
+			<plugins>
+				<!--
+					Lombok como annotation processor. Fica em pluginManagement e NÃO em plugins de
+					propósito: gateway, config-server e discovery-server não usam Lombok, e herdar o
+					processador ali seria peso sem função. Só os três módulos que usam declaram.
+				-->
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-compiler-plugin</artifactId>
+					<configuration>
+						<annotationProcessorPaths>
+							<path>
+								<groupId>org.projectlombok</groupId>
+								<artifactId>lombok</artifactId>
+							</path>
+						</annotationProcessorPaths>
+					</configuration>
+				</plugin>
+			</plugins>
+		</pluginManagement>
+
+		<plugins>
+			<!--
+				Gate de cobertura (docs/TESTES.md). Herdado pelos seis; config-server e
+				discovery-server desligam a execution `check` no próprio POM (report-only) — a
+				regra de 70% LINE/BUNDLE vale só para os quatro módulos de domínio.
+			-->
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>prepare-agent</id>
+						<goals><goal>prepare-agent</goal></goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>verify</phase>
+						<goals><goal>report</goal></goals>
+					</execution>
+					<execution>
+						<id>check</id>
+						<phase>verify</phase>
+						<goals><goal>check</goal></goals>
+						<configuration>
+							<rules>
+								<rule>
+									<element>BUNDLE</element>
+									<limits>
+										<limit>
+											<counter>LINE</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.70</minimum>
+										</limit>
+									</limits>
+								</rule>
+							</rules>
+						</configuration>
+					</execution>
+				</executions>
+				<configuration>
+					<excludes>
+						<exclude>**/*Application.class</exclude>
+						<exclude>**/dtos/**</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+
+			<!--
+				O exclude do Lombok é no-op nos módulos que não o declaram como dependência —
+				excluir artefato ausente não faz nada. Por isso pode ficar aqui, valendo para os seis.
+			-->
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<excludes>
+						<exclude>
+							<groupId>org.projectlombok</groupId>
+							<artifactId>lombok</artifactId>
+						</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>

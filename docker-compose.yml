@@ -230,7 +230,14 @@ services:
   #   (b) passar de 2 exigia editar arquivo, em vez de um argumento de linha de comando.
   # NÃO acrescente container_name nem ports: aqui — qualquer um dos dois quebra o --scale.
   config-server:
-    build: ./config-server
+    # Contexto de build = raiz, e não o diretório do módulo: desde o POM pai o <parent> dos filhos
+    # aponta para ../pom.xml, que precisa estar dentro do contexto. Um Dockerfile só para os seis
+    # módulos, parametrizado por MODULE. Ver infra/docker/Dockerfile.jvm e o .dockerignore da raiz.
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.jvm
+      args:
+        MODULE: config-server
     <<: *res-mid
     environment:
       SERVER_PORT: 8888
@@ -267,7 +274,11 @@ services:
   # discovery-server-2 reaproveita o scaffold (<<: *discovery) e só sobrescreve a env
   # (porta/hostname/peer apontando para o par) e a porta do healthcheck.
   discovery-server-1: &discovery
-    build: ./discovery-server
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.jvm
+      args:
+        MODULE: discovery-server
     <<: *res-mid
     # Sem ports: em prod — Eureka só na rede interna (G2). Republicado em dev no override.
     depends_on:
@@ -470,7 +481,11 @@ services:
   # ──────────────────────────────────────────────
 
   authorization-server:
-    build: ./authorization-server
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.jvm
+      args:
+        MODULE: authorization-server
     <<: *res-jvm
     # Sem ports: em prod. O front-channel (browser → /oauth2/authorize, /login, /connect/logout)
     # é exposto pelo reverse-proxy de TLS/ingress (G1) num hostname dedicado (ex.: auth.<dominio>),
@@ -540,7 +555,11 @@ services:
     restart: unless-stopped
 
   user-service:
-    build: ./user-service
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.jvm
+      args:
+        MODULE: user-service
     <<: *res-jvm
     # Sem ports: em prod — acesso só via gateway (G2: 8090 direto contorna rate limit/CORS).
     # Republicado em dev no override.
@@ -603,7 +622,11 @@ services:
   # aqui (chamada assíncrona com circuit breaker — indisponibilidade não pode travar o
   # cadastro), e este serviço também não depende do user-service.
   notification-service:
-    build: ./notification-service
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.jvm
+      args:
+        MODULE: notification-service
     <<: *res-jvm
     # Só o discovery do piso mínimo (invariante de profile do ADR-024, ver auth-server).
     depends_on:
@@ -640,7 +663,11 @@ services:
     restart: unless-stopped
 
   gateway:
-    build: ./gateway
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.jvm
+      args:
+        MODULE: gateway
     <<: *res-jvm
     # ports: movido para docker-compose.override.yml (G10 / ADR-019).
     # Na base prod-safe o gateway NÃO é publicado no host — apenas o nginx do SPA

@@ -1,6 +1,30 @@
-target
-.git
-.gitignore
-node_modules
-Dockerfile
-docker-compose.yml
+# Fail-closed: nega TUDO e readmite só o que o build Maven precisa.
+#
+# Por que fail-closed, e não uma lista de exclusões: até a introdução do POM pai este arquivo era
+# INERTE — o Docker lê o .dockerignore do diretório de contexto, e os contextos eram os diretórios
+# dos módulos (build: ./user-service), nenhum dos quais tinha .dockerignore próprio. Com o contexto
+# agora na raiz (infra/docker/Dockerfile.jvm), o arquivo passou a valer pela primeira vez, e o
+# conteúdo da raiz inclui `secrets/` e `.env`. Uma lista de negações erra por omissão; esta erra por
+# excesso, que no caso de segredo é o lado certo de errar.
+#
+# Mesmo princípio do lock fail-closed do OutboxRetryService.
+
+*
+
+# Manifesto do reator + os seis módulos de código.
+!pom.xml
+!config-server
+!discovery-server
+!authorization-server
+!user-service
+!gateway
+!notification-service
+
+# O próprio Dockerfile, referenciado por caminho a partir da raiz.
+!infra/docker/Dockerfile.jvm
+
+# Reexclusões dentro do que foi readmitido: artefatos de build (os seis target/ somam ~460 MB),
+# wrapper órfão e chaves geradas localmente, que nunca devem ir para uma camada.
+**/target
+**/.mvn
+**/src/main/resources/keys
