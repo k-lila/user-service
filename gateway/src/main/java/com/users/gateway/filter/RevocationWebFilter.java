@@ -15,10 +15,11 @@ import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.client.web.server.ServerOAuth2AuthorizedClientRepository;
-import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebSession;
+
+import com.users.gateway.security.RevocationTokenReader;
 
 import reactor.core.publisher.Mono;
 
@@ -31,9 +32,18 @@ import reactor.core.publisher.Mono;
  * sessão — forçando re-login. O user-service permanece a camada autoritativa (recursos sensíveis
  * vivem lá); aqui o ganho é rejeição imediata na borda sem o salto downstream.
  *
- * <p><b>Fail-open</b>: qualquer erro (decodificação, Redis) deixa a request seguir — um outage não
- * derruba a autenticação. Atua só sobre {@link OAuth2AuthenticationToken} (login por sessão);
- * tráfego não autenticado ou por bearer passa direto.
+ * <p><b>Fail-open</b>: erro de assinatura, token não-parseável, JWKS inalcançável ou Redis fora deixam
+ * a request seguir — um outage não derruba a autenticação. Atua só sobre
+ * {@link OAuth2AuthenticationToken} (login por sessão); tráfego não autenticado ou por bearer passa
+ * direto.
+ *
+ * <p><b>Token expirado NÃO é mais fail-open (ADR-025).</b> Antes, a decodificação usava o decoder do
+ * resource server, que valida {@code exp}: com o access token da sessão vencido — situação comum, não
+ * de borda (3× em 35 min de uso normal) — a decodificação lançava e a checagem inteira era pulada,
+ * bem no momento em que o titular revogado ainda podia renovar por refresh. O
+ * {@link RevocationTokenReader} lê {@code userID} e {@code iat} verificando <b>assinatura</b> e
+ * ignorando {@code exp}, e o decoder do resource server permanece <b>inalterado</b> para o tráfego
+ * bearer (que continua recebendo 401 com {@code exp} vencido).
  */
 @Component
 public class RevocationWebFilter implements GlobalFilter, Ordered {
@@ -44,19 +54,22 @@ public class RevocationWebFilter implements GlobalFilter, Ordered {
     private static final String CLIENT_REGISTRATION_ID = "gateway-client";
 
     private final ServerOAuth2AuthorizedClientRepository authorizedClientRepository;
-    private final ReactiveJwtDecoder jwtDecoder;
+    // Tipo PRÓPRIO, jamais ReactiveJwtDecoder: um bean daquele tipo desligaria a autoconfig do
+    // resource server (@ConditionalOnMissingBean) e o gateway aceitaria bearer expirado. Ver o
+    // javadoc de RevocationTokenReader.
+    private final RevocationTokenReader tokenReader;
     private final ReactiveStringRedisTemplate redis;
     private final boolean enabled;
     private final String keyPrefix;
 
     public RevocationWebFilter(
             ServerOAuth2AuthorizedClientRepository authorizedClientRepository,
-            ReactiveJwtDecoder jwtDecoder,
+            RevocationTokenReader tokenReader,
             ReactiveStringRedisTemplate redis,
             @Value("${security.revocation.enabled:true}") boolean enabled,
             @Value("${security.revocation.key-prefix:revoke:user:}") String keyPrefix) {
         this.authorizedClientRepository = authorizedClientRepository;
-        this.jwtDecoder = jwtDecoder;
+        this.tokenReader = tokenReader;
         this.redis = redis;
         this.enabled = enabled;
         this.keyPrefix = keyPrefix;
@@ -75,7 +88,12 @@ public class RevocationWebFilter implements GlobalFilter, Ordered {
                 .flatMap(this::isRevoked)
                 .defaultIfEmpty(false)
                 .onErrorResume(e -> {
-                    LOGGER.warn("| revogação | falha na checagem de borda (fail-open) | {}", e.toString());
+                    // Fail-open remanescente: assinatura inválida, token não-parseável, JWKS
+                    // inalcançável ou Redis fora. `exp` vencido NÃO cai mais aqui (ADR-025) — se
+                    // voltar a cair, a correção (5) fica inerte com build verde, que é exatamente o
+                    // modo de falha de um jwk-set-uri errado. WARN com a causa é o que torna isso
+                    // diagnosticável.
+                    LOGGER.warn("| revogação | falha na checagem de borda (fail-open) | causa: {}", e.toString());
                     return Mono.just(false);
                 })
                 .flatMap(revoked -> revoked ? deny(exchange) : chain.filter(exchange));
@@ -83,16 +101,12 @@ public class RevocationWebFilter implements GlobalFilter, Ordered {
 
     private Mono<Boolean> isRevoked(OAuth2AuthorizedClient client) {
         String tokenValue = client.getAccessToken().getTokenValue();
-        return jwtDecoder.decode(tokenValue).flatMap(jwt -> {
-            String userID = jwt.getClaimAsString("userID");
-            Instant issuedAt = jwt.getIssuedAt();
-            if (userID == null || issuedAt == null) {
-                return Mono.just(false);
-            }
-            return redis.opsForValue().get(keyPrefix + userID)
-                    .map(value -> isBefore(issuedAt, value))
-                    .defaultIfEmpty(false);
-        });
+        return tokenReader.read(tokenValue)
+                .flatMap(identity -> redis.opsForValue().get(keyPrefix + identity.userID())
+                        .map(value -> isBefore(identity.issuedAt(), value))
+                        .defaultIfEmpty(false))
+                // read() vazio = token sem userID/iat: nada a checar (não é erro, não é revogação).
+                .defaultIfEmpty(false);
     }
 
     private boolean isBefore(Instant issuedAt, String revokeEpochMillis) {

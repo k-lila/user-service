@@ -127,6 +127,21 @@ mapeia `AuthDTO.emailVerified` para `enabled` — `emailVerified=false` bloqueia
 nullable no lado consumidor — `null` equivale a usuário legado, sem NPE). Usuários legados
 (`emailVerified=null`) continuam tratados como verificados, sem bloqueio.
 
+**O gate vale também no SSO silencioso (ADR-025).** Até 2026-08-08 ele só era exercido no
+`POST /login`: com sessão do IdP viva, o `GET /oauth2/authorize` emitia o código **sem** chamar
+`loadUserByUsername`, então `emailVerified=false` fora da carência (assim como `active=false` e roles
+revogadas) não barrava nada. O `AuthorizationEndpointRevalidationFilter` re-deriva o titular na
+emissão pelo **mesmo** método, e comportamento observável novo do endpoint:
+
+| Situação no `GET /oauth2/authorize` (com sessão) | Antes | Agora |
+| --- | --- | --- |
+| Titular íntegro | `302 …?code=…` | **inalterado** |
+| Eliminado / inativo / e-mail não verificado fora da carência / roles divergentes / sessão além de `security.session.max-lifetime` | `302 …?code=…` | `302 /login` + `AUTHSESSION` invalidado |
+| user-service indisponível, sem epoch de revogação | `302 …?code=…` | **inalterado** (fail-open) |
+
+Para o gateway, o `302 /login` é indistinguível de "sessão do IdP expirada" — caso que o fluxo BFF já
+tratava. Após o re-login, o pedido original é retomado (saved request), sem laço.
+
 **Canal interno (notification-service):** `POST /internal/notifications/email-verification`
 — protegido por `X-Internal-Token` (mesmo shared secret do ADR-006), sem Spring Security
 (`Filter` de servlet simples). Chamado só pelo user-service via Feign assíncrono
@@ -330,7 +345,14 @@ Além dos caches, o Redis compartilhado guarda o **epoch de revogação de token
 hard-delete (junto das evictions acima); lida pelos resource servers (user-service, gateway) e
 pelo guard de refresh do auth-server. **Comportamento:** um access token cujo `iat` precede o
 epoch é rejeitado com **401**, e o grant `refresh_token` de um titular revogado falha com
-`invalid_grant` — a revogação **força re-autenticação**. Fail-open se o Redis estiver indisponível.
+`invalid_grant`. Fail-open se o Redis estiver indisponível.
+
+> **A revogação sozinha NÃO força re-autenticação — corrigido em 2026-08-09 (ADR-025).** As três
+> checagens comparam `iat < epoch`, e enquanto a sessão do IdP vivesse o `/oauth2/authorize`
+> reemitia credencial com `iat = agora`: todas aprovavam **por construção**. Quem força a
+> re-autenticação de fato é a **re-derivação do estado do titular na emissão**
+> ([ADR-025](adr/ADR-025-revalidacao-estado-emissao.md)) — o epoch é o que a torna eficaz sobre
+> credenciais já emitidas, não o que impede a emissão de novas.
 
 ## Formato de erros (RFC 7807 / ProblemDetail)
 

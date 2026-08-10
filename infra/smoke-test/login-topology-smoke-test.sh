@@ -15,12 +15,22 @@
 # renderizado: são status code, header Location e Content-Type. Playwright/Cypress seria mais caro
 # de manter e mais frágil sem cobrir nada que o curl não cubra (ADR-023 § Alternativas).
 #
-# AS CINCO ASSERÇÕES (ADR-023 § Mecanismo 4):
+# AS SEIS ASSERÇÕES (ADR-023 § Mecanismo 4; (f) acrescentada pelo ADR-025):
 #   (e) a base do compose não publica 8081/5173                      → G10
 #   (a) GET  /login devolve o form do IdP, não o index.html do SPA   → Elo 3
 #   (b) GET  /default-ui.css é text/css                              → Elo 3
 #   (c) POST /login não é barrado pelo CSRF do gateway               → BUG-001
 #   (d) Location de /oauth2/authorize traz host/proto públicos       → Elo 2 + Elo 6
+#   (f) sessão ÍNTEGRA obtém o authorization_code                    → ADR-025
+#
+# POR QUE (f) É OBRIGATÓRIA, E NÃO "NICE TO HAVE". Depois da re-derivação na emissão (ADR-025), a
+# asserção (d) passa TANTO com o fix correto QUANTO com a sua pior regressão — "o filtro invalida
+# toda sessão, sempre" —, porque nos dois casos o authorize sem sessão vai para o login. (d) prova
+# que SEM sessão vai-se ao formulário; só (f) prova que COM sessão íntegra emite-se o código. Sem o
+# par, o smoke-test deixa de distinguir o fix da regressão total. Isso não é hipotético: durante a
+# implementação do ADR-025 a comparação de authorities crua reprovou TODA sessão (o Spring Security 7
+# acrescenta FACTOR_PASSWORD ao token do login, ausente no UserDetails re-derivado) — exatamente esta
+# regressão, pega por um teste de integração equivalente a (f).
 #
 # USO:
 #   bash infra/smoke-test/login-topology-smoke-test.sh
@@ -59,10 +69,21 @@ export TUNNEL_ID="${TUNNEL_ID:-00000000-0000-0000-0000-000000000000}"
 NET="user-service-net"
 CURL_IMAGE="${SMOKE_CURL_IMAGE:-curlimages/curl:8.11.1}"
 BASE="http://interface"
-# code_challenge fixo (o exemplo da RFC 7636). Nunca é verificado — o fluxo morre no redirect para
-# o login —, mas TEM de estar presente: com requireProofKey(true) o provider do SAS valida o PKCE
-# ANTES de checar se o principal está autenticado, e sem ele a resposta é erro, não o 302.
+# code_challenge fixo (o exemplo da RFC 7636). O code_verifier correspondente nunca é apresentado —
+# nenhuma asserção troca o código por token —, mas o challenge TEM de estar presente: com
+# requireProofKey(true) o provider do SAS valida o PKCE ANTES de checar se o principal está
+# autenticado, e sem ele a resposta é erro, não o 302.
+#
+# NOTA (ADR-025): até a asserção (f) existir, este comentário dizia que "o fluxo morre no redirect
+# para o login". Deixou de ser verdade — em (f) o fluxo segue COM sessão autenticada até a emissão do
+# authorization_code. Quem depende deste bloco para entender o script precisa saber disso.
 CODE_CHALLENGE="E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+# Credenciais do titular registrado pela asserção (f). O e-mail é único por execução para o teste ser
+# hermético mesmo se o volume do Mongo sobreviver (o `down -v` do compose_up já cobre, isto é cinto
+# e suspensório). A senha satisfaz o @Pattern do UserRequestDTO (letra + dígito, 8..72).
+SMOKE_USER_EMAIL="smoke-f-$(date +%s)@example.invalid"
+SMOKE_USER_PASSWORD="SmokeTest123"
 
 FAILURES=0
 STACK_UP=0
@@ -386,6 +407,117 @@ assert_authorize_location() {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# (f) Sessão ÍNTEGRA obtém o authorization_code — ADR-025
+#
+# A CONTRAPARTIDA OBRIGATÓRIA DE (d). Ver o racional no cabeçalho: (d) sozinha não distingue o fix
+# da regressão "invalida toda sessão, sempre". Roteiro: registrar titular → POST /login real →
+# GET /oauth2/authorize com aquele AUTHSESSION → o Location tem de trazer o código.
+#
+# Sem SMTP: o cadastro nasce com emailVerified=false e o envio do e-mail NÃO é automático
+# (ADR-015), mas o login funciona dentro da carência de 24h — daí (f) ser executável no CI.
+#
+# ASSERÇÃO POR REGEX `[?&]code=`, NÃO SUBSTRING SOLTA: "code=" casaria dentro de
+# `error=invalid_request&error_description=...code_challenge...` e a asserção passaria justamente no
+# caso em que o código NÃO foi emitido. Pelo mesmo motivo, a AUSÊNCIA de `error=` é asserida à parte:
+# o redirect de erro do endpoint de autorização também começa no redirect_uri, então prefixo +
+# "contém code" não bastam. Enfraquecer (f) para prefix match devolve o buraco que ela veio tampar.
+# ──────────────────────────────────────────────────────────────────────────────
+assert_authorize_emits_code_with_valid_session() {
+	log "(f) Sessão íntegra obtém o authorization_code (ADR-025)"
+
+	# 1) Registro pelo gateway (rota permitAll e isenta de CSRF; tier LOW por-IP).
+	local reg_out reg_code
+	reg_out="$(dcurl -o /dev/null -D - -w '\nHTTP_CODE=%{http_code}\n' \
+		-H "Content-Type: application/json" \
+		--data "{\"name\":\"Smoke F\",\"email\":\"${SMOKE_USER_EMAIL}\",\"password\":\"${SMOKE_USER_PASSWORD}\",\"termsAccepted\":true}" \
+		"$BASE/v1/users/register")"
+	reg_code="$(http_code "$reg_out")"
+	if [ "$reg_code" != "201" ] && [ "$reg_code" != "200" ]; then
+		fail "POST /v1/users/register → $reg_code (esperado 201) — (f) não pôde ser exercida"
+		return
+	fi
+	pass "titular registrado (${reg_code})"
+
+	# 2) GET /login para obter AUTHSESSION + _csrf, e POST /login com as credenciais REAIS.
+	#    Mesmo padrão de cookie montado à mão da asserção (c) — APP_COOKIE_SECURE=true faz o curl
+	#    recusar reenviar o AUTHSESSION sobre HTTP.
+	local form authsession csrf
+	form="$(dcurl -D - "$BASE/login")"
+	authsession="$(printf '%s' "$form" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: *AUTHSESSION=\([^;]*\).*/\1/p' | tail -1)"
+	csrf="$(printf '%s' "$form" | grep -o '<input[^>]*_csrf[^>]*>' | grep -o 'value="[^"]*"' | head -1 | cut -d'"' -f2 || true)"
+	if [ -z "$authsession" ] || [ -z "$csrf" ]; then
+		fail "não foi possível extrair AUTHSESSION/_csrf do GET /login — (f) não pôde ser exercida"
+		return
+	fi
+
+	local login_out login_code login_session
+	login_out="$(dcurl -o /dev/null -D - -w '\nHTTP_CODE=%{http_code}\n' \
+		-H "Cookie: AUTHSESSION=${authsession}" \
+		--data-urlencode "username=${SMOKE_USER_EMAIL}" \
+		--data-urlencode "password=${SMOKE_USER_PASSWORD}" \
+		--data-urlencode "_csrf=${csrf}" \
+		"$BASE/login")"
+	login_code="$(http_code "$login_out")"
+	# O login troca o id da sessão (proteção contra session fixation): usa o cookie NOVO se veio.
+	login_session="$(printf '%s' "$login_out" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: *AUTHSESSION=\([^;]*\).*/\1/p' | tail -1)"
+	[ -n "$login_session" ] || login_session="$authsession"
+
+	local login_loc
+	login_loc="$(header_value "$login_out" location)"
+	if [ "$login_code" != "302" ] || [ "$login_loc" = "${PUBLIC_ORIGIN}/login?error" ]; then
+		fail "POST /login com credenciais válidas → $login_code '${login_loc:-<sem Location>}' (esperado 302 fora de /login?error) — (f) não pôde ser exercida"
+		return
+	fi
+	pass "login autenticado (302 → ${login_loc})"
+
+	# 3) GET /oauth2/authorize COM a sessão autenticada: aqui roda o filtro de re-derivação.
+	local redirect_enc url out code loc
+	redirect_enc="$(printf '%s' "${PUBLIC_ORIGIN}/login/oauth2/code/gateway-client" | sed -e 's|:|%3A|g' -e 's|/|%2F|g')"
+	url="${BASE}/oauth2/authorize?response_type=code&client_id=gateway-client&redirect_uri=${redirect_enc}&scope=openid&code_challenge=${CODE_CHALLENGE}&code_challenge_method=S256"
+	out="$(dcurl -o /dev/null -D - -w '\nHTTP_CODE=%{http_code}\n' \
+		-H "X-Forwarded-For: 203.0.113.9" \
+		-H "Cookie: AUTHSESSION=${login_session}" \
+		"$url")"
+	code="$(http_code "$out")"
+	loc="$(header_value "$out" location)"
+
+	if [ "$code" = "302" ]; then
+		pass "status 302"
+	else
+		fail "status $code (esperado 302 com o authorization_code)"
+		return
+	fi
+
+	case "$loc" in
+	"${PUBLIC_ORIGIN}/login/oauth2/code/gateway-client"*)
+		pass "Location no redirect_uri registrado"
+		;;
+	"${PUBLIC_ORIGIN}/login")
+		fail "Location: ${loc} — a sessão ÍNTEGRA foi invalidada. É a regressão total do ADR-025 (o filtro de re-derivação está reprovando todo mundo), e é precisamente o que (d) sozinha NÃO pega"
+		return
+		;;
+	*)
+		fail "Location: '${loc:-<ausente>}' (esperado ${PUBLIC_ORIGIN}/login/oauth2/code/gateway-client...)"
+		return
+		;;
+	esac
+
+	if printf '%s' "$loc" | grep -qE '[?&]code='; then
+		pass "authorization_code emitido"
+	else
+		fail "Location sem parâmetro code=: '${loc}' — sessão íntegra deixou de emitir código (ADR-025)"
+	fi
+
+	# Ausência de error= é asserção SEPARADA: o redirect de erro do endpoint de autorização também
+	# começa no redirect_uri, e sem esta linha um invalid_request passaria por sucesso.
+	if printf '%s' "$loc" | grep -qE '[?&]error='; then
+		fail "Location traz error=: '${loc}' — a autorização falhou, ainda que no redirect_uri"
+	else
+		pass "sem parâmetro error="
+	fi
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 diagnostics() {
 	log "Diagnóstico (a stack falhou)"
 	compose ps || true
@@ -420,6 +552,9 @@ main() {
 	assert_default_ui_css
 	assert_post_login_not_blocked_by_csrf
 	assert_authorize_location
+	# (f) DEPOIS de (d), e o par é indivisível: (d) prova o caminho SEM sessão, (f) prova o caminho
+	# COM sessão íntegra. Remover uma delas devolve a ambiguidade que o ADR-025 fechou.
+	assert_authorize_emits_code_with_valid_session
 
 	if [ "$FAILURES" -eq 0 ]; then
 		log "Smoke-test da topologia de login: OK"

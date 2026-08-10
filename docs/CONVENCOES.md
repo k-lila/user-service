@@ -56,6 +56,40 @@ Dois canais internos existem hoje: `/internal/users/email/{email}` (auth-server 
   dedicado (`/v1/admin/**`, ADR-014), que reativa os valores `SOFT_DELETE_ADMIN`/`HARD_DELETE_ADMIN`
   do enum `AuditAction` (antes reservados, sem rota ativa).
 
+## As sete cópias do estado de autorização (ADR-025)
+
+O estado de autorização de um titular existe **hoje em sete lugares**. Cada um precisa de um dono e de
+um mecanismo de invalidação **declarados** — a ADR-025 nasceu porque uma delas (a sessão do IdP) não
+tinha nenhum, e sozinha refabricava credencial nova e limpa a partir de estado obsoleto: nove
+`authorization_code` emitidos após um hard-delete, com zero autenticações.
+
+| # | Cópia | Dono | Mecanismo de invalidação |
+| --- | --- | --- | --- |
+| 1 | MongoDB `users` | user-service | **Fonte de verdade** — nada a invalidar |
+| 2 | Cache Redis `usersById`/`usersByEmail`/`authByEmail` | user-service | Evict explícito nas mutações + TTL 5 min |
+| 3 | **Sessão do IdP** (`AUTHSESSION`, `authserver:session:sessions:*`) | auth-server | Re-derivação na emissão + teto de vida (**ADR-025**) — antes: **NENHUM** |
+| 4 | Claims do access token | auth-server emite; gateway/user-service checam | Epoch de revogação (ADR-017) |
+| 5 | Refresh token | auth-server | `RevocationRefreshGuard` (ADR-017) |
+| 6 | PostgreSQL `oauth2_authorization` | auth-server | Só purga por expiração (ADR-022) |
+| 7 | Sessão do gateway (`SESSION`, `gateway:session`) | gateway | `RevocationWebFilter` (ADR-017 + correção do `exp`, ADR-025) |
+
+**Lacunas conhecidas** (listadas de propósito — um inventário que só mostra o que **está** coberto não
+impede a oitava cópia de entrar, e impede menos ainda que a lacuna já existente seja esquecida):
+
+- **Troca de senha não invalida nada.** `RegisterService.java:105-109` apenas regrava o hash: sem
+  epoch de revogação, sem invalidar a sessão do IdP, sem invalidar a sessão do gateway e sem derrubar
+  tokens vivos. Consequência: **trocar a senha não expulsa quem já está dentro** — inclusive um
+  atacante com sessão ativa, que é precisamente o caso de uso de trocar a senha. Gap **identificado e
+  registrado**, fora do escopo da ADR-025 (ver `docs/SECURITY.md`).
+- **Eliminação push ausente:** não há canal para o auth-server apagar sessões/registros de um titular
+  sob demanda; a ADR-025 reduz o resíduo (a sessão órfã fica inerte e morre no primeiro contato), não
+  o zera. ADR própria, futura.
+
+> **Invariante:** introduzir uma **oitava** cópia de estado de autorização exige **declarar seu
+> mecanismo de invalidação** nesta tabela, no mesmo commit. Esta correção foi o **quarto remendo da
+> mesma família** (ADR-017 cobriu #4 e #5, o filtro de borda cobriu #7, a ADR-025 cobriu #3); a tabela
+> existe para que não haja um quinto pela mesma razão.
+
 ## Credenciais e roles
 
 - **BCrypt** com custo padrão (10) para o hash de senha.

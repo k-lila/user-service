@@ -6,6 +6,22 @@
 - **Tarefa relacionada:** gap "Ausência de revogação ativa de token (pós-revogação de role ou
   desativação de conta)" (`docs/SECURITY.md`, tabela de dívida aceita)
 
+> **Nota de atualização (2026-08-08, [ADR-025](ADR-025-revalidacao-estado-emissao.md)).** O texto
+> abaixo está **preservado como foi escrito**, incluindo duas afirmações que a experiência derrubou:
+>
+> 1. **"Fora do refresh (authorization_code) o epoch é irrelevante"** (Decisão 3) — falso no **SSO
+>    silencioso**, em que *não houve login*: com sessão do IdP viva, o `/oauth2/authorize` reemitia
+>    credencial nova a partir de estado obsoleto, e como as três checagens daqui comparam
+>    `iat < epoch` e o token novo nasce com `iat = agora`, **todas aprovavam por construção**. Medido
+>    em produção em 2026-08-07: nove `authorization_code` emitidos após um hard-delete, zero
+>    autenticações.
+> 2. **"Revogação força re-autenticação"** (Decisão 5) — forçava *reemissão*, e a reemissão **lavava**
+>    o token. Passa a ser verdade a partir da ADR-025, que re-deriva o titular na emissão.
+>
+> Terceiro ponto, na borda: o `RevocationWebFilter` pulava a checagem inteira quando o access token da
+> sessão estava **expirado** (o decoder do resource server valida `exp`). Corrigido na ADR-025 pelo
+> `RevocationTokenReader`.
+
 ## Contexto
 
 Os resource servers (gateway e user-service) validavam o access token só por **assinatura + `exp`**,

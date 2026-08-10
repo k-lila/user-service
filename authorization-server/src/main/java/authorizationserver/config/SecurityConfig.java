@@ -1,5 +1,7 @@
 package authorizationserver.config;
 
+import java.time.Duration;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,13 +11,18 @@ import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.session.data.redis.config.annotation.web.http.EnableRedisHttpSession;
 import org.springframework.session.web.http.CookieSerializer;
 import org.springframework.session.web.http.DefaultCookieSerializer;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
+
+import authorizationserver.filter.AuthorizationEndpointRevalidationFilter;
+import authorizationserver.services.RevocationRefreshGuard;
 
 @Configuration
 @EnableWebSecurity
@@ -35,6 +42,23 @@ public class SecurityConfig {
 	@Value("${app.cookie.secure:false}")
 	private boolean cookieSecure;
 
+	// Teto de vida da sessão do IdP, medido a partir do INSTANTE DE AUTENTICAÇÃO (ADR-025) — não de
+	// getCreationTime(), que no BFF mede também o tempo de sessão anônima (CSRF + saved request) e
+	// faria um login legítimo nascer vencido. Os 30 min do Spring Session são de INATIVIDADE e cada
+	// autorização os renova: sem este teto, uma sessão em uso contínuo nunca expira.
+	// GRANULARIDADE REAL ≈ vida do refresh token (60 min, defaults do SAS): quem renova por
+	// refresh_token não passa pelo authorize. "Teto absoluto" seria a mesma imprecisão de "revogação
+	// força re-autenticação" que a ADR-025 corrige.
+	@Value("${security.session.max-lifetime:8h}")
+	private Duration sessionMaxLifetime;
+
+	// REVERSÃO OPERACIONAL, não configuração suportada (ADR-025). O raio de um defeito no filtro de
+	// re-derivação é "ninguém consegue logar" (R-01, P0), e com a propriedade servida pelo
+	// config-server o rollback é restart, sem rebuild. Precedente: TOKEN_REVOCATION_ENABLED.
+	// Em `false` o sistema volta ao comportamento vulnerável descrito na ADR-025 — não deixe assim.
+	@Value("${security.session.revalidation.enabled:true}")
+	private boolean revalidationEnabled;
+
 	// Cookie de sessão com nome próprio (AUTHSESSION) para NÃO colidir com o cookie
 	// SESSION do gateway: gateway e auth-server compartilham o host "localhost" em dev
 	// (cookies ignoram a porta), e o default do Spring Session ("SESSION") nos dois faria
@@ -52,7 +76,11 @@ public class SecurityConfig {
 
 	@Bean
 	@Order(1)
-	public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http)
+	public SecurityFilterChain authorizationServerSecurityFilterChain(
+			HttpSecurity http,
+			AuthorizationServerSettings authorizationServerSettings,
+			UserDetailsService userDetailsService,
+			RevocationRefreshGuard revocationGuard)
 			throws Exception {
 		http
 			.oauth2AuthorizationServer((authorizationServer) -> {
@@ -75,6 +103,30 @@ public class SecurityConfig {
 					new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
 				)
 			);
+
+		// Re-derivação do titular na emissão (ADR-025). TRÊS coisas a NÃO regredir aqui:
+		//
+		//  (1) A POSIÇÃO. addFilterAfter(SecurityContextHolderFilter): antes dele o
+		//      SecurityContextHolder ainda está vazio e o filtro vira NO-OP SILENCIOSO — filtro
+		//      correto em posição errada é a mesma classe de falha do sampling de tracing
+		//      documentado e inerte, com build verde. Guarda:
+		//      AuthorizationChainStructureIntegrationTest assere o índice na FilterChainProxy.
+		//  (2) A CHAIN. Só a @Order(1) serve: é ela que tem securityMatcher(endpointsMatcher) e,
+		//      portanto, a única que vê /oauth2/authorize. Na @Order(2) o filtro nunca rodaria.
+		//  (3) NÃO é @Component nem @Bean. Qualquer bean de tipo Filter é auto-registrado pelo
+		//      Boot no container servlet, o que o faria atuar em TODO path fora da security chain
+		//      — inclusive na porta de management. Instanciar com `new` aqui é o que mantém o
+		//      escopo restrito ao matcher positivo do próprio filtro.
+		http.addFilterAfter(
+			new AuthorizationEndpointRevalidationFilter(
+				// Derivado das settings, nunca do literal "/oauth2/authorize": um endpoint
+				// customizado faria o literal parar de casar em silêncio.
+				authorizationServerSettings.getAuthorizationEndpoint(),
+				userDetailsService,
+				revocationGuard,
+				sessionMaxLifetime,
+				revalidationEnabled),
+			SecurityContextHolderFilter.class);
 
 		return http.build();
 	}

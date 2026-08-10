@@ -330,7 +330,7 @@
 - **Decisão:** fechado o gap "Ausência de revogação ativa de token" via **epoch de revogação por usuário** no Redis (`revoke:user:{userID}`, TTL ≥ vida do refresh, default 75m) — fonte única compartilhada pelos 3 serviços, sem introspection por-request nem novo canal Feign. (1) **user-service** grava o epoch (`TokenRevocationService`) em `AdminService.updateUserRoles`, `RegisterService.deactivateUser`/`deleteUser` (self+admin), junto das evictions de cache; e rejeita o token cujo `iat` precede o epoch via `RevocationTokenValidator` somado aos validadores default num `JwtDecoder` de issuer **lazy** (preserva independência de startup do auth-server). (2) **auth-server** fecha o caminho do refresh: `RevocationRefreshGuard` + `TokenCustomizerConfig` abortam o grant `refresh_token` (`invalid_grant`) quando a revogação é mais recente que o refresh token apresentado. (3) **gateway** (defesa em profundidade): `RevocationWebFilter` (`GlobalFilter`) inspeciona o access token da sessão e responde 401 + invalida a sessão.
 - **Achado que motivou o escopo:** a nota antiga "janela = TTL do access token (~5 min)" era otimista — o gateway renova via `refresh_token` e o SAS reusa as authorities armazenadas no refresh, então um usuário revogado/desativado recebia tokens válidos **indefinidamente** até re-login. Por isso o fechamento do refresh é obrigatório (não opcional). Corrigido no `SECURITY.md`.
 - **Decisões com o humano (AskUserQuestion):** abrangência = **completa** (epoch + refresh + checagem em todo recurso — gateway **e** user-service; janela residual ≈ segundos); falha do Redis = **fail-open** (disponibilidade sobre rigor — outage de Redis não derruba a autenticação). Toggle `security.revocation.enabled`.
-- **Invariantes novas:** `key-prefix` (`revoke:user:`) idêntico nos 3 serviços; revogação **força re-autenticação** (não muta a sessão viva — re-login re-deriva roles e aplica o gate ADR-015); precisão de `iat` em segundos faz token emitido no mesmo segundo da revogação ser rejeitado (sentido seguro).
+- **Invariantes novas:** `key-prefix` (`revoke:user:`) idêntico nos 3 serviços; revogação **força re-autenticação** (não muta a sessão viva — re-login re-deriva roles e aplica o gate ADR-015) — **[CORRIGIDO em 2026-08-09, ADR-025: esta invariante era FALSA. A revogação forçava *reemissão*, e a reemissão lavava o token; ver a entrada da FASE 6 no fim deste arquivo]**; precisão de `iat` em segundos faz token emitido no mesmo segundo da revogação ser rejeitado (sentido seguro).
 - **Verificação:** user-service 283 testes ✅ (gate JaCoCo OK), auth-server 71 ✅, gateway 60 ✅, notification 12 ✅ — total backend 426 (+29). Novos testes: `TokenRevocationServiceTest`/`RevocationTokenValidatorTest`, `RevocationRefreshGuardTest`+2 em `TokenCustomizerConfigTest`, `RevocationWebFilterTest`, +1 em `AdminFlowIntegrationTest` (epoch no Redis real), +2 no fluxo OAuth2 (refresh revogado barrado).
 - **ADR:** docs/adr/ADR-017-revogacao-ativa-token.md. Docs sincronizados: `SECURITY.md` (gap → controle ativo), `CLAUDE.md` (descrições dos 3 serviços + invariante + ADR list + contagem 466), `CONFIG.md` (env `TOKEN_REVOCATION_*`).
 - **Pendência de pipeline:** mudança de **superfície de segurança** — `security-reviewer` (FASE 5) ainda **não** revisou esta implementação; o `senso-critico` final também não. Esta entrega NÃO os dispensa antes do merge.
@@ -685,3 +685,498 @@ de cada basta.
 - **`count(process_uptime_seconds{...})` super-conta por até 5 min** após remover réplica (janela
   de lookback do PromQL mantém a série da réplica morta). Medido; não é defeito da query. Anotado
   na `description` do painel para ninguém ler 4 depois de um scale-down e achar que falhou.
+
+
+## [2026-08-07] TASK-REVALIDACAO-EMISSAO — FASE 2 rodada 2/2 · senso-critico · APPROVED_WITH_OBSERVATIONS
+
+Spec rev.2 (`.claude/memory/spec-TASK-REVALIDACAO-EMISSAO.md`) aprovada para a FASE 3. Os quatro
+blockers da rodada 1 (BLOCK-006) estão fechados; os nove críticos, incorporados. Nenhum bloqueador
+novo. Seis restrições escritas seguem ao `techlead`/`qa-tester` — se qualquer uma delas não constar
+do relatório da FASE 3/4, é rejeição automática na FASE 6.
+
+### Fechamento de BLOCK-006 (verificado contra o código, não contra a spec)
+
+- **B-1 → AC-31 + AC-30.** O par fecha. Registro que **AC-31 sozinho não fecharia**: "exatamente um
+  bean de `ReactiveJwtDecoder`" **passa** no cenário exato que B-1 descreve (decoder leniente como
+  bean único, autoconfig desligada por `@ConditionalOnMissingBean`). Quem fecha é AC-30 (bearer
+  expirado → 401, sem mock). Restrição escrita: AC-31 deve acrescentar asserção **comportamental**
+  — o único bean de `ReactiveJwtDecoder` rejeita `exp` no passado.
+- **B-2 → AC-25(f).** Verificada como **implementável com a infraestrutura já existente** do
+  `login-topology-smoke-test.sh`: `CODE_CHALLENGE` fixo (RFC 7636) já existe em :65, o cookie
+  `AUTHSESSION` já é montado à mão por causa de `APP_COOKIE_SECURE=true` (:291-297) e a extração
+  de `AUTHSESSION`/`_csrf` já existe em :304-306. O stack do smoke-test já sobe user-service+mongo.
+- **B-3 → AC-16.** Contradição AC-15×AC-16 resolvida; teto ancorado no instante de autenticação.
+- **B-4 → AC-32 + AC-38 + AC-08.** Fecha. **AC-38 é load-bearing em dois lugares, e a spec só nomeia
+  um:** além de esvaziar o teto (AC-16), re-carimbar T0 derrotaria também a degradação por epoch
+  (AC-10) — `isRevoked(userID, T0)` sempre devolveria `false` se T0 avançasse a cada autorização.
+
+### Restrições escritas à FASE 3 (críticos carregáveis, não bloqueadores)
+
+1. **Comparação de authorities inclui `USER_ID:`.** AC-06 mantém as authorities da *sessão* na
+   emissão e `TokenCustomizerConfig:35-40` (arquivo congelado, DoD 11) tira o claim `userID`
+   dessas mesmas authorities. Comparar só `ROLE_*` deixaria um delete+re-registro com o mesmo
+   e-mail cunhar token com `userID` pendente de documento inexistente.
+2. **Matcher do filtro deriva de `AuthorizationServerSettings.getAuthorizationEndpoint()`**, não do
+   literal `/oauth2/authorize` (AC-33). Literal + customização futura = fix inerte com build verde.
+3. **AC-34 vira asserção estrutural positiva**, não contrafactual: índice do filtro na
+   `FilterChainProxy` posterior ao `SecurityContextHolderFilter`, e presença na chain `@Order(1)` /
+   ausência na `@Order(2)`.
+4. **AC-16/AC-17/AC-38 exercitados por override de `security.session.max-lifetime` no profile de
+   teste (ou `Clock` injetável) — nunca por `Thread.sleep`.**
+5. **AC-30 nomeia o substituto do mock:** `jwk-set-uri` apontando para WireMock no slice de teste.
+6. **AC-25(f):** asserir `[?&]code=` (não substring solta) **e ausência de `error=`**; atualizar o
+   comentário :62-64 do script, que passa a estar errado ("o fluxo morre no redirect para o login").
+   **Enfraquecer (f) para prefix match é rejeição automática na FASE 6** — é o retorno a R-02.
+
+### P-01 (troca de e-mail desloga) — recomendação A é sólida; duas omissões na formulação
+
+- **Custo escondido não listado:** o desligamento é **atrasado e não-determinístico**. A sessão do
+  IdP morre, mas a sessão do gateway + access token (5m) + refresh token (60m, defaults do SAS)
+  seguem válidos — o titular trabalha normalmente por até ~1h e só então cai no formulário. Muda o
+  texto do item de backlog do SPA: não há como correlacionar a mensagem ao ato de trocar o e-mail.
+- **Variante ausente da tabela:** re-derivar por `userID` (disponível na authority `USER_ID:`) em
+  vez de por e-mail. Deve ser **rejeitada no registro**, não omitida — exigiria endpoint interno
+  novo (superfície do ADR-006) e quebraria o reuso de `UserDetailsService` que é toda a
+  justificativa de AC-08.
+- **Confirmado sem custo:** o 404 da troca de e-mail **não** conta no lockout (AC-32/AC-08 tiram a
+  re-derivação da maquinaria de eventos) e **não** abre o circuito (`ignoreExceptions`,
+  `authorization-server.yml:173-174`).
+
+### Observação operacional
+
+`NOT_FOUND` (AC-37) passa a ter duas causas legítimas — titular eliminado e titular que trocou o
+e-mail. A ADR-025 deve dizer isso, senão o sinal que AC-29 usa como evidência de produção nasce
+ambíguo.
+
+**Pendências de pipeline:** `security-reviewer` (FASE 5, obrigatório) e ratificação humana de P-01
+(DoD 12) antes do merge.
+
+### Ratificações do humano (2026-08-08)
+
+- **P-01: opção A.** Trocar o próprio e-mail passa a deslogar. Custo real corrigido: o
+  desligamento é **atrasado e não-determinístico** (a sessão do IdP morre, mas gateway + access
+  token de 5m + refresh token de 60m seguem válidos — o titular trabalha até ~1h e só então cai no
+  formulário). Logo o item de backlog do SPA **não** pode prometer correlacionar a mensagem ao ato.
+  A variante "re-derivar por `userID`" fica **rejeitada por escrito**: exigiria endpoint interno
+  novo (superfície do ADR-006) e quebraria o reuso de `UserDetailsService` que justifica o AC-08.
+- **Base da branch.** A FASE 3 abriu com bloqueador de base: `fix/revalidacao-estado-emissao`
+  fora cortada de `main`, mas a spec fora escrita contra `elasticidade-piso-minimo` — em `main`
+  não existiam `infra/smoke-test/`, ADR-022/023/024 nem o job `smoke-test-login`, tornando
+  **AC-25(f) inimplementável** e derrubando com ela a restrição escrita #6, o DoD 3, o DoD 8 e a
+  mitigação de R-02 (P0). Resolvido pela via B: `elasticidade-piso-minimo` mergeada em `main`
+  (PR #24) e a branch recriada sobre a `main` nova. **Lição:** ao ramificar, verificar que os
+  artefatos que a spec exercita existem na base escolhida — a verificação linha a linha do
+  `senso-critico` foi feita contra a árvore de trabalho de outra branch e ficou obsoleta no
+  instante do `checkout`.
+
+## [2026-08-09] TASK-REVALIDACAO-EMISSAO — FASE 3 concluída · gate verificado pelo thread principal
+
+O `techlead` terminou a implementação e a ADR-025, mas caiu por **limite de gasto da API** antes de
+rodar o gate. O thread principal rodou e conferiu.
+
+### Resultado do gate (executado, não inferido)
+
+| Módulo | Testes | Falhas/Erros | JaCoCo LINE |
+|---|---|---|---|
+| authorization-server | 136 | 0 | **96,2%** |
+| gateway | 86 | 0 | **99,2%** |
+| user-service | 296 | 0 | (BUILD SUCCESS) |
+
+Piso do gate: 70% BUNDLE. Zero `[ERROR]`, zero `BUILD FAILURE`.
+
+**Armadilha de medição registrada:** a primeira leitura usou `mvn ... | tail -60; echo $?`, e `$?`
+depois de um pipe é o exit do `tail`, não do `mvn` — sempre 0. O resultado só vale porque foi
+reconferido nos relatórios do surefire e num `verify` com exit capturado direto. **Exit code depois
+de pipe não é evidência.**
+
+### As seis restrições escritas — conferidas uma a uma no código
+
+1. **`USER_ID:` na comparação** — `domainAuthorities()` filtra `ROLE_` **e** `USER_ID_`.
+2. **Matcher das settings** — `SecurityConfig:124` passa `getAuthorizationEndpoint()`; zero literal
+   `"/oauth2/authorize"` no `src/main` (só em comentário explicativo).
+3. **AC-34 estrutural positiva** — `AuthorizationChainStructureIntegrationTest`.
+4. **Sem `Thread.sleep`** — override de `security.session.max-lifetime=1ms`; as únicas ocorrências
+   da string são comentários dizendo para não usá-la.
+5. **AC-30 não herda o mock** — `JwtDecoderStrictnessIntegrationTest` registra `jwk-set-uri` real
+   por WireMock, fora de `AbstractGatewayIntegrationTest`.
+6. **AC-25(f)** — `login-topology-smoke-test.sh:505` assere `grep -qE '[?&]code='` e `:513` assere a
+   **ausência** de `[?&]error=`; comentário do cabeçalho corrigido (nota explícita do ADR-025).
+
+### Achado do techlead que evitaria a pior regressão possível
+
+O `DaoAuthenticationProvider` do **Spring Security 7** acrescenta ao token do login authorities de
+**fator** (`FACTOR_PASSWORD`) que o `UserDetails` não possui. Comparar os conjuntos **crus** faria
+toda sessão divergir de si mesma e o filtro invalidaria **todo login** — exatamente a regressão que
+a asserção (f) existe para distinguir do fix correto. Daí o recorte por prefixo em
+`domainAuthorities()`: compara o que o `AuthorizationService` deriva e o que o
+`TokenCustomizerConfig` consome, nem mais nem menos.
+
+### Não executado
+
+- **Smoke-test (ADR-023 + (f))** — exige subir a topologia de deploy; o job `smoke-test-login` do CI
+  o roda. Não rodado localmente para não derrubar o deploy ativo.
+- **FASE 4 (`qa-tester`), FASE 5 (`security-reviewer`, obrigatória) e FASE 6 (`senso-critico`)** —
+  bloqueadas pelo limite de gasto da API. **O merge segue bloqueado até a 5 e a 6 fecharem.**
+
+## [2026-08-09] TASK-REVALIDACAO-EMISSAO — FASE 4 · qa-tester · PASS
+
+`regression_status: PASS` · 9 testes escritos (8 auth-server, 1 gateway) · 144/144 auth-server,
+87/87 gateway, 296/296 user-service · cobertura das classes novas/alteradas 94,4%–100% (alvo 80%)
+· 5 bugs: **nenhum P0, nenhum P1** — 1×P2, 4×P3. Nada commitado; `src/main` não alterado pelo QA.
+
+### BUG-QA-01 (P2) — AC-32 afirmava algo FALSO, e a ADR-025 nomeava só metade do controle
+
+A spec exigia "NENHUM `AuthenticationSuccessEvent` é publicado". **Medido: 3 autorizações → 3
+eventos** — o próprio SAS autentica o `OAuth2AuthorizationCodeRequestAuthenticationToken` por um
+`ProviderManager` e publica sucesso a cada authorize, **desde antes** desta tarefa. O que protege o
+lockout do ADR-010 são **duas** coisas: (1) a re-derivação chamar o `UserDetailsService` direto — a
+única que a ADR registrava — e (2) o **guard de tipo** `instanceof UsernamePasswordAuthenticationToken`
+em `LoginAttemptListener:39,46` e `AuthenticationInstantListener:44`. Sem (2), o evento que o SAS já
+publica hoje zeraria o contador sem prova de senha (o principal aninhado é o UPAT do titular, logo
+`auth.getName()` devolve o e-mail). **Não era defeito de código — era defeito de spec + lacuna de
+invariante.** Corrigido pelo thread principal: AC-32 reescrito na spec e o guard promovido a
+invariante "não relaxe" na ADR-025 §Decisão 1.
+
+### Buracos de teste que o QA fechou
+
+- **Premissa do recorte `domainAuthorities()` não tinha guarda.** Só um teste montava
+  `FACTOR_PASSWORD` à mão — verde mesmo se o framework passasse a acrescentar OUTRA authority.
+  Novo teste lê o `SecurityContext` da sessão real no Redis e falha se o login deixar de trazer
+  authority fora de `ROLE_`/`USER_ID:`. Token real medido:
+  `[ROLE_USER, USER_ID:…, FactorGrantedAuthority[FACTOR_PASSWORD]]`.
+- **Todos os stubs WireMock casavam `urlPathMatching(".*")`** — nenhum teste fixava por qual
+  identificador o filtro re-deriva; um filtro consultando a string errada receberia o mesmo 200 e os
+  13 cenários seguiriam verdes. É a premissa de P-01. Agora asserido (1 chamada por autorização, com
+  o e-mail da sessão) — o que também fixa o volume que alimenta a aritmética de `AUDIT_LOG_RETENTION`.
+- **Kill switch sem teste de fio:** o unitário cobria a lógica do toggle, não o `@Value` → construtor
+  (nome errado cairia no default `true` em silêncio). Novo IT dedicado, mais a asserção de que o
+  filtro **permanece na chain** mesmo desligado — para a guarda estrutural do AC-34 não virar medida
+  de configuração.
+- **AC-18 asseria só o 401**, não a invalidação da sessão do gateway — sem ela o SPA fica "logado"
+  tomando 401 a cada request, que é o laço do incidente por outra porta.
+- **AC-09 pela cadeia real:** 5 falhas → lockout ativo (provado: nem a senha certa passa) → sessão
+  viva **continua emitindo**. É o AC que impede o lockout de virar DoS contra sessão viva.
+
+### P3 aceitos como dívida (nenhum bloqueia)
+
+- **BUG-QA-02** — AC-11 ("Redis fora") é indistinguível do caso "sem epoch"; e há razão estrutural:
+  com `@EnableRedisHttpSession` a sessão **vive** no Redis, então "sessão viva + Redis fora" não é
+  estado alcançável no auth-server. O 2º nível de degradação é guard-level por construção.
+- **BUG-QA-03** — `evaluate()` delega o fail-open ao `catch (RuntimeException)` de outra classe, sem
+  catch defensivo próprio; estreitar aquele catch no futuro faria outage do user-service virar 500 em
+  `/oauth2/authorize` (raio P0 alcançável de fora do arquivo). Sem teste que fixe o acoplamento.
+- **BUG-QA-04** — AC-22 sem guarda automatizada (correto por inspeção: 3 vars no anchor, no
+  `.env.example`, nos 2 YAMLs e em `docs/CONFIG.md`). Recomendação: asserir no job `compose-validate`
+  que `docker compose config` as renderiza nos 4 apps Spring.
+- **BUG-QA-05** — AC-37 parcial: os 5 motivos e o mascaramento estão asseridos; cardinalidade e
+  `traceId` B3 não (a suíte roda com sampling 0.0).
+
+### ACs sem teste (declarado, não escondido)
+
+AC-22 (inspeção) · AC-12/26/28 (cruzamento gateway↔auth-server só no smoke-test; **AC-28, logout
+ponta a ponta, não é exercitado nem por ele**) · AC-15 (só unitário — sessão autenticada sem o
+atributo não é construível em IT sem desligar o listener) · AC-23/24 (documentação, verificadas por
+inspeção contra o código) · **AC-25(f) e AC-29 não executados** — exigem CI e ambiente de deploy.
+
+## [2026-08-09] TASK-REVALIDACAO-EMISSAO — FASE 5 · security-reviewer · APPROVED_WITH_OBSERVATIONS
+
+`verdict: APPROVED_WITH_OBSERVATIONS` · **0 bloqueadores** · 1 crítico (documental, sem código) ·
+4 melhorias · 7 observações. Escopo revisado: diff completo da árvore de trabalho
+(`AuthorizationEndpointRevalidationFilter`, `AuthenticationInstantListener`,
+`AuthenticationInstantAttribute`, `SecurityConfig` do auth-server, `RevocationRefreshGuard`,
+`RevocationTokenReader`, `RevocationWebFilter`, YAMLs, compose/anchor, smoke-test (f), docs).
+`/security-scan` no escopo tocado: **LIMPO** (nenhum segredo, canal interno/CSRF/CORS/permitAll/
+headers/front intactos; `user-service/src/main`, `notification-service/src/main` e
+`login-interface/` **não** foram tocados).
+
+### CRIT-SEC-01 — a trilha LGPD **não** registra o contato pós-eliminação (afirmação falsa)
+
+`ADR-025:191` ("A trilha LGPD passa a registrar o contato pós-eliminação"), a métrica da spec
+("Entradas na trilha LGPD após a eliminação: 0 → ≥1") e a cláusula correspondente de **AC-29** são
+**falsas contra o código**. `InternalUserController.java:42-43` só chama
+`auditService.recordSystem(READ_INTERNAL_CREDENTIAL, …)` **depois** de
+`authenticationService.getUserByEmail(email)` retornar, e `AuthenticationService.java:31-37` lança
+`DomainEntityNotFound` (→404) para titular **inexistente OU inativo**. Logo, exatamente os dois
+cenários do incidente (`NOT_FOUND` por hard-delete e por soft-delete) continuam a **não** gravar
+nada em `auditLogs`; o único rastro é a linha SLF4J de invalidação, que o ADR-011 distingue
+explicitamente da trilha LGPD. Gravam entrada apenas os caminhos em que a re-derivação **tem
+sucesso** (`AUTHORITIES_DIVERGED`, sessão íntegra). **Ação:** corrigir o texto do ADR-025 e a
+cláusula de AC-29 **antes** de declarar AC-29 executado — auditar o 404 no canal interno é mudança
+de desenho, fora do escopo. Lição G1 aplicada: documento verificado contra código.
+
+### Melhorias registradas como dívida (não bloqueiam)
+
+- **MELH-SEC-01 — o kill switch é silencioso.** `AuthorizationEndpointRevalidationFilter.java:146-150`
+  torna o filtro no-op sem emitir sinal algum; o actuator vive na 8181 não publicada. O switch em si
+  é **defensável** (raio P0 "ninguém loga", rollback por restart, precedente `TOKEN_REVOCATION_ENABLED`)
+  e fica **mantido**; falta o WARN de startup e/ou métrica quando `false`.
+- **MELH-SEC-02 — segundo desligador não documentado.** `SESSION_MAX_LIFETIME=0` (ou negativo)
+  desativa o teto em silêncio (`AuthorizationEndpointRevalidationFilter.java:217-222`). Rejeitar no
+  boot ou logar.
+- **MELH-SEC-03 — fail-open só observável por WARN.** Degradação (user-service fora) e
+  `jwk-set-uri` errado produzem WARN **por requisição** (flood durante outage, invisível em painel).
+  Sugerido contador Micrometer (`revalidation.degraded`, `revocation.failopen`) nos dashboards.
+- **MELH-SEC-04 — amplificação do canal interno/auditoria.** Uma sessão autenticada passa a gerar
+  1 chamada `/internal/users/email/{email}` + 1 `READ_INTERNAL_CREDENTIAL` **por authorize**,
+  limitada só pelo tier MED (5 req/s por IP) e **sem** o custo BCrypt que freia `/login`. Retenção
+  180d inalterada por decisão do humano; monitorar crescimento de `auditLogs`.
+
+### Verificado OK (não re-litigar)
+
+- **Invariante do `RevocationTokenReader` (B-1) confirmada por leitura e por teste.** Não implementa
+  nem é atribuível a `ReactiveJwtDecoder`; `JwtDecoderStrictnessIntegrationTest` não herda o
+  `@MockitoBean` da base, assere **um** bean daquele tipo **e** o comportamento (bearer expirado 401)
+  **com controle positivo** (bearer válido 200). `setJwtValidator(→success)` remove apenas
+  `exp`/`nbf`/`iss`: a verificação de assinatura RS256 contra o JWKS permanece no processamento JWS.
+  `userID`/`iat` só alimentam a chave Redis e a comparação `iat < epoch` — só podem **negar**, nunca
+  conceder; token forjado exigiria a chave privada do IdP.
+- **Matcher sem brecha de normalização.** Verificado no bytecode do SAS 7.0.3:
+  `OAuth2AuthorizationEndpointFilter.createDefaultRequestMatcher` usa
+  `PathPatternRequestMatcher.withDefaults().matcher(...)` — **a mesma** implementação/semântica do
+  filtro; não há path (barra final, encoding, path params) que o SAS trate como authorize e o filtro
+  não case. O GET+POST do filtro é superconjunto do matcher de consent do SAS.
+- **B-4 confirmado.** `OAuth2AuthorizationCodeRequestAuthenticationToken` estende
+  `AbstractOAuth2AuthorizationCodeRequestAuthenticationToken` (→`AbstractAuthenticationToken`) — **não**
+  é `UsernamePasswordAuthenticationToken`. O guard de tipo em `LoginAttemptListener:39,46` e
+  `AuthenticationInstantListener:44` é **suficiente hoje** e **load-bearing**; a medição do QA
+  (3 authorize → 3 eventos) procede. Confirmado ainda que `loadUserByUsername` só **lê** o lockout
+  (`loginAttempts.isBlocked`), nunca escreve.
+- **Sem oráculo de enumeração.** Todos os motivos produzem o mesmo `302 ${PUBLIC_ORIGIN}/login` com
+  sessão invalidada; o motivo vive só no log, com `maskEmail`. `MAX_LIFETIME` é mais rápido (curto-
+  circuita antes do Feign), mas o probe exige o `AUTHSESSION` do próprio titular — não é oráculo
+  contra terceiros. `NOT_FOUND`/`DISABLED`/`AUTHORITIES_DIVERGED` pagam a mesma chamada remota.
+- **PII em log.** O `e.toString()` do ramo degradado só alcança
+  `UserServiceUnavailableException("user-service unavailable")` — a `UsernameNotFoundException` com
+  e-mail cru (`AuthorizationService.java:90`) é capturada no `catch` anterior. Sem vazamento.
+- **Fail-open na emissão** (pergunta 3): herança **defensável**. Controles compensatórios: o teto de
+  vida roda **antes** da chamada remota; o epoch cobre o caso revogado sempre que o Redis está de pé;
+  e o estado anterior era 100% aberto neste ponto. Efeito colateral positivo: mesmo com Redis fora, o
+  ADMIN revogado deixa de ser indefinido e passa a ser limitado por ~60 min (refresh) + teto de 8h.
+- **G15 (troca de senha não invalida nada)** registrado em `docs/SECURITY.md` e no inventário das
+  sete cópias em `docs/CONVENCOES.md`. **Não deve bloquear este merge:** é defeito pré-existente,
+  **não agravado** pela ADR-025 (a re-derivação compara existência/`enabled`/authorities, não o hash)
+  e levemente **mitigado** por ela (o teto de 8h passa a limitar a sessão do atacante). Tarefa própria.
+- **Volume LGPD** (pergunta 8): sem categoria de PII nova, ator SYSTEM, `targetEmail` mascarado,
+  retenção 180d inalterada — do ponto de vista de conformidade o saldo é **positivo** (mais
+  accountability de acesso a credencial), com a ressalva do CRIT-SEC-01 e a nota de que entradas
+  referentes a titular eliminado seguem por até 180d (pré-existente, ADR-011/022, defensável como
+  registro de acesso).
+
+### Condição de aceite pendente
+
+Aprovação **não** cobre o que não foi executado: `smoke-test-login` com a asserção (f) e **AC-29** no
+ambiente de deploy. Ao executar AC-29, a cláusula da trilha LGPD **falhará** — corrigir o texto antes
+(CRIT-SEC-01), não ajustar o teste ao texto.
+
+## [2026-08-09] TASK-REVALIDACAO-EMISSAO — FASE 6 · senso-critico · APPROVED_WITH_OBSERVATIONS (condicionada)
+
+`reviewing: full` (spec ↔ implementação ↔ testes ↔ segurança ↔ docs). **0 bloqueadores · 1 crítico
+documental · 4 melhorias · 5 observações.** Merge **gateado** por três condições enumeradas abaixo.
+
+### As seis restrições da FASE 2 — reconferidas contra o código, não contra o relatório
+
+1. **`USER_ID:` na comparação** — `AuthorizationEndpointRevalidationFilter.java:242-247`. Provada
+   nos DOIS níveis: unitário (`...FilterTest.deveInvalidar_quandoApenasOUserIdDiverge`) e integração
+   (`AuthorizeRevalidationIntegrationTest.deveInvalidarSessao_quandoApenasUserIdDiverge`, delete +
+   re-registro com mesmo e-mail e mesmas roles). Satisfeita.
+2. **Matcher das settings** — `SecurityConfig.java:124` passa `getAuthorizationEndpoint()`; o
+   literal só aparece em comentário. Confirmado ainda pelo `security-reviewer` que o SAS 7.0.3 usa a
+   **mesma** `PathPatternRequestMatcher`, então não há path que o SAS trate como authorize e o filtro
+   não case. Satisfeita.
+3. **AC-34 estrutural positiva** — `AuthorizationChainStructureIntegrationTest` compara **índices**
+   na `FilterChainProxy` real (+ guarda de que as duas chains são distintas, que impede o par
+   presença/ausência de passar por colapso de chain). Satisfeita.
+4. **Sem `Thread.sleep`** — `@TestPropertySource(security.session.max-lifetime=1ms)` (IT) e
+   `Duration` no construtor (unitário). As únicas ocorrências da string são comentários proibindo-a.
+   Satisfeita.
+5. **AC-30 sem herdar o mock** — `JwtDecoderStrictnessIntegrationTest` **não** estende
+   `AbstractGatewayIntegrationTest`; JWKS por WireMock, decoder de produção, **com controle positivo**
+   (bearer válido → 200), sem o qual o 401 poderia vir do setup. Satisfeita.
+6. **AC-25(f)** — `login-topology-smoke-test.sh:505` (`grep -qE '[?&]code='`) e `:513` (ausência de
+   `[?&]error=` como asserção **separada**); comentário do cabeçalho (antigo :62-64) corrigido com
+   nota explícita. Satisfeita, **mas nunca executada** (ver condição de merge 2).
+
+### CRIT-06-01 — a mesma afirmação falsa sobreviveu em DOIS documentos (crítico, gateia o merge)
+
+O AC-24 mandava corrigir *"revogação força re-autenticação"* em `CLAUDE.md`, `docs/SECURITY.md` e
+ADR-017. Os três foram corrigidos. **Sobraram dois lugares, ambos com o texto original intacto:**
+
+- **`docs/ARQUITETURA.md:523-525`** — "A revogação **força re-autenticação** — não muta a sessão
+  viva; o re-login re-deriva roles e reaplica os gates de e-mail e `active`." O arquivo **não tem uma
+  única menção à ADR-025**: a §6.4 continua "Revogação ativa (**três** camadas)"; a tabela das duas
+  filter chains (`:266-271`) não cita o filtro no `@Order(1)`; o fluxo 6.1 (`:449-470`) não descreve o
+  SSO silencioso; o índice invertido ADR↔arquivo (`:613-637`) não lista a ADR-025 em
+  `authorization-server/config/SecurityConfig.java` nem em `gateway/filter/RevocationWebFilter.java`;
+  as árvores de arquivos (`:752-770`, `:789/808/819`) não trazem `filter/`, `session/`,
+  `AuthenticationInstantListener` nem `security/RevocationTokenReader`.
+- **`docs/SERVICOS.md:348`** — "a revogação **força re-autenticação**". O arquivo **foi editado**
+  nesta branch (bloco novo em `:130-141`) e a frase falsa ficou 200 linhas abaixo, intocada.
+
+**Por que é crítico e não observação:** é o **terceiro** achado desta mesma tarefa em que o problema é
+documento falso, e é literalmente a frase cuja falsidade custou o incidente. `ARQUITETURA.md` é o
+primeiro documento estrutural apontado pelo `CLAUDE.md`. Causa raiz declarada: o AC-24 **enumerou os
+documentos que o `product-manager` conhecia** em 2026-08-07 — o padrão de "matcher por exclusão" que a
+própria ADR-025 condena no AC-33 — e `ARQUITETURA.md` nasceu depois (commit `24daf7d`, 2026-08-08
+19:22), entrando na árvore pelo merge do PR #24 que desbloqueou a FASE 3. **Lição para o próximo
+AC-24: a varredura tem de ser `grep` na superfície, nunca lista escrita à mão.**
+
+### Melhorias registradas como dívida (não bloqueiam)
+
+- **MELH-06-01 — o recorte `domainAuthorities()` é uma allow-list por prefixo sem guarda de
+  completude.** `AuthorizationEndpointRevalidationFilter.java:242-247` compara só `ROLE_*` e
+  `USER_ID:`. Hoje está **exato** (é o que `AuthorizationService.java:93-95` emite e o que o
+  `TokenCustomizerConfig` consome), mas se um dia a fonte de verdade passar a emitir um terceiro tipo
+  de authority de domínio — `tenantIds` é campo **reservado** no entity `User` — a comparação o
+  ignoraria **em silêncio**, e o fix ficaria parcialmente inerte com build verde: exatamente a classe
+  de falha que o AC-33 rejeita, invertida (sub-comparação em vez de sub-cobertura). Guarda barata:
+  teste que assere que **toda** authority devolvida por `loadUserByUsername` casa um dos dois
+  prefixos — o espelho do `deveHaverAuthorityDeFrameworkNaAutenticacaoReal`, que guarda o outro lado.
+- **MELH-06-02 — BUG-QA-03 tem um portador *atual*, que o QA não nomeou.** `evaluate()` delega o
+  fail-open ao `catch (RuntimeException)` do `RevocationRefreshGuard`, mas o caminho **hoje**
+  desprotegido é outro: `AuthorizationService.java:99` chama `loginAttempts.isBlocked(...)` **fora**
+  do seu try/catch, e `LoginAttemptService.java:51-61` não captura erro de Redis. Uma falha de Redis
+  entre a leitura da sessão e essa leitura (janela de failover do Sentinel) sobe
+  `RedisConnectionFailureException` pelo filtro → **500 em `/oauth2/authorize`**. **Severidade real:
+  MELHORIA, não crítico** — com `@EnableRedisHttpSession` a sessão vive no Redis, então qualquer
+  request com `AUTHSESSION` já falha antes, no `SecurityContextHolderFilter`; a ADR-025 não cria a
+  classe de falha, só a estende a mais um endpoint. Correção proporcional: `catch (RuntimeException)`
+  defensivo em `evaluate()` degradando para o ramo do epoch.
+- **MELH-06-03 — AC-28 (logout ponta a ponta) fecha sem teste, e isso é aceitável.** O risco que a
+  ADR-025 introduz sobre o logout é o filtro atuar em `/connect/logout` (que está **dentro** do
+  `endpointsMatcher` da `@Order(1)`), e esse risco **está** coberto duas vezes (unitário do matcher +
+  `deveNaoAtuar_noTokenEndpointNemNoLogout`, que assere zero chamadas ao canal interno). O que fica
+  descoberto — a cadeia `POST /logout` → `/connect/**` → `end_session_endpoint` — já estava descoberto
+  antes desta tarefa. Sugestão para tarefa própria: asserção **(g)** no smoke-test.
+- **MELH-06-04 — as 4 melhorias do `security-reviewer` seguem válidas** (kill switch silencioso,
+  `SESSION_MAX_LIFETIME=0` como segundo desligador não documentado, fail-open só observável por WARN,
+  amplificação do canal interno/auditoria). Não re-litigadas aqui.
+
+### Observações
+
+- **`/check-compat` fecha sem quebras.** Contrato Feign `IUserClient`↔`InternalUserController`
+  (path, `AuthDTO`, `X-Internal-Token`) intacto; `TokenCustomizerConfig` **sem uma linha alterada**
+  (DoD 11, verificável por `git status`); chaves de cache (`usersById`/`usersByEmail`/`authByEmail`) e
+  `revoke:user:{userID}` sem mudança de nome ou prefixo; cookies `SESSION`/`AUTHSESSION` e
+  `redisNamespace` inalterados; `"/actuator/**"` continua no `permitAll()`
+  (`SecurityConfig.java:153`); user-service, notification-service e `login-interface` sem mudança em
+  `src/main`. As 3 propriedades novas estão no anchor `x-spring-app-env`, no `.env.example`, nos dois
+  YAMLs e em `docs/CONFIG.md`.
+- **A premissa do recorte está guardada nas duas direções de mudança do framework:** se o Spring
+  Security parar de acrescentar authority fora do domínio, `deveHaverAuthorityDeFrameworkNaAutenticacaoReal`
+  falha e força revisão consciente; se passar a acrescentar uma authority **com prefixo de domínio**,
+  o AC-01 pela chain real (`deveEmitirCodigo_quandoSessaoIntegra`) falha. Nenhuma das duas depende do
+  nome `FACTOR_PASSWORD`.
+- **A correção de BUG-QA-01 é sólida e completa** — AC-32 reescrito, guard promovido a invariante na
+  ADR-025 §Decisão 1, e o teste correspondente vem **com controle positivo**
+  (`devePublicarEventoDeFormLogin_noLogin`), sem o qual a asserção negativa seria vazia.
+- **A correção de CRIT-SEC-01 é completa nos três lugares apontados** (Consequências da ADR-025,
+  tabela de valor da spec, cláusula do AC-29). `grep` na superfície não encontrou quarta ocorrência da
+  afirmação sobre a trilha LGPD.
+- **`AbstractGatewayIntegrationTest` não define `security.revocation.jwk-set-uri`**, então nos ITs
+  herdeiros o `RevocationTokenReader` aponta para `localhost:8082` e cai no fail-open. Inócuo (só é
+  invocado com sessão OAuth2 viva), mas registrado para não confundir quem depurar.
+
+### Condições de merge (bloqueantes, verificáveis)
+
+1. **CRIT-06-01 corrigido:** `docs/ARQUITETURA.md` (frase de `:524`, §6.4 "três camadas" → quatro
+   consumidores do epoch, tabela das chains, índice invertido de ADRs, árvores de arquivos/testes) e
+   `docs/SERVICOS.md:348`.
+2. **`smoke-test-login` verde no CI com a asserção (f)** — nunca executada. É a única mitigação de
+   R-02 (P0) e a única camada que distingue o fix da sua pior regressão; além disso (f) é código shell
+   novo, e um erro de script nele é indistinguível de um erro do fix. **DoD 3 e 8.**
+3. **AC-29 executado no ambiente de deploy**, com resultado registrado — negação ponto a ponto das
+   seis linhas de evidência do incidente. **Sem a cláusula da trilha LGPD**, já removida (CRIT-SEC-01):
+   se ela reaparecer no roteiro, o AC falha e alguém "conserta" o teste.
+
+Nada disto reabre desenho: as sete correções, as quatro decisões dos blockers e P-01 (opção A) estão
+ratificadas. A FASE 6 aprova **o código, os testes e o desenho**; o merge depende das três condições.
+
+## [2026-08-09] TASK-REVALIDACAO-EMISSAO — CRIT-06-01 corrigido pelo thread principal
+
+O `senso-critico` (FASE 6) achou que a minha correção do AC-24 estava **incompleta**, e a causa raiz
+é a mesma família de erro que esta tarefa inteira combate: **o AC-24 enumerou os documentos
+conhecidos em 2026-08-07**, e `docs/ARQUITETURA.md` nasceu em 2026-08-08 (commit `24daf7d`),
+entrando na árvore pelo merge do PR #24 — o merge que eu conduzi para desbloquear a FASE 3. Enumerar
+alvos conhecidos em vez de varrer a superfície é exatamente o padrão do G1.
+
+Corrigido em ambos os arquivos, com a frase falsa substituída por uma nota que explica **por que**
+era falsa (não apenas apagada — apagar deixaria o próximo leitor livre para reintroduzi-la):
+
+- **`docs/SERVICOS.md`** — a frase de `:348`.
+- **`docs/ARQUITETURA.md`**, que não tinha **uma única** menção à ADR-025: a frase de `:524`; a lista
+  de camadas de revogação (eram 3, agora 4, com a re-derivação na emissão marcada como a que fecha a
+  **emissão**, não a validação); a tabela das duas filter chains, com a nota de que o filtro fica
+  **depois** do `SecurityContextHolderFilter` e usa matcher positivo; **5 entradas** no índice
+  invertido ADR↔arquivo; e as **4 árvores** de arquivos (main e teste de auth-server e gateway).
+- **Entrada histórica da ADR-017 neste arquivo** (`:333`): texto preservado com nota de
+  encaminhamento, o mesmo padrão da nota no topo do `ADR-017.md`. Não se reescreve registro datado.
+
+Varredura final: nenhuma ocorrência de "força re-autenticação" sobrevive fora de (a) correções
+explícitas, (b) o texto original da ADR-017 com a nota de atualização no topo, e (c) citações que
+nomeiam a frase como errada.
+
+## [2026-08-09] TASK-REVALIDACAO-EMISSAO — FASE 6 · senso-critico · APPROVED_WITH_OBSERVATIONS (condicionada)
+
+0 bloqueadores · 1 crítico documental (CRIT-06-01, corrigido acima) · 4 melhorias · 3 condições de
+merge. As seis restrições da FASE 2 reconferidas contra o código e **todas satisfeitas**.
+
+### O que a FASE 6 acrescentou de substantivo
+
+- **O recorte `domainAuthorities()` está guardado nas DUAS direções de mudança do framework:** se o
+  Spring Security parar de acrescentar authority fora do domínio, `deveHaverAuthorityDeFramework
+  NaAutenticacaoReal` falha; se passar a acrescentar uma **com prefixo de domínio**, o AC-01 pela
+  chain real falha. Nenhum dos dois depende do nome `FACTOR_PASSWORD`.
+- **MELH-06-01 — flanco real:** o recorte é *allow-list por prefixo sem guarda de completude*. Se a
+  fonte de verdade emitir um terceiro tipo de authority de domínio — e `tenantIds` é campo
+  **reservado** no entity `User` — o filtro a ignora em silêncio e o fix fica parcialmente inerte com
+  build verde. Guarda barata: asserir que **toda** authority de `loadUserByUsername` casa um dos dois
+  prefixos.
+- **BUG-QA-03 rebaixado a MELHORIA, e o QA nomeou o portador errado.** O caminho desprotegido não é
+  o `RevocationRefreshGuard`: é `AuthorizationService.java:99`, que chama `loginAttempts.isBlocked`
+  **fora** do try/catch, com `LoginAttemptService:51-61` sem captura de erro de Redis. Mas com
+  `@EnableRedisHttpSession` a sessão vive no Redis, então qualquer request com `AUTHSESSION` já falha
+  antes, no `SecurityContextHolderFilter` — a ADR-025 não cria a classe de falha, só a estende a mais
+  um endpoint.
+- **AC-28 (logout ponta a ponta) sem teste é ACEITÁVEL:** o risco que a ADR-025 introduz sobre o
+  logout é o filtro atuar em `/connect/logout` (que está dentro do `endpointsMatcher` da `@Order(1)`),
+  e esse risco está coberto duas vezes. O que fica descoberto já estava descoberto antes. Sugestão
+  para tarefa própria: asserção **(g)** no smoke-test.
+- **`/check-compat` fecha sem quebras** e `TokenCustomizerConfig` está **sem uma linha alterada**.
+
+### Condições de merge (bloqueantes)
+
+1. **CRIT-06-01 corrigido** — ✅ feito (entrada acima).
+2. **`smoke-test-login` verde no CI com a asserção (f)** — DoD 3 e 8. É código shell **novo e nunca
+   executado**, onde um erro de script é indistinguível de um erro do fix.
+3. **AC-29 executado no deploy**, com resultado registrado, **sem** a cláusula da trilha LGPD (já
+   removida). Se ela reaparecer no roteiro, o AC falha e alguém "conserta" o teste.
+
+A FASE 6 aprova código, testes e desenho; **não** aprova o merge. Nenhuma condição reabre desenho.
+
+## [2026-08-10] TASK-REVALIDACAO-EMISSAO — condições de merge fechadas · tarefa encerrada
+
+As três condições da FASE 6 estão satisfeitas. Registro aqui porque a spec
+(`spec-TASK-REVALIDACAO-EMISSAO.md`, 884 linhas, 38 AC) foi **apagada** nesta data a pedido do
+humano, e o `current_task` voltou a `idle`: as referências a números de AC espalhadas por este
+arquivo e por `blockers.md` **não têm mais documento de destino**. O racional de desenho sobrevive
+em `docs/adr/ADR-025-revalidacao-estado-emissao.md`; o que se perdeu foi o Gherkin dos ACs.
+
+1. **CRIT-06-01** — corrigido (entrada de 2026-08-09).
+2. **Smoke-test com a asserção (f)** — **VERDE**. Executado em 2026-08-10, `exit 0`, 16 asserções
+   `[OK]`, zero falhas. A (f) passou nos quatro pontos (titular 201 → login 302 → `Location` no
+   `redirect_uri` → `code=` presente, `error=` ausente) **com a (d) verde no mesmo run**, que é o par
+   que distingue o fix da regressão "invalida toda sessão, sempre".
+   **Ressalva:** rodado **localmente**, com as envs idênticas às do job de CI
+   (`PUBLIC_ORIGIN=https://smoke-test.local`, `PUBLIC_HOST=smoke-test.local`, `TUNNEL_ID` zerado),
+   não no runner. O risco que a condição visava — shell novo nunca executado — está fechado; o run
+   no CI em si depende de abrir PR (gatilho `pull_request`).
+3. **AC-29 no deploy** — confirmado pelo humano: a credencial é invalidada após a eliminação do
+   titular. Sem a cláusula da trilha LGPD, corretamente.
+
+**Estado:** nada commitado — a árvore da branch `fix/revalidacao-estado-emissao` segue com as 22
+modificações + 14 caminhos novos. Merge liberado do ponto de vista das condições; falta o commit,
+o PR e o CI verde.
+
+**Não fechado, registrado de propósito:** G15 (troca de senha não invalida nada,
+`RegisterService.java:105-109`), MELH-06-01 (guarda de completude do recorte de authorities por
+prefixo — relevante se `tenantIds` virar authority) e a asserção (g) de logout no smoke-test.
