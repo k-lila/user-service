@@ -69,12 +69,11 @@ public class OAuth2ClientConfig {
      * redirectUri/scopes — incluindo o redirect do Swagger UI.
      *
      * <p><b>Tolerante à corrida entre instâncias (ADR-022).</b> O par
-     * {@code findByClientId} → {@code save} é um check-then-act: com N instâncias subindo
-     * juntas, todas leem "ausente" e todas gravam. Quem fecha a brecha é o índice único sobre
-     * {@code client_id} (ver {@code schema/oauth2-registered-client-schema.sql}); aqui apenas
-     * absorvemos a violação resultante, para que o perdedor da corrida siga a subida em vez de
-     * abortar o contexto. Sem a constraint este catch nunca dispararia e o banco acumularia
-     * duplicatas silenciosas.
+     * {@code findByClientId} → {@code save} é check-then-act: com N instâncias subindo juntas,
+     * todas leem "ausente" e todas gravam. Quem fecha a brecha é o índice único sobre
+     * {@code client_id} ({@code schema/oauth2-registered-client-schema.sql}); aqui só absorvemos a
+     * violação, para que o perdedor da corrida siga a subida em vez de abortar o contexto. Sem a
+     * constraint este catch nunca dispararia e o banco acumularia duplicatas silenciosas.
      *
      * <p>Package-private para o teste conseguir exercitar o caminho da duplicata com um
      * repositório dublê — o método {@code @Bean} constrói o repositório real internamente.
@@ -86,15 +85,14 @@ public class OAuth2ClientConfig {
         try {
             repository.save(gatewayClient());
         } catch (DuplicateKeyException | IllegalArgumentException e) {
-            // A mesma corrida chega por duas exceções, conforme o momento em que a outra
-            // instância commitou:
+            // A mesma corrida chega por duas exceções, conforme quando a outra instância commitou:
             //  - IllegalArgumentException — o assertUniqueIdentifiers do
-            //    JdbcRegisteredClientRepository já enxerga a linha. Note que ele é, ele próprio,
-            //    outro check-then-act: por isso NÃO substitui o índice único, só antecipa o erro.
-            //  - DuplicateKeyException — as duas instâncias passaram por aquele check e foi o
-            //    índice único que rejeitou o segundo INSERT.
-            // A releitura confirma que é a corrida: se o client não estiver lá, a exceção tem
-            // outra causa (um RegisteredClient malformado, p. ex.) e não pode ser engolida.
+            //    JdbcRegisteredClientRepository já enxerga a linha. Ele é, ele próprio, outro
+            //    check-then-act: NÃO substitui o índice único, só antecipa o erro.
+            //  - DuplicateKeyException — ambas passaram por aquele check e o índice único rejeitou
+            //    o segundo INSERT.
+            // A releitura confirma que é a corrida: se o client não estiver lá, a causa é outra
+            // (um RegisteredClient malformado, p. ex.) e não pode ser engolida.
             if (repository.findByClientId("gateway-client") == null) {
                 throw e;
             }

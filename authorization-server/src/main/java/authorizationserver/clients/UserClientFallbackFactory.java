@@ -12,25 +12,21 @@ import feign.FeignException;
  * Fallback do circuit breaker na chamada ao user-service.
  *
  * <p><b>Distingue dois desfechos que o Feign entrega pelo mesmo caminho</b> (ADR-021): o
- * {@code getAndApplyFallback} do Spring Cloud captura {@code Throwable} <b>sem filtro algum</b> —
- * nem por tipo, nem por {@code ignoreExceptions}, nem por estado do circuito —, então 404 de
- * negócio e indisponibilidade real chegam aqui juntos e precisam ser separados no código. Não há
- * atalho por configuração: {@code ignoreExceptions} impede o circuito de <i>abrir</i>, mas não
- * impede o fallback de ser <i>invocado</i>.
+ * {@code getAndApplyFallback} do Spring Cloud captura {@code Throwable} <b>sem filtro algum</b>, e
+ * não há atalho por configuração — {@code ignoreExceptions} impede o circuito de <i>abrir</i>, mas
+ * não impede o fallback de ser <i>invocado</i>. A separação tem de ser no código:
  *
  * <ul>
- *   <li><b>404</b> ({@code FeignException.NotFound}) — o titular não existe ou está inativo
- *       ({@code AuthenticationService} do user-service lança {@code DomainEntityNotFound} nos dois
- *       casos). É <b>resultado de negócio</b>, não falha de infraestrutura: vira
- *       {@code UsernameNotFoundException}, que o {@code DaoAuthenticationProvider} converte em
- *       {@code BadCredentialsException} → evento publicado → <b>conta no lockout</b>, mantendo o
- *       atrito contra enumeração de e-mails.</li>
+ *   <li><b>404</b> ({@code FeignException.NotFound}) — titular inexistente ou inativo (o
+ *       {@code AuthenticationService} lança {@code DomainEntityNotFound} nos dois casos). É
+ *       <b>resultado de negócio</b>: vira {@code UsernameNotFoundException} → o
+ *       {@code DaoAuthenticationProvider} converte em {@code BadCredentialsException} → evento
+ *       publicado → <b>conta no lockout</b>, mantendo o atrito contra enumeração de e-mails.</li>
  *   <li><b>Qualquer outra causa</b> — 500, 503 (LoadBalancer sem instância),
- *       {@code RetryableException} (conexão recusada), {@code TimeoutException} (TimeLimiter),
- *       {@code CallNotPermittedException} (circuito aberto) — é indisponibilidade real:
- *       {@link UserServiceUnavailableException}, que <b>não</b> gera evento e portanto
- *       <b>não conta no lockout</b>. Sem isso, um outage de cinco tentativas bloquearia a conta de
- *       um usuário legítimo por 15 minutos.</li>
+ *       {@code RetryableException}, {@code TimeoutException}, {@code CallNotPermittedException}
+ *       (circuito aberto) — é indisponibilidade real: {@link UserServiceUnavailableException}, que
+ *       <b>não</b> gera evento e portanto <b>não conta no lockout</b>. Sem isso, um outage de cinco
+ *       tentativas bloquearia a conta de um usuário legítimo por 15 min.</li>
  * </ul>
  *
  * <p><b>Não use {@code instanceof FeignException} genérico</b> para detectar o caso de negócio:

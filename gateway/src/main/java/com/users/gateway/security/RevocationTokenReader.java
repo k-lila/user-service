@@ -15,28 +15,28 @@ import reactor.core.publisher.Mono;
  * Leitor de access token <b>para fins de revogação</b> (ADR-025) — usado só pelo
  * {@code RevocationWebFilter}.
  *
- * <p><b>O problema.</b> A checagem de revogação da borda (ADR-017) precisa de dois campos do JWT
- * guardado na sessão: {@code userID} e {@code iat}. Ela decodificava o token com o decoder do
- * resource server, que valida {@code exp} — então, com o access token <b>expirado</b>, a decodificação
- * lançava e o {@code onErrorResume} pulava a checagem inteira, fail-open. Observado 3× em 35 min de
- * uso normal: caminho comum, não borda. Para esta pergunta o {@code exp} é <b>irrelevante</b> — a
- * pergunta é "quem era o titular e quando este token nasceu", e um token expirado responde as duas.
+ * <p><b>O problema.</b> A checagem de revogação da borda (ADR-017) precisa de {@code userID} e
+ * {@code iat} do JWT guardado na sessão. Decodificar com o decoder do resource server, que valida
+ * {@code exp}, fazia a decodificação lançar para todo access token <b>expirado</b> e o
+ * {@code onErrorResume} pular a checagem inteira, fail-open — caminho comum, não borda. Aqui o
+ * {@code exp} é irrelevante: a pergunta é "quem era o titular e quando este token nasceu", e um
+ * token expirado responde as duas.
  *
- * <p><b>Por que um tipo próprio, e não um {@code ReactiveJwtDecoder} leniente.</b> O gateway
- * <b>não declara</b> {@code ReactiveJwtDecoder}: ele vem da autoconfig
+ * <p><b>Tipo próprio, nunca um {@code ReactiveJwtDecoder} leniente.</b> O gateway <b>não declara</b>
+ * {@code ReactiveJwtDecoder}: ele vem da autoconfig
  * {@code ReactiveOAuth2ResourceServerJwtConfiguration}, que é
  * {@code @ConditionalOnMissingBean(ReactiveJwtDecoder.class)}. Expor o decoder leniente como bean
- * desse tipo — sob <b>qualquer</b> qualifier — desligaria a autoconfig e o resource server passaria a
- * aceitar <b>bearer JWT expirado</b>: a correção de segurança <i>enfraqueceria</i> o serviço. Dois
- * beans do tipo, por outro lado, tornariam ambígua a injeção. Esta classe elimina a categoria inteira
- * do problema: ela <b>guarda</b> um {@link NimbusReactiveJwtDecoder} como campo privado, não o expõe,
- * não implementa {@link ReactiveJwtDecoder} e não é atribuível a ele.
+ * desse tipo — sob <b>qualquer</b> qualifier — desligaria a autoconfig e o resource server passaria
+ * a aceitar <b>bearer JWT expirado</b>: a correção de segurança <i>enfraqueceria</i> o serviço; dois
+ * beans do tipo tornariam ambígua a injeção. Esta classe elimina a categoria: <b>guarda</b> um
+ * {@link NimbusReactiveJwtDecoder} como campo privado, não o expõe, não implementa
+ * {@link ReactiveJwtDecoder} e não é atribuível a ele.
  *
- * <p><b>Assinatura continua obrigatória.</b> O que se desliga é só a validação de {@code exp}/
- * {@code nbf}/{@code iss} — a verificação criptográfica contra o JWKS permanece, senão qualquer um
- * forjaria um token com o {@code userID} de outro e o {@code iat} que quisesse, e a checagem de
- * revogação passaria a ser controlada pelo atacante. Assinatura inválida ou JWKS inalcançável
- * propagam o erro, e o filtro trata como fail-open (ADR-017).
+ * <p><b>Assinatura continua obrigatória.</b> Desliga-se só {@code exp}/{@code nbf}/{@code iss}; a
+ * verificação criptográfica contra o JWKS permanece, senão qualquer um forjaria um token com o
+ * {@code userID} de outro e o {@code iat} que quisesse, e a checagem de revogação passaria a ser
+ * controlada pelo atacante. Assinatura inválida ou JWKS inalcançável propagam o erro, e o filtro
+ * trata como fail-open (ADR-017).
  *
  * <p>A busca do JWKS é <b>preguiçosa</b> ({@code withJwkSetUri}): não acopla o startup do gateway ao
  * authorization-server.

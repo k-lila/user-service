@@ -37,13 +37,12 @@ import reactor.core.publisher.Mono;
  * {@link OAuth2AuthenticationToken} (login por sessão); tráfego não autenticado ou por bearer passa
  * direto.
  *
- * <p><b>Token expirado NÃO é mais fail-open (ADR-025).</b> Antes, a decodificação usava o decoder do
- * resource server, que valida {@code exp}: com o access token da sessão vencido — situação comum, não
- * de borda (3× em 35 min de uso normal) — a decodificação lançava e a checagem inteira era pulada,
- * bem no momento em que o titular revogado ainda podia renovar por refresh. O
+ * <p><b>Token expirado NÃO é fail-open (ADR-025).</b> Decodificar com o decoder do resource server,
+ * que valida {@code exp}, fazia a checagem inteira ser pulada sempre que o access token da sessão
+ * vencia — situação comum, e justamente quando o titular revogado ainda pode renovar por refresh. O
  * {@link RevocationTokenReader} lê {@code userID} e {@code iat} verificando <b>assinatura</b> e
- * ignorando {@code exp}, e o decoder do resource server permanece <b>inalterado</b> para o tráfego
- * bearer (que continua recebendo 401 com {@code exp} vencido).
+ * ignorando {@code exp}; o decoder do resource server permanece <b>inalterado</b> para o tráfego
+ * bearer, que continua recebendo 401 com {@code exp} vencido.
  */
 @Component
 public class RevocationWebFilter implements GlobalFilter, Ordered {
@@ -90,9 +89,8 @@ public class RevocationWebFilter implements GlobalFilter, Ordered {
                 .onErrorResume(e -> {
                     // Fail-open remanescente: assinatura inválida, token não-parseável, JWKS
                     // inalcançável ou Redis fora. `exp` vencido NÃO cai mais aqui (ADR-025) — se
-                    // voltar a cair, a correção (5) fica inerte com build verde, que é exatamente o
-                    // modo de falha de um jwk-set-uri errado. WARN com a causa é o que torna isso
-                    // diagnosticável.
+                    // voltar a cair, a correção fica inerte com build verde, que é o modo de falha
+                    // de um jwk-set-uri errado. O WARN com a causa é o que torna isso diagnosticável.
                     LOGGER.warn("| revogação | falha na checagem de borda (fail-open) | causa: {}", e.toString());
                     return Mono.just(false);
                 })

@@ -10,16 +10,15 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * Revogação ativa de token por usuário (fecha o gap "Ausência de revogação ativa de token",
- * ADR-017). Mantém no Redis um "epoch de revogação" por titular — o instante (millis) a partir do
- * qual todo access token emitido <b>antes</b> dele deve ser rejeitado. É escrito em cada evento que
- * deveria invalidar sessões vivas (revogação de role, desativação, hard-delete, e troca de senha ou
- * de e-mail — ADR-026), junto das evictions de cache já existentes nesses pontos.
+ * Revogação ativa de token por usuário (ADR-017). Mantém no Redis um "epoch de revogação" por
+ * titular — o instante (millis) a partir do qual todo access token emitido <b>antes</b> dele é
+ * rejeitado. Escrito em <b>todo evento que invalida sessão viva</b> (ADR-017 + ADR-026), junto das
+ * evictions de cache já existentes nesses pontos.
  *
  * <p>O validador dos resource servers ({@code RevocationTokenValidator}) e o guard de refresh do
  * authorization-server comparam o {@code iat} do token a este epoch. A chave expira sozinha após
- * {@code security.revocation.ttl} (≥ a vida máxima de um refresh token) — passado esse tempo não há
- * token vivo anterior à revogação, então a marca é descartável.
+ * {@code security.revocation.ttl} (≥ a vida máxima de um refresh token): passado esse prazo não há
+ * token vivo anterior à revogação, e a marca é descartável.
  *
  * <p><b>Fail-open</b> (decisão consciente — disponibilidade sobre rigor): erro de Redis na escrita
  * loga WARN sem derrubar a operação de negócio; na leitura, retorna vazio (tratado como "sem

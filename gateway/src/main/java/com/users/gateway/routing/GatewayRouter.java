@@ -32,11 +32,10 @@ public class GatewayRouter {
             )
 
             // Endpoint público pré-sessão (usuário recém-cadastrado, sem cookie/JWT, ADR-015).
-            // Rota explícita (precede a rota genérica "user-service") para não cair no
-            // tokenRelay()/tier HIGH por-usuário dela — aqui não há sessão para relayar, e o
-            // tier LOW por-IP é o mesmo já usado em /v1/users/register (anti-abuso/enumeração).
-            // /v1/users/resend-verification deixou de ser pré-sessão: agora é self-service
-            // autenticado, coberto pela rota genérica "user-service" (tokenRelay) abaixo.
+            // Rota explícita, precedendo a genérica "user-service", para não herdar dela o
+            // tokenRelay()/tier HIGH por-usuário: não há sessão para relayar, e o tier LOW por-IP é
+            // o mesmo de /v1/users/register (anti-abuso/enumeração). Já
+            // /v1/users/resend-verification é self-service autenticado e cai na rota genérica.
             .route("user-verify-email", route -> route
                 .path("/v1/users/verify-email")
                 .filters(f -> f.requestRateLimiter(c -> {
@@ -68,12 +67,10 @@ public class GatewayRouter {
                 .uri("lb://authorization-server")
             )
 
-            // CSS do formulário de login do IdP. O browser solicita /default-ui.css sem sessão
-            // (antes de autenticar). Sem esta rota o path cai no try_files do nginx → index.html
-            // → text/html com nosniff → browser recusa o CSS e o formulário fica sem estilo.
-            // Tier LOW/IP: recurso estático público, mesmo tier de /v1/users/register e
-            // /v1/users/verify-email. Sem tokenRelay() — não há sessão pré-autenticação.
-            // /default-ui.css está no permitAll() do SecurityConfig (ADR-019).
+            // CSS do formulário de login do IdP, pedido pelo browser sem sessão. Sem esta rota o
+            // path cai no try_files do nginx → index.html → text/html com nosniff → o browser
+            // recusa o CSS e o formulário fica sem estilo. Tier LOW/IP (estático público), sem
+            // tokenRelay(); está no permitAll() do SecurityConfig (ADR-019).
             .route("auth-default-ui", route -> route
                 .path("/default-ui.css")
                 .filters(f -> f.requestRateLimiter(c -> {
@@ -83,14 +80,12 @@ public class GatewayRouter {
                 .uri("lb://authorization-server")
             )
 
-            // Front-channel do RP-Initiated Logout (ADR-018). Sob a topologia de hostname único
-            // (Cloudflare Tunnel → nginx do SPA → gateway) o authorization-server não é alcançável
-            // de fora, mas o oidcLogoutSuccessHandler redireciona o BROWSER ao end_session_endpoint
-            // — que precisa existir na origem pública. Sem esta rota, o logout termina em 404.
-            // Tier MED por-IP: é navegação de browser (não XHR autenticado), e a requisição chega
-            // já sem a sessão do gateway (o POST /logout acabou de encerrá-la) — userKeyResolver
-            // só devolveria "anonymous" e colapsaria todos os clientes num balde só.
-            // Sem tokenRelay(): o id_token_hint viaja na query string, não em Authorization.
+            // Front-channel do RP-Initiated Logout (ADR-018). Sob hostname único o
+            // authorization-server não é alcançável de fora, mas o oidcLogoutSuccessHandler
+            // redireciona o BROWSER ao end_session_endpoint, que precisa existir na origem pública
+            // — sem esta rota o logout termina em 404. Tier MED por-IP porque a requisição chega
+            // sem a sessão do gateway (o POST /logout acabou de encerrá-la) e o userKeyResolver
+            // colapsaria todos em "anonymous". Sem tokenRelay(): o id_token_hint viaja na query.
             .route("connect-logout", route -> route
                 .path("/connect/**")
                 .filters(f -> f.requestRateLimiter(c -> {

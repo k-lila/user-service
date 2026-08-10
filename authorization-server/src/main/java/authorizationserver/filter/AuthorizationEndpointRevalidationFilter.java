@@ -34,50 +34,44 @@ import jakarta.servlet.http.HttpSession;
 
 /**
  * Re-derivação do estado do titular <b>na emissão</b> do authorization code (ADR-025).
+ * <b>Leia o ADR-025 antes de alterar este filtro.</b>
  *
- * <p><b>O defeito que este filtro fecha.</b> Com {@code requireAuthorizationConsent(false)}, havendo
- * sessão do IdP o Spring Authorization Server emite o código <b>sem</b> chamar
- * {@code loadUserByUsername}, e o {@code TokenCustomizerConfig} cunha {@code userID}/{@code roles}/
- * {@code permissions} a partir das authorities <b>congeladas no login</b>. Como as três checagens da
- * ADR-017 comparam {@code iat < epoch} e o token reemitido nasce com {@code iat = agora}, todas
- * aprovam <b>por construção</b>: a revogação não falha, é <i>contornada</i>, porque o crédito é
- * reemitido limpo. Medido em produção (2026-08-07): nove {@code authorization_code} emitidos após um
- * hard-delete, zero autenticações, sessão do IdP viva 33 min depois da eliminação.
+ * <p><b>O defeito.</b> Com {@code requireAuthorizationConsent(false)} e sessão do IdP viva, o SAS
+ * emite o código <b>sem</b> chamar {@code loadUserByUsername}, e o {@code TokenCustomizerConfig}
+ * cunha os claims a partir das authorities <b>congeladas no login</b>. As três checagens da ADR-017
+ * comparam {@code iat < epoch} e o token reemitido nasce com {@code iat = agora}: todas aprovam
+ * <b>por construção</b> — a revogação não falha, é <i>contornada</i>.
  *
- * <p><b>Reuso, não caminho paralelo (AC-08).</b> A re-derivação chama o <b>mesmo</b>
- * {@link UserDetailsService} do form login, herdando sem reimplementar: o gate de {@code active}, o
- * gate de e-mail com carência (ADR-015) e a distinção 404-de-negócio × indisponibilidade do
- * {@code UserClientFallbackFactory} (ADR-021). É esse reuso que também elimina a classe inteira do
- * risco de laço {@code /login} ↔ {@code /oauth2/authorize}: para {@code enabled=false} o form login
- * aplica o mesmo gate e a {@code DisabledException} aparece em {@code /login?error} antes de o filtro
- * poder ciclar. Uma futura "otimização" que chame o Feign direto reintroduz o laço e os três gates.
+ * <p><b>Cinco coisas a NÃO regredir:</b>
  *
- * <p><b>Fora da maquinaria de autenticação, de propósito.</b> A chamada é direta ao
- * {@link UserDetailsService} e <b>nunca</b> via {@code AuthenticationManager}/{@code ProviderManager}:
- * este publicaria {@code AuthenticationSuccessEvent}, e o {@code LoginAttemptListener}
- * <b>zeraria</b> o contador de lockout do ADR-010 a cada visita ao authorize — bypass de controle de
- * segurança sem prova de senha, não mero falso positivo. Pelo mesmo evento, o carimbo de instante de
- * autenticação seria re-emitido a cada autorização, esvaziando o teto de vida e a degradação por
- * epoch. Um defeito, três controles.
+ * <p>(1) <b>Re-derivar pelo mesmo {@link UserDetailsService} do form login</b> (AC-08), nunca pelo
+ * Feign direto. O reuso herda o gate de {@code active}, o de e-mail com carência (ADR-015) e a
+ * distinção 404-de-negócio × indisponibilidade (ADR-021), e elimina o laço {@code /login} ↔
+ * {@code /oauth2/authorize}: com {@code enabled=false} o form login aplica o mesmo gate e a
+ * {@code DisabledException} aparece em {@code /login?error} antes de o filtro poder ciclar.
  *
- * <p><b>Divergência invalida; não atualiza em cima (AC-06).</b> O filtro não substitui as authorities
- * do {@code SecurityContext} nem emite código com as novas na mesma requisição — invalida a sessão e
- * deixa o re-login re-derivar o estado por definição, que é o caminho já testado.
+ * <p>(2) <b>Nunca via {@code AuthenticationManager}/{@code ProviderManager}</b>: publicaria
+ * {@code AuthenticationSuccessEvent}, e o {@code LoginAttemptListener} <b>zeraria</b> o contador de
+ * lockout do ADR-010 a cada authorize — bypass de controle sem prova de senha. Pelo mesmo evento o
+ * carimbo de instante de autenticação seria re-emitido, esvaziando o teto de vida e a degradação
+ * por epoch.
  *
- * <p><b>A comparação olha existência, {@code enabled} e authorities. Só.</b>
- * {@code accountNonLocked} fica <b>deliberadamente</b> de fora: se conta bloqueada invalidasse sessão
- * viva, qualquer um derrubaria a sessão de outro errando cinco senhas — o lockout do ADR-010 viraria
- * DoS. E a comparação de authorities inclui a authority {@code USER_ID:}, não só as {@code ROLE_*}:
- * é dela que o {@code TokenCustomizerConfig} tira o claim {@code userID}, então comparar só roles
- * deixaria um delete + re-registro com o mesmo e-mail e as mesmas roles cunhar um token cujo
- * {@code userID} aponta para documento inexistente — o bug original por outra porta.
+ * <p>(3) <b>Divergência invalida a sessão; não atualiza em cima</b> (AC-06) — o re-login re-deriva
+ * o estado por definição, que é o caminho já testado.
  *
- * <p><b>Como a sessão inválida vira 302 {@code /login}.</b> O filtro não redireciona à mão: invalida
- * a sessão, limpa o {@code SecurityContext} e <b>segue a chain</b>. Sem autenticação, o
- * {@code AuthorizationFilter} nega, o {@code ExceptionTranslationFilter} salva o request numa sessão
- * nova e comissiona o {@code LoginUrlAuthenticationEntryPoint} já configurado — o que faz o fluxo
- * originalmente pedido ser retomado após o re-login, pelo
- * {@code SavedRequestAwareAuthenticationSuccessHandler}, sem laço nem tela morta.
+ * <p>(4) <b>{@code accountNonLocked} fica deliberadamente fora</b> da comparação: se conta
+ * bloqueada invalidasse sessão viva, qualquer um derrubaria a sessão de outro errando cinco senhas
+ * — o lockout do ADR-010 viraria DoS.
+ *
+ * <p>(5) <b>A comparação inclui a authority {@code USER_ID:}</b>, não só as {@code ROLE_*}: é dela
+ * que sai o claim {@code userID}, e comparar só roles deixaria um delete + re-registro com o mesmo
+ * e-mail cunhar token cujo {@code userID} aponta para documento inexistente.
+ *
+ * <p><b>Sessão inválida vira 302 {@code /login} sem redirect à mão:</b> o filtro invalida, limpa o
+ * {@code SecurityContext} e segue a chain; sem autenticação o {@code AuthorizationFilter} nega, o
+ * {@code ExceptionTranslationFilter} salva o request e comissiona o
+ * {@code LoginUrlAuthenticationEntryPoint}, e o {@code SavedRequestAwareAuthenticationSuccessHandler}
+ * retoma o fluxo pedido após o re-login — sem laço nem tela morta.
  */
 public class AuthorizationEndpointRevalidationFilter extends OncePerRequestFilter {
 
@@ -88,16 +82,15 @@ public class AuthorizationEndpointRevalidationFilter extends OncePerRequestFilte
     private static final String ROLE_PREFIX = "ROLE_";
 
     /**
-     * Motivo da invalidação, discriminado no log (AC-37). O incidente de origem só foi diagnosticável
-     * por perícia manual no Postgres e no Redis; sem motivo no log, a verificação em produção vale no
-     * dia do deploy e deixa de valer na semana seguinte.
+     * Motivo da invalidação, discriminado no log (AC-37) — sem ele, verificar a correção em
+     * produção exige perícia manual no Postgres e no Redis.
      */
     public enum Reason {
         /**
-         * Titular inexistente ou inativo na fonte de verdade. <b>Tem duas causas legítimas:</b>
-         * eliminação (hard/soft delete) <i>e</i> titular que trocou o próprio e-mail — o
-         * {@code principal_name} da sessão continua sendo o antigo e a re-derivação procura por ele
-         * (ADR-025, P-01). Ao usar esta linha como evidência, o sinal é ambíguo por desenho.
+         * Titular inexistente ou inativo na fonte de verdade. <b>Sinal ambíguo por desenho:</b> tem
+         * duas causas legítimas — eliminação (hard/soft delete) <i>e</i> titular que trocou o
+         * próprio e-mail, caso em que o {@code principal_name} da sessão é o antigo e a
+         * re-derivação procura por ele (ADR-025, P-01).
          */
         NOT_FOUND,
         /** {@code enabled=false}: e-mail não verificado fora da carência de 24h (ADR-015). */
@@ -123,16 +116,13 @@ public class AuthorizationEndpointRevalidationFilter extends OncePerRequestFilte
             Duration maxLifetime,
             boolean enabled) {
         // MATCHER POSITIVO E EXATO, derivado de AuthorizationServerSettings.getAuthorizationEndpoint()
-        // — nunca do literal "/oauth2/authorize" (AC-33). Duas razões, ambas de regressão silenciosa:
-        //
-        //  (1) Enumerar EXCLUSÕES é o padrão que produziu o G1: o ADR-016 listou as rotas que
-        //      conhecia em vez de varrer a superfície, e a listagem pública ficou seis semanas
-        //      aberta. Matcher positivo transforma "esqueci de excluir X" em "X nunca esteve
-        //      incluído" — e a chain @Order(1) casa TODO o endpointsMatcher do SAS (/oauth2/token,
-        //      /connect/logout via oidc(), /oauth2/jwks...), então sem este recorte o filtro atuaria
-        //      no back-channel e no logout.
-        //  (2) Um `.authorizationEndpoint(...)` customizado no AuthorizationServerSettings faria o
-        //      literal parar de casar EM SILÊNCIO: fix inerte, build verde, defeito reaberto.
+        // — nunca do literal "/oauth2/authorize" (AC-33). Duas regressões silenciosas evitadas:
+        //  (1) A chain @Order(1) casa TODO o endpointsMatcher do SAS (/oauth2/token, /connect/logout
+        //      via oidc(), /oauth2/jwks...); sem este recorte o filtro atuaria no back-channel e no
+        //      logout. Enumerar EXCLUSÕES é o padrão que produziu o G1 — matcher positivo transforma
+        //      "esqueci de excluir X" em "X nunca esteve incluído".
+        //  (2) Um `.authorizationEndpoint(...)` customizado faria o literal parar de casar EM
+        //      SILÊNCIO: fix inerte, build verde, defeito reaberto.
         this.matcher = new OrRequestMatcher(
                 PathPatternRequestMatcher.pathPattern(HttpMethod.GET, authorizationEndpoint),
                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, authorizationEndpoint));
@@ -175,9 +165,9 @@ public class AuthorizationEndpointRevalidationFilter extends OncePerRequestFilte
         String userId = userIdFrom(authentication);
         Instant authenticatedAt = AuthenticationInstantAttribute.read(session);
 
-        // Teto de vida ANTES da chamada remota: uma sessão vencida não precisa de I/O para morrer.
-        // Os 30 min do Spring Session são de INATIVIDADE e cada autorização os renova — sem um teto
-        // ancorado no instante de autenticação, uma sessão em uso contínuo nunca expira.
+        // Teto de vida ANTES da chamada remota: sessão vencida não precisa de I/O para morrer. Os
+        // 30 min do Spring Session são de INATIVIDADE e cada autorização os renova — sem teto
+        // ancorado no instante de autenticação, sessão em uso contínuo nunca expira.
         if (isPastMaxLifetime(authenticatedAt)) {
             return Reason.MAX_LIFETIME;
         }
@@ -187,16 +177,16 @@ public class AuthorizationEndpointRevalidationFilter extends OncePerRequestFilte
             fresh = this.userDetailsService.loadUserByUsername(username);
         } catch (UsernameNotFoundException e) {
             // 404 de negócio (inexistente OU inativo), resolvido no UserClientFallbackFactory.
-            // Fail-CLOSED aqui é o ponto inteiro da correção. Ressalva conhecida: o catch (Exception)
-            // do AuthorizationService converte falha inesperada (ex.: (de)serialização) nesta mesma
-            // exceção, então um erro raro desloga em vez de degradar — aceito e declarado na ADR-025,
-            // em vez de um terceiro ramo que adivinharia a causa.
+            // Fail-CLOSED aqui é o ponto inteiro da correção. Ressalva aceita na ADR-025: o
+            // catch (Exception) do AuthorizationService converte falha inesperada (ex.:
+            // (de)serialização) nesta mesma exceção, então um erro raro desloga em vez de degradar
+            // — preferível a um terceiro ramo que adivinharia a causa.
             return Reason.NOT_FOUND;
         } catch (AuthenticationException e) {
             // UserServiceUnavailableException (ADR-021) e afins: indisponibilidade real (500, 503,
-            // timeout, conexão recusada, circuito aberto). NÃO propaga como erro e NÃO invalida por
-            // si só — um outage do user-service não pode derrubar o login de todo mundo. Degrada
-            // para a checagem que só precisa do Redis.
+            // timeout, conexão recusada, circuito aberto). NÃO propaga e NÃO invalida por si só —
+            // outage do user-service não pode derrubar o login de todos. Degrada para a checagem
+            // que só precisa do Redis.
             LOGGER.warn(
                     "| revalidação | fonte de verdade indisponível | degradando para o epoch (fail-open) | email: {} | causa: {}",
                     LogUtils.maskEmail(username), e.toString());
@@ -222,17 +212,17 @@ public class AuthorizationEndpointRevalidationFilter extends OncePerRequestFilte
     }
 
     /**
-     * Compara as authorities <b>de domínio</b> — {@code ROLE_*} e {@code USER_ID:} — entre a sessão e a
-     * fonte de verdade. {@code accountNonLocked} não entra (ver o javadoc da classe).
+     * Compara as authorities <b>de domínio</b> — {@code ROLE_*} e {@code USER_ID:} — entre a sessão
+     * e a fonte de verdade. {@code accountNonLocked} não entra (ver o javadoc da classe).
      *
-     * <p><b>Por que o recorte por prefixo, e não a comparação do conjunto cru.</b> O
-     * {@code DaoAuthenticationProvider} do Spring Security 7 acrescenta ao token do login authorities
-     * de <b>fator de autenticação</b> ({@code FACTOR_PASSWORD}) que o {@link UserDetails} não tem — são
-     * do framework, não do domínio. Comparar os conjuntos crus faria TODA sessão divergir de si mesma
-     * e o filtro invalidaria todo login: precisamente a pior regressão possível desta correção, a que o
-     * smoke-test do ADR-023 existe para distinguir do fix correto. O recorte compara exatamente o que o
-     * {@code AuthorizationService} deriva da fonte de verdade e o que o
-     * {@code TokenCustomizerConfig} consome — nem mais, nem menos.
+     * <p><b>O recorte por prefixo é obrigatório; conjunto cru não serve.</b> O
+     * {@code DaoAuthenticationProvider} do Spring Security 7 acrescenta ao token do login
+     * authorities de <b>fator de autenticação</b> ({@code FACTOR_PASSWORD}) que o
+     * {@link UserDetails} não tem — do framework, não do domínio. Comparar os conjuntos crus faria
+     * TODA sessão divergir de si mesma e invalidaria todo login: a pior regressão desta correção, e
+     * a que o smoke-test do ADR-023 existe para distinguir do fix correto. O recorte compara
+     * exatamente o que o {@code AuthorizationService} deriva e o que o
+     * {@code TokenCustomizerConfig} consome.
      */
     private boolean authoritiesMatch(Authentication authentication, UserDetails fresh) {
         return domainAuthorities(authentication.getAuthorities())
@@ -269,8 +259,8 @@ public class AuthorizationEndpointRevalidationFilter extends OncePerRequestFilte
         try {
             session.invalidate();
         } catch (IllegalStateException e) {
-            // Já invalidada por outro caminho no mesmo request: nada a fazer, o efeito desejado já é o
-            // que se tem. Não é condição de erro.
+            // Já invalidada por outro caminho no mesmo request: o efeito desejado já é o que se
+            // tem. Não é condição de erro.
             LOGGER.debug("| revalidação | sessão já invalidada | motivo: {}", reason);
         }
         SecurityContextHolder.clearContext();

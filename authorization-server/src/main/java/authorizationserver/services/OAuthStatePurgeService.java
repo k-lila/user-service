@@ -14,20 +14,18 @@ import org.springframework.stereotype.Service;
 /**
  * Purga periódica do estado OAuth expirado na tabela {@code oauth2_authorization} (ADR-022).
  *
- * <p>O {@code JdbcOAuth2AuthorizationService} do SAS grava uma linha por autorização e
- * <b>nunca</b> apaga nenhuma: o access token expira, o refresh token expira, e a linha
- * permanece. É crescimento monotônico de uma linha por login — a tabela vira um log de
- * autenticações que ninguém lê, encarecendo backup, restore e o próprio índice primário.
+ * <p>O {@code JdbcOAuth2AuthorizationService} do SAS grava uma linha por autorização e <b>nunca</b>
+ * apaga nenhuma — crescimento monotônico de uma linha por login, encarecendo backup, restore e o
+ * índice primário.
  *
- * <p><b>Critério de morte.</b> Uma linha só é apagada quando <i>todas</i> as suas colunas de
- * expiração já passaram, com folga de {@code app.oauth-state.purge-grace}. Usar uma coluna só
- * (p. ex. {@code access_token_expires_at}) apagaria autorizações cujo refresh token ainda é
- * válido, deslogando usuários ativos — daí o {@code GREATEST} sobre as seis.
+ * <p><b>Critério de morte:</b> uma linha só é apagada quando <i>todas</i> as suas colunas de
+ * expiração já passaram, com folga de {@code app.oauth-state.purge-grace}. Filtrar por uma coluna
+ * só (p. ex. {@code access_token_expires_at}) apagaria autorizações cujo refresh token ainda vale,
+ * deslogando usuário ativo — daí o {@code GREATEST} sobre as seis.
  *
- * <p><b>Fail-closed no lock</b>, como o {@code OutboxRetryService} do user-service e pelo mesmo
- * motivo invertido: aqui o dano de rodar concorrente não é duplicar e-mail, é duas transações
- * disputando as mesmas linhas. Um ciclo pulado não custa nada — o próximo apanha as mesmas
- * linhas, que só ficaram mais expiradas.
+ * <p><b>Fail-closed no lock</b>, como o {@code OutboxRetryService}: rodar concorrente significaria
+ * duas transações disputando as mesmas linhas, e pular um ciclo não custa nada — o próximo apanha
+ * as mesmas linhas, só que mais expiradas.
  */
 @Service
 public class OAuthStatePurgeService {
@@ -39,12 +37,11 @@ public class OAuthStatePurgeService {
     /**
      * Apaga em lote as autorizações totalmente expiradas.
      *
-     * <p>O {@code COALESCE(..., 'epoch')} trata "coluna nula" como "expirou há muito", porque
-     * nulo aqui significa que aquele tipo de grant não foi usado nesta autorização — não que ele
-     * nunca expira. Isso, porém, tornaria uma linha com <i>todas</i> as colunas nulas elegível,
-     * e é exatamente a forma que uma linha recém-inserida poderia assumir num estado
-     * intermediário: daí a disjunção {@code IS NOT NULL}, que exige ao menos uma expiração real
-     * antes de considerar a linha morta. Sem ela, este DELETE poderia alcançar estado vivo.
+     * <p>O {@code COALESCE(..., 'epoch')} trata coluna nula como "expirou há muito", porque nulo
+     * significa que aquele grant não foi usado nesta autorização — não que nunca expira. Isso
+     * sozinho tornaria elegível uma linha com <i>todas</i> as colunas nulas, que é a forma de uma
+     * linha recém-inserida em estado intermediário: daí a disjunção {@code IS NOT NULL}, exigindo
+     * ao menos uma expiração real. Sem ela, este DELETE alcançaria estado vivo.
      *
      * <p>O {@code IN (SELECT ... LIMIT ?)} limita o tamanho da transação: numa base que acumulou
      * meses de estado, um DELETE único seguraria lock sobre a tabela inteira. O ciclo seguinte

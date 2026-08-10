@@ -48,25 +48,16 @@ public class AuthorizationService implements UserDetailsService {
         try {
             user = userClient.getUserByEmail(email);
         } catch (AuthenticationException e) {
-            // Propaga sem reembrulhar. AMBOS os casos chegam aqui pelo fallback do circuit breaker
-            // (UserClientFallbackFactory), que é quem os distingue — o Feign entrega 404 de negócio
-            // e indisponibilidade real pelo mesmo caminho:
+            // Propaga sem reembrulhar. Os dois casos chegam pelo fallback do circuit breaker, que
+            // é quem os distingue (ver o javadoc de UserClientFallbackFactory):
+            // UsernameNotFoundException para o 404 de negócio, que CONTA no lockout — mantendo o
+            // atrito contra enumeração de e-mails; UserServiceUnavailableException (ADR-021) para
+            // indisponibilidade real, que NÃO conta, senão um outage bloquearia conta legítima.
             //
-            //  - UsernameNotFoundException: o fallback a lança quando a causa é FeignException
-            //    .NotFound, ou seja, o user-service devolveu 404 (titular inexistente OU inativo).
-            //    O DaoAuthenticationProvider a converte em BadCredentialsException → evento
-            //    publicado → CONTA no lockout. Correto: é indistinguível de tentativa de
-            //    adivinhação, e manter o atrito contra enumeração de e-mails importa.
-            //
-            //  - UserServiceUnavailableException (ADR-021): indisponibilidade real (500, 503,
-            //    timeout, conexão recusada, circuito aberto). É InternalAuthenticationService-
-            //    Exception, repropagada intacta e sem evento publicado — NÃO conta no lockout.
-            //    Um outage não pode bloquear a conta de um usuário legítimo por 15 min.
-            //
-            // O catch TEM de ser AuthenticationException (e não UsernameNotFoundException): a
+            // O catch TEM de ser AuthenticationException, nunca UsernameNotFoundException: a
             // segunda não é subtipo da primeira, cairia no catch (Exception) abaixo e seria
-            // convertida de volta em UsernameNotFoundException — reintroduzindo o bug inteiro,
-            // com todos os testes existentes passando. Guard: AuthorizationServiceTest
+            // convertida de volta em UsernameNotFoundException — reintroduzindo o bug inteiro, com
+            // todos os testes existentes passando. Guard: AuthorizationServiceTest
             // .deveNaoConverterEmUsernameNotFound_quandoUserServiceIndisponivel.
             throw e;
         } catch (Exception e) {
@@ -97,12 +88,11 @@ public class AuthorizationService implements UserDetailsService {
         // accountNonLocked=false faz o DaoAuthenticationProvider lançar LockedException
         // antes de checar a senha. Chaveado pelo email submetido (mesmo valor do listener).
         boolean accountNonLocked = !loginAttempts.isBlocked(email, ClientIpResolver.currentIp(trustedClientIpHeader));
-        // emailVerified nulo (legado, anterior ao campo, ou falha de (de)serialização) é
-        // tratado como verificado. Cadastros novos (ADR-015) nascem com emailVerified=false
-        // e só viram true após a confirmação — mas ficam dentro de uma janela de carência
-        // (grace period) desde o cadastro, para não tornar a conta permanentemente
-        // inacessível caso o e-mail nunca chegue (SMTP fora do ar, outbox FAILED, etc.):
-        // o reenvio manual é a única saída fora dessa janela.
+        // emailVerified nulo (legado, ou falha de (de)serialização) é tratado como verificado.
+        // Cadastros novos (ADR-015) nascem false e só viram true após a confirmação, mas contam
+        // com uma janela de carência desde o cadastro para que a conta não fique permanentemente
+        // inacessível se o e-mail nunca chegar (SMTP fora, outbox FAILED). Fora da janela, a única
+        // saída é o reenvio manual.
         boolean withinGracePeriod = user.getRegistrationDate() != null
                 && user.getRegistrationDate().plus(emailVerificationGracePeriod).isAfter(Instant.now());
         boolean emailVerified = !Boolean.FALSE.equals(user.getEmailVerified()) || withinGracePeriod;
