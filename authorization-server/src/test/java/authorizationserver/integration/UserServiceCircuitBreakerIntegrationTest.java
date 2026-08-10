@@ -30,10 +30,9 @@ import com.github.tomakehurst.wiremock.client.WireMock;
  * <p>O fallback lança {@code UserServiceUnavailableException} (ADR-021), que estende
  * {@code InternalAuthenticationServiceException} e o {@code AuthorizationService} propaga sem
  * reembrulhar → na borda HTTP o form login redireciona para {@code /login?error} (falha
- * controlada, sem 5xx e sem travar no delay do downstream). Antes do ADR-021 o fallback lançava
- * {@code UsernameNotFoundException}, que o {@code DaoAuthenticationProvider} convertia em
- * {@code BadCredentialsException} — e o {@code LoginAttemptListener} contava a falha, fazendo um
- * outage bloquear contas legítimas por 15 min. É o que
+ * controlada, sem 5xx e sem travar no delay do downstream). O fallback <b>não pode</b> lançar
+ * {@code UsernameNotFoundException}: viraria {@code BadCredentialsException} e um outage
+ * bloquearia contas legítimas por 15 min — o que
  * {@link #naoDeveBloquearConta_apos5FalhasDuranteOutage()} cobre.
  */
 class UserServiceCircuitBreakerIntegrationTest extends AbstractAuthIntegrationTest {
@@ -119,14 +118,9 @@ class UserServiceCircuitBreakerIntegrationTest extends AbstractAuthIntegrationTe
     }
 
     /**
-     * ADR-021 — o teste de cruzamento lockout × circuit breaker: a prova do bug e do fix.
-     *
-     * <p>Antes do fix este teste FALHAVA. O fallback lançava {@code UsernameNotFoundException},
-     * o {@code DaoAuthenticationProvider} a convertia em {@code BadCredentialsException}, o
-     * publisher emitia {@code AuthenticationFailureBadCredentialsEvent} e o
-     * {@code LoginAttemptListener} incrementava — cinco tentativas durante um outage bloqueavam
-     * a conta por 15 min (max-attempts=5 no yml de teste). Um incidente de infraestrutura virava
-     * negação de serviço para o usuário legítimo.
+     * ADR-021 — o cruzamento lockout × circuit breaker. Falha se a indisponibilidade voltar a
+     * contar no lockout, que é o que faria um outage de cinco tentativas bloquear a conta de um
+     * usuário legítimo por 15 min (max-attempts=5 no yml de teste).
      *
      * <p>Assere sobre o {@code LoginAttemptService} diretamente, e não sobre um login bem-sucedido
      * depois: o circuito abre com 2 falhas e {@code waitDurationInOpenState=60s} o mantém aberto

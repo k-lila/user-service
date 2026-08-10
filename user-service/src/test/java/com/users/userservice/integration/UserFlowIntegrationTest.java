@@ -60,8 +60,8 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertNotNull(encontrado);
         assertEquals("fulano@email.com", encontrado.getEmail());
         assertEquals("Fulano", encontrado.getName());
-        assertTrue(encontrado.getActive());           // lacuna 1
-        assertNotNull(encontrado.getRegistrationDate()); // lacuna 2
+        assertTrue(encontrado.getActive());
+        assertNotNull(encontrado.getRegistrationDate());
         // Consentimento LGPD persistido no cadastro (aceite versionado com timestamp).
         assertNotNull(encontrado.getConsentAcceptedAt());
         assertEquals("v1", encontrado.getTermsVersion());
@@ -175,7 +175,6 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
                 registerService.updateUser(buildDTO("Novo", "novo@email.com", null), "id-inexistente"));
     }
 
-    // lacuna 3
     @Test
     void deveAtribuirRoleUser_quandoUsuarioRegistrado() {
         UserResponseDTO registrado = registerService.registerUser(
@@ -187,7 +186,6 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertEquals(1, persistido.getRoles().size());
     }
 
-    // lacuna 4
     @Test
     void deveHashearSenhaComBcrypt_quandoUsuarioRegistrado() {
         UserResponseDTO registrado = registerService.registerUser(
@@ -199,14 +197,12 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertNotEquals("senha123", persistido.getPasswordHash());
     }
 
-    // lacuna 5
     @Test
     void deveLancarDomainEntityNotFound_quandoIdInexistenteNaBusca() {
         assertThrows(DomainEntityNotFound.class, () ->
                 searchService.searchById("id-inexistente"));
     }
 
-    // lacuna 6
     @Test
     void deveBuscarPorEmail_quandoEmailExiste() {
         registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
@@ -218,14 +214,12 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertEquals("fulano@email.com", encontrado.getEmail());
     }
 
-    // lacuna 7
     @Test
     void deveLancarDomainEntityNotFound_quandoEmailInexistente() {
         assertThrows(DomainEntityNotFound.class, () ->
                 searchService.searchByEmail("nao@existe.com"));
     }
 
-    // lacuna 8
     @Test
     void deveLancarEmailAlreadyRegisteredException_quandoEmailDeAtualizacaoConflita() {
         UserResponseDTO userA = registerService.registerUser(

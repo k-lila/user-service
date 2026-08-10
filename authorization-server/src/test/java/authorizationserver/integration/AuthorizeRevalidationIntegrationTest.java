@@ -56,9 +56,7 @@ import jakarta.servlet.http.Cookie;
  * Testcontainers e o user-service dublado por WireMock. É a diferença que importa: um filtro
  * instanciado isoladamente prova comportamento, não prova que ele roda.
  *
- * <p>Cada cenário nega uma linha da evidência do incidente de 2026-08-07 (nove
- * {@code authorization_code} emitidos após um hard-delete, zero autenticações, sessão do IdP viva 33
- * min depois da eliminação).
+ * <p>Cada cenário nega uma linha da evidência do incidente que originou o ADR-025 (§ Contexto).
  */
 class AuthorizeRevalidationIntegrationTest extends AbstractAuthIntegrationTest {
 

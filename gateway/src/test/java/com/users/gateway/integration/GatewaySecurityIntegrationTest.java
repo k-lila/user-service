@@ -104,11 +104,9 @@ class GatewaySecurityIntegrationTest extends AbstractGatewayIntegrationTest {
     }
 
     /**
-     * ADR-020 — a documentação deixou de ser pública. O vazamento que motivou a mudança foi o
-     * springdoc materializar `springdoc.swagger-ui.oauth.client-secret` como um ui.initOAuth()
-     * literal dentro de /swagger-ui/swagger-initializer.js, servido a anônimos. O bloco `oauth`
-     * saiu do gateway.yml, mas o gate de acesso é a garantia durável: qualquer coisa que uma
-     * configuração futura empurre para dentro da página deixa de ser legível sem sessão.
+     * ADR-020 — a documentação deixou de ser pública. O bloco `oauth` saiu do gateway.yml, mas o
+     * gate de acesso é a garantia durável: qualquer coisa que uma configuração futura empurre para
+     * dentro da página deixa de ser legível sem sessão.
      *
      * Espera-se 302 (não 401) porque /swagger-ui/** é navegação de browser, e um 401 seco não
      * daria ao operador caminho para autenticar — ver swaggerAwareEntryPoint() no SecurityConfig.
@@ -197,15 +195,11 @@ class GatewaySecurityIntegrationTest extends AbstractGatewayIntegrationTest {
     }
 
     /**
-     * Regressão BUG-001 (P1, ADR-019): POST /login deve atravessar o gateway sem ser barrado
-     * por CSRF, mesmo sem X-XSRF-TOKEN válido do gateway.
-     *
-     * Contexto: sob hostname único (Cloudflare Tunnel), o nginx encaminha POST /login ao gateway,
-     * que o proxia ao auth-server. O formulário do auth-server embute um _csrf gerado pelo
-     * próprio auth-server — o gateway não tem como injetar seu XSRF-TOKEN num HTML renderizado
-     * pelo auth-server. Exigir o token do gateway em /login é incorreto: a request é
-     * unauthenticated (sem sessão do gateway a proteger). O auth-server é dono do CSRF do
-     * formulário de login. (ADR-019)
+     * Regressão BUG-001 (P1, ADR-019): POST /login deve atravessar o gateway sem ser barrado por
+     * CSRF, mesmo sem X-XSRF-TOKEN válido do gateway. O formulário do auth-server embute um _csrf
+     * próprio, e o gateway não tem como injetar seu XSRF-TOKEN num HTML que o auth-server renderiza
+     * — exigi-lo em /login é incorreto, porque a request é unauthenticated e não há sessão do
+     * gateway a proteger.
      */
     @Test
     void postLoginSemCsrfDoGateway_deveChegarAoDownstream() {
