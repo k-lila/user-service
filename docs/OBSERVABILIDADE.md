@@ -118,6 +118,22 @@ Par **"Membros saudáveis" × "Membros configurados"**. A divergência entre os 
 configurados / 1 saudável) é a **assinatura exata** do Mongo somente-leitura descrito no runbook de
 encolhimento em [docs/CONFIG.md](CONFIG.md).
 
+### `dashboardRedis.json`
+
+Os dois `stat` de topo — **"Data nodes UP (piso 1 · ha 3)"** e **"Sentinels UP (piso 1 · ha 3)"** —
+têm threshold **verde a partir de 1**, não de 3, de propósito: o piso mínimo do
+[ADR-024](adr/ADR-024-elasticidade-piso-minimo-eixos-escala.md) roda com um nó e um Sentinel, e um
+alerta em 3 pintaria de vermelho a topologia default. O título carrega os dois valores esperados
+porque o painel sozinho não distingue "piso mínimo saudável" de "`ha` degradado" — quem distingue é
+o operador que sabe com qual profile subiu.
+
+Os painéis de **replicação** (`redis_connected_slaves`, `redis_master_link_up`) e de **Sentinel**
+(`redis_sentinel_master_ok_sentinels` / `..._ok_slaves`) só têm série no profile `ha`; no piso
+mínimo ficam legitimamente vazios, e isso **não** é falha de scrape.
+
+> Lembrete de coleta: o `redis-exporter` é **SPOF de scrape** — um processo coleta os seis alvos.
+> Se este dashboard zerar inteiro, suspeite do exporter antes de suspeitar do Redis.
+
 ### `dashboardPostgres.json`
 
 **"Headroom de conexões"** e **"Conexões vs teto"** tiram de `docs/CONFIG.md` e põem em painel o
