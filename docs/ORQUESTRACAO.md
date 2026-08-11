@@ -11,36 +11,31 @@ O pipeline é o caminho para qualquer mudança de domínio (feature, bugfix, nov
 **habilita a evolução** protegendo as invariantes da v1 (revisão adversarial + ADRs + gate de
 cobertura) — os guardrails que deixam o produto crescer sem regredir.
 
-## Agentes
+## Agentes e skills
 
-| Agente               | Modelo                               | Responsabilidade                                                                   | Quando invocar                          |
-| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- | --------------------------------------- |
-| `product-manager`    | sonnet-4-6                           | Spec, impacto no ecossistema, critérios de aceite (AC-NN), DoD                     | Sempre primeiro                         |
-| `techlead`           | sonnet-4-6 (opus-4-8 p/ arquitetura) | Implementa sem regredir invariantes; cria ADRs                                     | Após spec aprovada                      |
-| `qa-tester`          | sonnet-4-6                           | Testes (unit/controller/integração), regressão, bugs P0–P3                         | Após implementação                      |
-| `senso-critico`      | opus-4-8                             | Revisão adversarial: consistência + **compatibilidade de contrato** + bugs latentes | Após o `product-manager` e após o `qa-tester` |
-| `security-reviewer`  | opus-4-8                             | Revisão de segurança dedicada (authn/authz, segredos, canal interno, CSRF/CORS)    | Condicional (superfície de segurança) + novo serviço |
-| `dependency-steward` | sonnet-4-6                           | Higiene de dependências: CVE, upgrades Spring/React, compat de versões             | Higiene de dependências / CVE / upgrade |
-| `report-writer`      | sonnet-4-6                           | Gera relatórios de impacto (mudanças recentes) ou estado de uma fatia do projeto (segurança, endpoints, infra, testes, etc.) | Sob demanda, fora do pipeline linear |
+As definições são os próprios arquivos e já chegam ao contexto por eles — **este documento não as
+espelha**, para não divergir em silêncio. Modelo, ferramentas e checklist de cada agente estão no
+frontmatter e no corpo de `.claude/agents/<nome>.md`.
 
-> Histórico: `techlead` fundiu os antigos `backlog-driver` + `security-auditor`, mas a
-> revisão de segurança voltou a ser dedicada no **`security-reviewer`** (a evolução ativa
-> prioriza não regredir segurança a cada entrega); `senso-critico` absorve o antigo
-> `error-analyst` e a
-> antiga ideia de um `compat-guardian` (compatibilidade de contrato é sua responsabilidade,
-> operada pela skill `/check-compat`).
+| Agente | Quando invocar |
+| --- | --- |
+| `product-manager` | Sempre primeiro: spec, impacto no ecossistema, critérios de aceite (AC-NN), DoD |
+| `senso-critico` | Após o `product-manager` **e** após o `qa-tester` — revisão adversarial, compatibilidade de contrato, bugs latentes |
+| `techlead` | Após a spec aprovada — implementa sem regredir invariantes; cria ADRs |
+| `qa-tester` | Após a implementação — testes, regressão, bugs P0–P3 |
+| `security-reviewer` | **Condicional:** superfície de segurança tocada; **sempre** em novo serviço |
+| `dependency-steward` | Higiene de dependências: CVE, upgrade, compat de versões |
+| `report-writer` | Sob demanda, fora do pipeline linear |
 
-## Skills
+Skills invocáveis: `/suggest-tests <Classe>`, `/check-compat [base-ref]`, `/security-scan [escopo]`,
+`/new-adr "<título>"`. Skills de referência (lidas pelos agentes, não invocáveis): `java-microservices`,
+`test-strategy`, `inter-service-communication`, `observability`, `invariants-and-contracts` — esta
+última é a base do `/check-compat`. Todas em `.claude/skills/`.
 
-**Invocáveis** (slash commands): `/suggest-tests <Classe>` (gera testes faltantes, alimenta
-o `qa-tester`); `/check-compat [base-ref]` (checa quebra de contrato entre serviços,
-read-only); `/new-adr "<título>"` (scaffolda ADR do template com o próximo número);
-`/security-scan [escopo]` (varre regressões de segurança, alimenta o `security-reviewer`).
-
-**Referência** (conhecimento lido pelos agentes, não invocável): `java-microservices`,
-`test-strategy`, `inter-service-communication`, `observability` e `invariants-and-contracts`
-(invariantes + superfícies de contrato; base do `/check-compat`).
-
+> Histórico das fusões, que não está em nenhum outro lugar: o `techlead` fundiu os antigos
+> `backlog-driver` + `security-auditor`, mas a revisão de segurança voltou a ser dedicada no
+> `security-reviewer` — a evolução ativa prioriza não regredir segurança a cada entrega. O
+> `senso-critico` absorveu o antigo `error-analyst` e a ideia de um `compat-guardian`.
 ## Workflows (`.claude/workflows/`)
 
 `feature.md`, `bugfix.md`, `hotfix.md`, `new-service.md`, `dependency-update.md`. O
@@ -85,8 +80,7 @@ Os agentes também podem ser chamados isoladamente via Claude Code: `techlead` p
 ou "qual gap fechar agora?"; `security-reviewer` para uma auditoria de segurança;
 `dependency-steward` para "audite/atualize as dependências"; `report-writer` para
 "resuma o que mudamos hoje" ou "como está a cobertura de testes do user-service" — gera
-relatório de impacto ou de estado de uma fatia, sem aprovar/reprovar nada. Skills:
-`/suggest-tests <Classe>`, `/check-compat`, `/security-scan`, `/new-adr "<título>"`.
+relatório de impacto ou de estado de uma fatia, sem aprovar/reprovar nada.
 
 > A sincronização de `CLAUDE.md`/`docs/` após `APPROVED` deixou de ter um agente dedicado
 > (`doc-keeper`, removido) — fica a cargo de quem conduz o pipeline (humano ou
