@@ -259,7 +259,10 @@ O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims
 ## Schema MongoDB (coleção `notificationOutbox`)
 
 Outbox sem poller (ADR-015) — criado e processado no mesmo evento que o originou (cadastro ou
-reenvio), sem `@Scheduled`/scan periódico. Índice composto `(userId, type, status)`.
+reenvio), sem `@Scheduled`/scan periódico. **Dois** índices compostos:
+`(userId, type, status)` e `(type, status, createdAt)` — o segundo existe porque o primeiro tem
+`userId` no prefixo e não serve a varredura do `OutboxRetryService`, que filtra por `(type, status)`
+sem conhecer o titular; sem ele, COLLSCAN da coleção inteira.
 
 ```js
 {
@@ -342,7 +345,10 @@ TTL de 5 min, três caches distintos:
 Além dos caches, o Redis compartilhado guarda o **epoch de revogação de token** por usuário
 (ADR-017): chave `revoke:user:{userID}` → instante (millis) da última revogação, TTL `75m`
 (`security.revocation.ttl`). Gravada pelo user-service em revogação de role / desativação /
-hard-delete (junto das evictions acima); lida pelos resource servers (user-service, gateway) e
+hard-delete (junto das evictions acima) e na **troca de senha ou de e-mail**
+([ADR-026](adr/ADR-026-revogacao-troca-senha-email.md) — trocar só o nome não revoga, e o autor da
+troca também é deslogado porque o epoch é por titular, não por sessão); lida pelos resource
+servers (user-service, gateway) e
 pelo guard de refresh do auth-server. **Comportamento:** um access token cujo `iat` precede o
 epoch é rejeitado com **401**, e o grant `refresh_token` de um titular revogado falha com
 `invalid_grant`. Fail-open se o Redis estiver indisponível.

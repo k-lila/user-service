@@ -540,6 +540,7 @@ revogação, na mesma operação.
 
 ```
 AdminService.updateUserRoles | RegisterService.deactivateUser | .deleteUser
+                             | RegisterService.updateUser  (senha OU e-mail — ADR-026)
   → TokenRevocationService.revoke(userID)  →  Redis revoke:user:{id} (TTL 75m)
 
 Daí em diante, em paralelo:
@@ -552,6 +553,9 @@ Daí em diante, em paralelo:
 
 Todas são **fail-open**: outage de Redis não bloqueia autenticação. A invalidação não muta a sessão
 viva — o re-login re-deriva roles e reaplica os gates de e-mail e `active`.
+
+Na troca de senha ou e-mail ([ADR-026](adr/ADR-026-revogacao-troca-senha-email.md)) o **autor da
+troca também cai** — o epoch é por titular, não por sessão. Trocar só o nome não revoga.
 
 > **Corrigido em 2026-08-09 — não reintroduza a frase antiga.** Este parágrafo dizia que "a
 > revogação **força re-autenticação**". Não força, e a diferença custou um incidente: as três
@@ -667,7 +671,7 @@ alterar.
 | `user-service/controller/UserController.java` | [001](adr/ADR-001-leitura-somente-ativos.md) · [013](adr/ADR-013-remocao-rotas-admin-delete-user-controller.md) · [016](adr/ADR-016-leitura-pii-restrita-admin.md) · [021](adr/ADR-021-remocao-listagem-publica-usuarios.md) |
 | `user-service/controller/AdminController.java` | [013](adr/ADR-013-remocao-rotas-admin-delete-user-controller.md) · [014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md) · [016](adr/ADR-016-leitura-pii-restrita-admin.md) |
 | `user-service/controller/InternalUserController.java` | [006](adr/ADR-006-canal-interno-isolado.md) |
-| `user-service/services/RegisterService.java` | [012](adr/ADR-012-consentimento-lgpd-cadastro.md) · [015](adr/ADR-015-verificacao-email-cadastro.md) · [017](adr/ADR-017-revogacao-ativa-token.md) |
+| `user-service/services/RegisterService.java` | [012](adr/ADR-012-consentimento-lgpd-cadastro.md) · [015](adr/ADR-015-verificacao-email-cadastro.md) · [017](adr/ADR-017-revogacao-ativa-token.md) · [026](adr/ADR-026-revogacao-troca-senha-email.md) |
 | `user-service/services/EmailVerificationService.java` + outbox | [015](adr/ADR-015-verificacao-email-cadastro.md) |
 | `user-service/services/OutboxRetryService.java` | [015](adr/ADR-015-verificacao-email-cadastro.md) (emenda) · [022](adr/ADR-022-higiene-estado-persistente.md) |
 | `user-service/services/AuditService.java`, `domain/AuditLog.java` | [011](adr/ADR-011-trilha-auditoria-dado-pessoal.md) · [014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md) · [022](adr/ADR-022-higiene-estado-persistente.md) |
