@@ -77,10 +77,11 @@ B3) liga as duas, e ao trace no Zipkin. Detalhe do escopo/modelo em [SERVICOS.md
 
 | Classe                   | Camada                           | Destaque                                                                             |
 | ------------------------ | -------------------------------- | ------------------------------------------------------------------------------------ |
-| `UserController`         | user-service / controller        | entrada dos 9 endpoints                                                              |
+| `UserController`         | user-service / controller        | entrada dos 7 endpoints (1 INFO por rota)                                            |
 | `InternalUserController` | user-service / controller        | entrada do auth interno (e-mail mascarado)                                           |
+| `AdminController`        | user-service / controller        | entrada das rotas ADMIN com o **ID alvo** — quem operou sobre quem                    |
 | `RegisterService`        | user-service / service           | registro/update/desativar/deletar + rejeições (WARN)                                 |
-| `SearchService`          | user-service / service           | página/encontrado (INFO) + não encontrado (WARN)                                     |
+| `SearchService`          | user-service / service           | busca por ID/e-mail: encontrado (INFO) + inexistente ou inativo (WARN)               |
 | `AuthenticationService`  | user-service / service           | `auth` — enviando credenciais (INFO) / inexistente ou inativo (WARN)                 |
 | `CacheService`           | user-service / service           | put/evict dos 3 caches (DEBUG)                                                       |
 | `GlobalExceptionHandler` | user-service / exceptions        | 404/409/400 (WARN), 500 (ERROR), 403 relançado p/ Spring Security                    |
