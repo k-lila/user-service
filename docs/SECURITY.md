@@ -107,7 +107,9 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   leitura de PII de terceiro virou ADMIN-only —, mas **permanece no enum** para desserializar
   registros históricos. A *listagem* administrativa (`GET /v1/admin/users`) — desde o ADR-021 a
   única superfície que devolve PII de vários titulares de uma vez — **também é auditada**, com
-  `ADMIN_LIST_USERS` e **uma entrada por titular retornado** (fix do G13, ver a seção de gaps).
+  `ADMIN_LIST_USERS` e **uma entrada por titular retornado** — uma entrada agregada registraria a
+  leitura sem aparecer no histórico de titular algum, que é a pergunta que a trilha existe para
+  responder ([ADR-011](adr/ADR-011-trilha-auditoria-dado-pessoal.md)).
   `targetEmail` mascarado; `correlationId` = traceId B3 (o IP do cliente vive no log de borda do
   gateway, ADR-010). Escrita assíncrona e isolada de falha (dívida consciente detalhada na seção
   **LGPD**). **Consulta via API (ADR-014):** `GET /v1/admin/audit-logs` (feed geral) e
@@ -132,8 +134,10 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 - **Revogação ativa de token (ADR-017 — fecha o gap de revogação):** um **epoch de revogação por
   usuário** no Redis (`revoke:user:{userID}`, TTL ≥ vida do refresh token) é a fonte única compartilhada
   pelos três serviços. O user-service grava o epoch (junto das evictions de cache) em revogação de role
-  (`AdminService.updateUserRoles`), desativação (`RegisterService.deactivateUser`) e hard-delete
-  (`RegisterService.deleteUser`) — self **e** admin. Os resource servers rejeitam o token cujo `iat`
+  (`AdminService.updateUserRoles`), desativação (`RegisterService.deactivateUser`), hard-delete
+  (`RegisterService.deleteUser`) — self **e** admin — e **troca de senha ou de e-mail**
+  (`RegisterService.updateUser`, [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md); trocar só o
+  nome não revoga). O autor da troca também é deslogado: o epoch é por titular, não por sessão. Os resource servers rejeitam o token cujo `iat`
   precede o epoch: user-service via `RevocationTokenValidator` (somado aos validadores default no
   `JwtDecoder`); gateway via `RevocationWebFilter` (`GlobalFilter`) que inspeciona o access token da
   sessão e responde **401** + invalida a sessão (defesa em profundidade; o user-service é autoritativo).
@@ -176,6 +180,19 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   passaria a aceitar **bearer expirado**; a garantia é o par "exatamente um bean daquele tipo" **+**
   asserção comportamental de que esse bean rejeita `exp` no passado (a primeira, sozinha, passa no
   cenário catastrófico). Fail-open permanece para assinatura inválida/JWKS inalcançável.
+
+- **Headers de segurança HTTP no nginx do SPA** (`login-interface/nginx.conf`): o Spring Security já
+  emitia `X-Content-Type-Options`, `X-Frame-Options: DENY` e `Cache-Control`; o que faltava — e hoje o
+  nginx emite, com `always` — é `Strict-Transport-Security` (`max-age=31536000; includeSubDomains`),
+  `Content-Security-Policy` (`frame-ancestors 'none'`, `base-uri`/`form-action 'self'`),
+  `Referrer-Policy` e `Permissions-Policy`. **HSTS não dispara no gateway**: a request que chega a ele
+  é HTTP, porque o TLS termina na Cloudflare. **Dívida consciente:** `'unsafe-inline'` em `style-src`
+  é deliberado (o Tailwind injeta estilo inline), e o `location /swagger-ui` roda uma CSP própria que
+  relaxa também `script-src` — mitigado por a rota exigir sessão desde a
+  [ADR-020](adr/ADR-020-swagger-atras-da-sessao.md), então o relaxamento não vale para anônimos.
+  **Ao mexer:** um `location` com `add_header` próprio **descarta** todos os headers do nível
+  `server` — por isso o bloco do Swagger repete a lista inteira e o `location = /default-ui.css`
+  não tem nenhum. A armadilha está comentada em `login-interface/nginx.conf:15-17`.
 
 ## Gaps de segurança conhecidos (dívida aceita)
 
@@ -223,172 +240,16 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 | **TLS de transporte Redis ausente** | Aceito. A senha (`REDIS_PASSWORD`) protege o protocolo de comando mas trafega em claro no handshake `AUTH` na rede interna Docker. Mitigado por portas Redis/Sentinel nunca publicadas no compose base (prod-safe). | TLS no Redis (Redis 6+ `tls-port`) + rede Docker isolada em prod |
 | **ACLs por usuário Redis ausentes** | Aceito. Todos os clientes (gateway, auth-server, user-service, exporter) compartilham a mesma `REDIS_PASSWORD` sem segregação de permissões por serviço. | Criar usuários ACL dedicados por serviço com permissões mínimas (Redis 6+) |
 
-## Gaps recém-identificados (a tratar / não ratificados)
+## Gaps abertos, não ratificados
 
-Achados levantados na **auditoria de segurança ad hoc de 2026-06-21** (`security-reviewer`),
-**ainda não ratificados** como dívida aceita. Diferente da tabela acima — que registra escolhas
-**conscientes** — estes aguardam **correção** ou uma **decisão explícita de aceitação** (quando
-um item for tratado, mova-o para "controles ativos"; se for conscientemente aceito, mova-o para a
-tabela de dívida aceita). Os controles já ativos **não** regrediram; estes são gaps novos.
+Achados que **aguardam correção ou uma decisão explícita de aceitação**. Diferente da tabela
+acima — que registra escolhas conscientes —, um item daqui não deve morar aqui indefinidamente:
+ou se trata, ou se ratifica como dívida.
 
-> **G15 — Troca de senha não invalidava nada (era MÉDIO; identificado em 2026-08-07, FECHADO em
-> 2026-08-10 pela [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md)).**
-> `RegisterService.updateUser` apenas regravava o hash: **sem** epoch de revogação, **sem** invalidar
-> a sessão do IdP, **sem** invalidar a sessão do gateway e **sem** derrubar tokens vivos. Consequência:
-> **trocar a senha não expulsava quem já estava dentro** — inclusive um atacante com sessão ativa,
-> que é precisamente o caso de uso de trocar a senha.
->
-> **Correção:** `updateUser` grava o epoch quando a senha **ou** o e-mail muda (só o nome não revoga),
-> seguindo o padrão já usado em `updateUserRoles`/`deactivateUser`/`deleteUser`. As duas decisões de
-> produto que estavam pendentes foram tomadas no ADR-026: o **autor da troca também é deslogado** (o
-> epoch é por titular, não por sessão) e a **troca de e-mail entra**, o que derruba o desligamento de
-> ~1h (via P-01 da ADR-025) para ~segundos. Coberto por 6 testes unitários novos em
-> `RegisterServiceTest` — o arquivo declarava o mock `TokenRevocationService` desde sempre e **nunca o
-> verificava** — e por teste de integração com Redis real.
->
-> **Ressalva verificada contra o código, não contra documento:** o motivo logado na invalidação da
-> sessão do IdP continua sendo `NOT_FOUND`, **não** `REVOKED_EPOCH` — este último só é emitido no ramo
-> degradado do `AuthorizationEndpointRevalidationFilter` (user-service indisponível). A ambiguidade do
-> `NOT_FOUND` registrada na ADR-025 **permanece**: o epoch mudou a latência, não o motivo.
-
-> **G1 — IDOR de leitura de PII (ALTO): correção incompleta em 2026-06-21, fechado de fato em
-> 2026-08-04 ([ADR-016](adr/ADR-016-leitura-pii-restrita-admin.md) + [ADR-021](adr/ADR-021-remocao-listagem-publica-usuarios.md)).**
-> O ADR-016 tornou ADMIN-only as leituras por id/e-mail (`/v1/admin/users/{id}` e
-> `.../email/{email}`) e o gap foi declarado fechado — **prematuramente**. `GET /v1/users`
-> (`UserController.searchAll`, `hasRole('USER')`) continuou devolvendo `Page<UserResponseDTO>`
-> de **toda a base ativa** a qualquer usuário autenticado, **sem auditoria**: o mesmo desfecho
-> que o G1 descrevia, obtido com uma requisição paginada em vez de enumeração por id. A rota foi
-> removida pelo ADR-021, junto de `SearchService.searchAll` e `IUserRepository.findByActiveTrue`.
-> Agora sim: nenhuma superfície `USER` devolve PII de terceiro.
->
-> **Por que ficou aberto seis semanas — o que não repetir.** O ADR-016 enumerou as rotas que
-> conhecia em vez de varrer a superfície do controller. A partir daí três documentos (este, o
-> `CLAUDE.md` e as _Consequências_ do próprio ADR-016) passaram a afirmar que o gap estava
-> fechado, e o `BLOCK-004` chegou a ser marcado RESOLVIDO **com base nesses documentos, não no
-> código** — a documentação validando a si mesma. Só o `docs/SERVICOS.md` continuou correto,
-> porque documentava a rota. **Critério de "fechado" verifica-se contra o código, nunca contra
-> outro documento.**
-
-> **G3 — Sem headers de segurança HTTP (MÉDIO): corrigido (2026-07-28).** Correção de registro: não
-> era ausência total — o Spring Security já emitia `X-Content-Type-Options`, `X-Frame-Options: DENY`
-> e `Cache-Control`. Faltavam **CSP** (nunca é default) e **HSTS** (não dispara porque a request que
-> chega ao gateway é HTTP — o TLS termina na Cloudflare), e o nginx do SPA não emitia nenhum. Agora
-> `login-interface/nginx.conf` emite, com `always`: `Strict-Transport-Security`,
-> `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy` e `Permissions-Policy`.
-> **Dívida consciente embutida:** `'unsafe-inline'` em `style-src` é deliberado (o Tailwind injeta
-> estilo inline); e o `location /swagger-ui` roda uma CSP própria que relaxa também `script-src`,
-> porque o Swagger-UI usa script inline. A mitigação prevista era o Cloudflare Access na frente
-> dele — que nunca ficou ativo (exige cartão). **Atualização (2026-08-04, ADR-020):** a rota deixou
-> de ser pública — exige sessão OAuth2 —, então o relaxamento de `script-src` não vale mais para
-> anônimos.
-> Atenção ao mexer: no nginx, um `location` com `add_header` próprio **descarta** todos os headers
-> do nível `server`, por isso o bloco do Swagger repete a lista inteira.
-
-> **Canal interno do notification-service publicado em OpenAPI (MÉDIO): fechado (2026-08-04,
-> [ADR-021](adr/ADR-021-remocao-listagem-publica-usuarios.md)).** O módulo trazia
-> `springdoc-openapi-starter-webmvc-ui` no classpath e o YAML servido desligava apenas
-> `springdoc.swagger-ui.enabled` — `/v3/api-docs` seguia servindo a especificação de
-> `POST /internal/notifications/email-verification` a quem alcançasse a porta 8095 (publicada em
-> `0.0.0.0` no override de dev; o `InternalTokenFilter` cobre só `/internal/*`). Violava a
-> invariante do ADR-006. **Fechamento:** dependência removida do `pom.xml` — garantia de
-> *classpath*, não de propriedade. Desligar `springdoc.api-docs.enabled` por YAML seria
-> condicional: o serviço importa a config com `optional:configserver:` e a propriedade evapora se
-> o config-server estiver fora no boot. **Não reintroduzir a dependência.** Regra geral em
-> `docs/CONVENCOES.md`: serviço que publica doc esconde a rota interna com `@Hidden`; serviço que
-> não publica não tem a dependência.
-
-> **Lockout alimentado por indisponibilidade do user-service (MÉDIO, DoS auto-infligido): fechado
-> (2026-08-04, [ADR-021](adr/ADR-021-remocao-listagem-publica-usuarios.md)).** O
-> `UserClientFallbackFactory` lançava `UsernameNotFoundException` quando o circuito abria; o
-> `DaoAuthenticationProvider` a convertia em `BadCredentialsException` **sem encadear a causa**, o
-> publisher emitia `AuthenticationFailureBadCredentialsEvent` e o `LoginAttemptListener`
-> incrementava o contador — **cinco tentativas durante um outage bloqueavam o par (conta, IP) por
-> 15 minutos**. Um incidente de infraestrutura virava negação de serviço para o usuário legítimo,
-> e o comentário de intenção do próprio listener dizia o contrário. **Fechamento:** exceção
-> dedicada `UserServiceUnavailableException extends InternalAuthenticationServiceException`, que o
-> provider repropaga intacta e o publisher não mapeia — nenhum evento, nenhum contador. Detalhe
-> que **não pode regredir**: a exceção **não encadeia `cause`**, porque o failure handler a guarda
-> na sessão Redis e a cadeia Feign/Resilience4j não é serializável (a primeira versão do fix
-> quebrou 3 testes de integração com `SerializationException`). Guard: o teste de cruzamento
-> `naoDeveBloquearConta_apos5FalhasDuranteOutage`.
->
-> **Nuance obrigatória (correção pós-revisão, mesmo dia):** só a **indisponibilidade real** escapa
-> do contador. O **404** (titular inexistente ou inativo) é resultado de negócio e **conta no
-> lockout** — o `UserClientFallbackFactory` distingue as duas causas por
-> `instanceof FeignException.NotFound`. A primeira versão do fix não distinguia e tirou o
-> not-found do contador junto, enfraquecendo o atrito contra **enumeração de e-mails**. Ao mexer
-> aqui: `instanceof FeignException` **genérico** devolveria 500/503 ao lockout e reabriria o bug
-> original — só `NotFound` isola o caso de negócio.
-
-> **DoS por typo no login (MÉDIO, pré-existente): fechado (2026-08-04, ADR-021 pós-revisão).**
-> O 404 de "e-mail não encontrado" contava como falha do circuit breaker. Com `slidingWindowSize`
-> 10 e `failureRateThreshold` 50%, um punhado de logins com e-mail digitado errado abria o circuito
-> e derrubava o login de **todos** por 10s — sem nenhuma falha real de infraestrutura. Fechado com
-> `ignoreExceptions: [feign.FeignException$NotFound]` em `configs.user-service`
-> (`config-server/.../authorization-server.yml`), primeira ocorrência de `ignoreExceptions` no
-> projeto. **Não é substituto do `instanceof` no fallback:** `ignoreExceptions` só tira o 404 da
-> contabilidade do circuito; o fallback continua sendo invocado (o `getAndApplyFallback` do Spring
-> Cloud captura `Throwable` sem filtro). As duas correções são interdependentes.
-
-> **G14 — `/actuator/**` sem guarda fora do gateway (MÉDIO): fechado (2026-08-05).**
-> Só o gateway isolava o actuator numa porta de management própria. Nos outros três o
-> `/actuator/**` respondia na **porta de tráfego**: `permitAll()` explícito no
-> `authorization-server` (8082) e no `user-service` (8090), e no `notification-service` (8095) sem
-> guarda alguma — o serviço não tem Spring Security e o `InternalTokenFilter` cobre só
-> `/internal/*`. Qualquer container da rede (R-09) e, sob o override de dev, qualquer host da LAN
-> lia `/actuator/metrics` e `/actuator/prometheus`: topologia, hostnames internos e volume de
-> tráfego. **Fechamento:** `management.server.port: 8181` nos três (mesmo padrão e mesma porta do
-> gateway — containers distintos, sem colisão), porta **não publicada** em nenhum compose;
-> `infra/prometheus.yml` raspa `:8181` nos quatro; healthchecks do compose apontam para 8181.
-> **Medido, não deduzido:** antes, de qualquer container da rede, `/actuator/health` respondia
-> **200** anônimo nos três e `/actuator/prometheus` devolvia o dump completo de métricas; depois,
-> a porta de tráfego responde 404/500 e o corpo não carrega métrica alguma.
->
-> **Tentativa de defesa em profundidade que foi revertida — e por quê.** A intenção era também
-> tirar `"/actuator/**"` do `permitAll()` dos SecurityConfig, para que reverter a porta não
-> reabrisse o acesso anônimo em silêncio. **Não funciona:** a chain do contexto pai governa
-> também a porta de management, então remover a linha derruba o actuator na 8181 (user-service
-> 401 + `unhealthy`; auth-server 302 com healthcheck em falso-positivo). Revertido, e a linha
-> ficou **anotada nos três arquivos** como load-bearing. Registro do custo: a hipótese "essa linha
-> é resíduo inerte" veio de leitura estática e só caiu ao subir o sistema — é o tipo de premissa
-> que teste de unidade não pega, porque nenhum teste sobe a porta de management.
->
-> **Correção de escopo registrada junto.** O gap foi escrito nomeando **dois** serviços; o
-> `user-service` estava na mesma situação (`SecurityConfig:86`) e ficou de fora. O achado não era
-> novo — `security-reviewer` e `senso-critico` o registraram em `.claude/memory/decisions.md`
-> (2026-08-04, "G14 deve incluir o `user-service`") e ele **nunca chegou a este documento**. É a
-> variante do post-mortem do G1: lá a doc afirmava fechado o que o código deixava aberto; aqui a
-> doc descrevia um gap menor do que o real. Mesma lição — **o escopo de um gap verifica-se
-> varrendo a superfície no código, não relendo o texto do gap**.
->
-> **Severidade em perspectiva (não regredir a análise):** a exposure dos quatro serviços sempre
-> foi só `health, info, metrics, prometheus` — nunca `env`, `heapdump`, `threaddump` ou `beans`.
-> Não havia vazamento de segredo ou de memória; o gap era de reconhecimento. **Resíduo aceito:** a
-> porta de management não tem autenticação — o controle é ela não ser publicada e a rede Docker ser
-> interna. Numa rede compartilhada com terceiros (o que R-09 já cobre), isso não bastaria.
-> **Não afetado:** os discovery-servers seguem servindo o actuator na porta principal (9091/9092),
-> e o config-server tem controle próprio (HTTP Basic, com `/actuator/health` aberto).
-
-> **G13 — Listagem administrativa não auditada (MÉDIO): fechado (2026-08-05).**
-> `GET /v1/admin/users` devolvia PII paginada de vários titulares sem emitir nada na trilha LGPD
-> — só as leituras por id/e-mail auditavam. Desde o ADR-021 é a **única** superfície de listagem
-> do sistema, então um ADMIN (ou um token ADMIN comprometido) exfiltrava a base inteira sem
-> rastro. **Fechamento:** ação nova `ADMIN_LIST_USERS`, emitida por
-> `AuditService.recordBulkFromJwt` a partir do `AdminController.listAllUsers`.
->
-> **Decisão de modelagem — uma entrada por titular retornado, não uma agregada por requisição.**
-> O `AuditLog` tem `targetUserId` singular e o índice `(targetUserId, timestamp desc)` serve
-> `GET /v1/admin/users/{id}/audit-logs`; uma entrada agregada (`targetUserId=null`) registraria o
-> evento mas **não apareceria no histórico de titular algum** — ou seja, registraria a leitura sem
-> responder "quem acessou o *meu* dado?", que é a pergunta que a trilha existe para responder.
-> Guarda automatizada: `AuditLogIntegrationTest.listagemAdministrativa_deveAparecerNoHistoricoDeCadaTitular`.
->
-> **Dívida assumida no fechamento:** volume. Uma página no teto (`MAX_AUDIT_PAGE_SIZE=100`) grava
-> 100 entradas — num único `insert` em lote, mas numa coleção que segue **sem TTL** (dívida do
-> ADR-011, agora mais cara). Se a coleção crescer demais, a saída é TTL/arquivamento, **não**
-> voltar à entrada agregada. Os filtros aplicados (`active`/`name`/`email`) **não** são
-> registrados: exigiriam campo novo no schema, e os titulares alcançados já são o dado forense
-> relevante.
+> O histórico dos gaps já fechados (G1, G3, G10–G15 e correlatos) **não** vive mais neste
+> documento. Cada fechamento é rastreável pelo ADR correspondente (ADR-016/019/020/021/022/023/026)
+> e pelo `git log`. As lições que sobreviveram ao caso que as gerou estão em
+> [Como manter este documento](#como-manter-este-documento).
 
 | Gap | Severidade | Cenário de exploração | Caminho de correção |
 | --- | --- | --- | --- |
@@ -396,56 +257,6 @@ tabela de dívida aceita). Os controles já ativos **não** regrediram; estes s�
 | **G4 — CORS pattern curinga (risco operacional)** | BAIXO | `CORSConfig` usa `setAllowedOriginPatterns(allowedOrigins)` + `allowCredentials(true)`. Seguro hoje (default `localhost:5173`, não-wildcard), mas como vem de `CORS_ALLOWED_ORIGINS`, um pattern curinga setado por engano em prod vira exfiltração cross-origin **com credenciais**. | Validar/rejeitar pattern curinga quando `allowCredentials=true` |
 | **G8 — Sem invalidação de sessões concorrentes** | BAIXO | Não há limite/registro de sessões simultâneas; um usuário pode manter N sessões ativas e o logout encerra só a corrente. Combinado com a ausência de revogação ativa, sessões antigas não são revogáveis centralmente. | Limitar/registrar sessões concorrentes (Spring Session) |
 | **R-09 — Rede flat Docker (dívida aceita, ADR-019)** | BAIXO | Um container hostil na mesma rede Docker (`user-service-net`) alcança `gateway:8081` diretamente e pode forjar `X-Forwarded-*`, independentemente de `trusted-proxies` (que só protege contra peers externos) e do G10. Resíduo pré-existente — ADR-010 não cobre a rede interna. Mitigação atual: o modelo de ameaça assume que todos os containers da rede são do projeto. | Rede Docker isolada por serviço (network segmentation) em prod |
-
-> **G12 — `OAUTH_CLIENT_SECRET` servido publicamente pelo Swagger (ALTO): fechado (2026-08-04, [ADR-020](adr/ADR-020-swagger-atras-da-sessao.md)).**
-> `springdoc.swagger-ui.oauth.client-secret: ${OAUTH_CLIENT_SECRET}` no `gateway.yml` fazia o
-> springdoc materializar um `ui.initOAuth({... "clientSecret":"…"})` **literal** dentro de
-> `/swagger-ui/swagger-initializer.js` — recurso estático servido a qualquer anônimo enquanto a rota
-> foi pública. O segredo publicado era **idêntico** ao `secrets/OAUTH_CLIENT_SECRET`, ou seja, o do
-> cliente **confidential** do BFF: sua confidencialidade deixou de existir, restando só a lista de
-> `redirect_uri` e o `requireProofKey(true)` segurando a porta. **Não aparece** em
-> `/v3/api-docs/swagger-config` — só a leitura do `swagger-initializer.js` revela.
-> **Fechamento:** (a) bloco `springdoc.swagger-ui.oauth` removido inteiro — era supérfluo, o
-> "Try it out" autentica pela sessão do BFF (cookie `SESSION` + `tokenRelay()`); (b) segredo
-> **rotacionado** com re-seed direcionado do `gateway-client` e limpeza das sessões no Redis;
-> (c) `/swagger-ui/**` e `/v3/api-docs/**` saíram do `permitAll()` (ver G11).
-> **Lição para não repetir:** o risco de uma rota pública não é só o que você pretendeu publicar
-> nela — é o que qualquer configuração futura empurrar para dentro dela. O `ServedConfigSecretLeakTest`
-> (módulo config-server) é a guarda automatizada; ele falha se qualquer property `springdoc.*` de
-> qualquer YAML servido carregar `secret`/`password`/`token`.
-
-> **G11 — `/swagger-ui/*` e `/v3/api-docs/*` públicos: fechado (2026-08-04, [ADR-020](adr/ADR-020-swagger-atras-da-sessao.md)).**
-> Era dívida aceita por indisponibilidade do Cloudflare Access (Zero Trust exige cartão de crédito,
-> mesmo no free — decisão do operador é não cadastrar). Fechado **sem** o Access: os três matchers
-> saíram do `permitAll()` do `SecurityConfig` do gateway e passaram a exigir a sessão OAuth2 do
-> próprio BFF. O entry point virou `DelegatingServerAuthenticationEntryPoint` — 302 para
-> `/oauth2/authorization/gateway-client` **só** em `/swagger-ui/**` (navegação de browser; um 401
-> seco não daria caminho para autenticar), 401 no resto, inclusive `/v3/api-docs/**` (é XHR — um 302
-> para HTML faria o `swagger-client` parsear a tela de login como JSON).
-> **Não regredir:** devolver esses paths ao `permitAll()` reabre G11 **e** o vetor do G12.
-> Escolhido sobre `htpasswd` no nginx para não introduzir mais um segredo estático compartilhado.
-> **Consequência do fechamento:** a CSP relaxada do `location /swagger-ui` (com `'unsafe-inline'` em
-> `script-src`, registrada em G3) deixou de valer para rota pública.
-
-> **G10 — Portas do host publicadas na base do compose: fechado (2026-08-03, [ADR-019](adr/ADR-019-correcao-elos-login-hostname-unico.md)).** Os dois blocos `ports:` (`8081:8081` do gateway e `${WEB_HOST_PORT:-5173}:80` da interface) foram movidos para `docker-compose.override.yml`. A base prod-safe não publica mais nenhuma porta de aplicação no host — a premissa do ADR-010 é agora verdadeira na topologia base. G10 era pré-requisito do `trusted-proxies` (os dois controles são interdependentes: RFC1918 amplo seria inseguro com as portas abertas). **Dívida residual aceita:** rede flat Docker (R-09, adicionada na tabela abaixo).
-
-> **Gap de asseguramento da topologia de hostname único: fechado (2026-08-06, [ADR-023](adr/ADR-023-smoke-test-automatizado-login-hostname-unico.md)).**
-> Não era vulnerabilidade, e sim a **ausência de barreira**: os quatro elos do ADR-019 (Elo 2
-> `trusted-proxies`, Elo 3 `/login` e `/default-ui.css` no nginx, Elo 6 XFF reescrevendo
-> `remoteAddress`, BUG-001 CSRF do gateway barrando `POST /login`) foram **todos** descobertos ao
-> vivo, em produção — os controles ADR-010/018/019 só tinham verificação manual no browser, depois
-> do deploy. Nenhuma camada de teste exercitava a cadeia: unitários e `@WebMvcTest` batem no
-> controller, os Testcontainers nunca sobem o container `interface`, o `compose-validate` valida
-> sintaxe YAML, e o dev local vai direto a `localhost:8082`.
-> **Fechamento:** `infra/smoke-test/login-topology-smoke-test.sh` + job `smoke-test-login` no CI —
-> sobe a topologia de deploy (menos o `cloudflared`) e valida 5 asserções HTTP contra ela, a cada
-> push/PR. A mitigação originalmente proposta (checklist manual de smoke-test) foi **rejeitada**
-> por repetir o antipadrão que causou o Elo 1: depender de o operador lembrar de rodar algo — o
-> mesmo motivo pelo qual o `assert-env` existe como invariante forçada em vez de comentário.
-> **Escopo residual, de propósito:** R-09 (rede flat) e os CSRF latentes BUG-002/BUG-004/BUG-005
-> continuam fora — são riscos de outra natureza, não bugs de roteamento pegáveis por asserção HTTP
-> contra a topologia normal. Detalhes das asserções em
-> [docs/TESTES.md](TESTES.md#smoke-test-da-topologia-de-login-adr-023).
 
 **G9 — Scan transitivo de dependências pendente.** As versões diretas (Spring Boot 4.0.3 /
 Spring Cloud 2025.1.0 / Java 21) não têm CVE conhecida no patch level, mas o scan **transitivo**
@@ -458,7 +269,8 @@ repositórios com métodos derivados parametrizados) e **timing attack no token 
 e-mail** (G7 — a comparação ocorre sobre o **hash** SHA-256 no índice do Mongo, com token de 256
 bits de entropia; o `X-Internal-Token`, esse sim, usa `MessageDigest.isEqual` constant-time).
 
-### Melhorias abertas do `senso-critico` / `security-reviewer`
+## Melhorias abertas do `senso-critico` / `security-reviewer`
+
 
 Itens levantados nas revisões adversariais da ADR-025 (2026-08-09) e da ADR-014. **Nenhum é
 bloqueante**; todos foram deliberadamente não-corrigidos na tarefa em que apareceram. Migraram para
@@ -580,10 +392,27 @@ original. Detalhe e racional em [ADR-011](adr/ADR-011-trilha-auditoria-dado-pess
 
 - Ao **fechar** um gap, mova-o de "gaps" para "controles ativos" (ou remova) e registre em
   `.claude/memory/decisions.md`.
-- Um achado em **"Gaps recém-identificados (a tratar)"** tem dois destinos: ao ser **corrigido**
-  vira "controle ativo"; ao ser **conscientemente aceito** vira linha na tabela de "dívida aceita".
-  Não deixe um achado morar na seção "a tratar" indefinidamente — ou se trata, ou se ratifica.
+- Um achado em **"Gaps abertos, não ratificados"** tem dois destinos: ao ser **corrigido** vira
+  "controle ativo"; ao ser **conscientemente aceito** vira linha na tabela de "dívida aceita". Não
+  deixe um achado morar ali indefinidamente — ou se trata, ou se ratifica.
+- Ao fechar um gap, **não** deixe a narrativa do fechamento neste documento: o *porquê* vai para o
+  ADR e o *o quê* para o `git log`. Aqui fica só o estado corrente. Chegou-se a 40% do arquivo em
+  histórico de gaps já fechados, sob um cabeçalho que prometia pendência.
 - Ao **introduzir** dívida de segurança consciente, registre-a aqui com mitigação e caminho de
   saída — dívida não documentada é a que volta a morder.
 - Mudanças que afetem contrato/superfície de segurança seguem o fluxo com ADR
   (ver [docs/adr/](adr/) e [docs/CONVENCOES.md](CONVENCOES.md)).
+
+**Lições que sobreviveram aos gaps que as geraram** — preservadas na poda de 2026-08-11, quando o
+histórico dos fechamentos saiu daqui:
+
+- **Documentação pública pode servir segredo** (G12). O `initOAuth` do Swagger-UI publicava o
+  `OAUTH_CLIENT_SECRET` a qualquer anônimo. Ao auditar, pergunte o que a *doc* expõe, não só o que
+  a *API* expõe.
+- **Desligar por propriedade é garantia condicional; ausência de dependência é garantia de
+  classpath.** O notification-service servia `/v3/api-docs` do canal interno com o springdoc apenas
+  desativado por YAML — e a propriedade evapora se o config-server estiver fora no boot. A saída foi
+  remover a dependência do `pom.xml`; **não reintroduzir**.
+- **Não conserte por checklist manual** ([ADR-023](adr/ADR-023-smoke-test-automatizado-login-hostname-unico.md)).
+  A mitigação "o operador roda um smoke-test antes de subir" foi rejeitada por repetir o antipadrão
+  que causou o bug — depender de alguém lembrar. Virou job de CI.

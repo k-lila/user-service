@@ -15,8 +15,9 @@ de comprometimento fechava a porta sem tê-la fechado.
 
 O gap foi identificado durante a [ADR-025](ADR-025-revalidacao-estado-emissao.md) e deliberadamente
 mantido fora do escopo dela, para não misturar duas correções de segurança no mesmo commit. Ficou
-registrado como **G15** em [docs/SECURITY.md](../SECURITY.md) e no inventário das sete cópias do
-estado de autorização em [docs/CONVENCOES.md](../CONVENCOES.md).
+registrado como **G15** no `docs/SECURITY.md` da época — que hoje documenta só estado corrente — e
+no inventário das sete cópias do estado de autorização em
+[docs/CONVENCOES.md](../CONVENCOES.md), onde a lacuna consta como fechada por esta ADR.
 
 Duas perguntas ficaram abertas na ocasião, ambas de produto, e são o que este ADR resolve:
 

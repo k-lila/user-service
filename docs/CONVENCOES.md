@@ -90,7 +90,7 @@ tinha nenhum, e sozinha refabricava credencial nova e limpa a partir de estado o
 impede a oitava cópia de entrar, e impede menos ainda que a lacuna já existente seja esquecida):
 
 - ~~**Troca de senha não invalida nada.**~~ **Fechada em 2026-08-10 pela
-  [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md)** (gap G15). `RegisterService.updateUser`
+  [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md).** `RegisterService.updateUser`
   grava o epoch de revogação quando a senha **ou** o e-mail muda, derrubando as cópias #4 e #5 — e,
   por consequência, a #7 no `RevocationWebFilter` e a #3 na re-derivação da ADR-025. Trocar só o nome
   não revoga. O autor da troca também é deslogado (o epoch é por titular, não por sessão).

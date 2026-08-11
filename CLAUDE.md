@@ -337,8 +337,11 @@ Gaps **ativos** (dívida consciente — não regrida os controles existentes):
 | CORS curinga operacional + sessões concorrentes | Achado de auditoria (BAIXO), **não ratificado** |
 | Scan transitivo de dependências pendente | Achado de auditoria, **não ratificado** |
 
-Gaps **fechados** (G1, G3, G10–G15, chave JWK, TLS em prod, revogação ativa, ingress versionadas)
-estão detalhados em `docs/SECURITY.md`, cada um com o que exatamente foi feito.
+Gaps **fechados** (IDOR de leitura de PII, headers HTTP, portas na base do compose, Swagger
+público, actuator sem guarda, listagem admin não auditada, troca de senha sem revogação, chave JWK,
+TLS em prod) não são mais narrados no `docs/SECURITY.md`, que documenta **estado corrente**: o
+*porquê* de cada fechamento está no ADR correspondente (016/019/020/021/022/023/026) e o *o quê*, no
+`git log`.
 
 > **Ao fechar um gap ou introduzir dívida:** atualize `docs/SECURITY.md` e
 > `.claude/memory/decisions.md`. E lembre da regra que governa as outras: **o critério de "fechado"

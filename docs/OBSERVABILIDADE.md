@@ -48,9 +48,9 @@ Endpoint `/actuator/prometheus`, scrape a cada **5s**. Configuração em `infra/
 
 Duas razões, ambas a preservar:
 
-1. **A porta 8181 é o controle de acesso do actuator.** O G14 moveu o actuator para uma porta que o
-   compose nunca publica — ver [docs/SECURITY.md](SECURITY.md). Apontar o scrape para a porta de
-   tráfego reabriria a superfície.
+1. **A porta 8181 é o controle de acesso do actuator.** O actuator vive numa porta de management
+   que o compose nunca publica — ver [docs/SECURITY.md](SECURITY.md) § Controles ativos. Apontar o
+   scrape para a porta de tráfego reabriria a superfície.
 2. **`dns_sd_configs` é o que dá um target por réplica** (ADR-024). Com `static_configs`, o nome do
    serviço resolvia para **uma** réplica por scrape e, a partir de N > 1, as séries alternavam entre
    processos a cada 5s — métricas que pareciam ruído e eram amostragem trocando de sujeito.

@@ -43,8 +43,9 @@ Você **não edita `src/`**. `Bash`/`Grep` são para leitura e diagnóstico
 - Claims (`userID`, `roles`, `permissions`) derivados corretamente, não confiáveis do cliente?
 - **IDOR / authz por-titular:** rota de leitura por `{id}`/e-mail de **terceiro** (ex.:
   `GET /v1/users/{id}`, `/email/{email}`) valida titularidade (solicitante = titular) ou é
-  ADMIN-only? Um `USER` consegue ler PII de outro titular? (auditar ≠ bloquear — ver **G1** em
-  `docs/SECURITY.md`).
+  ADMIN-only? Um `USER` consegue ler PII de outro titular? (auditar ≠ bloquear — ver
+  [ADR-016](../../docs/adr/ADR-016-leitura-pii-restrita-admin.md) e
+  [ADR-021](../../docs/adr/ADR-021-remocao-listagem-publica-usuarios.md)).
 
 ### 2 — Canal interno e segredos
 - `/internal/users/email/{email}` segue fora do gateway/Swagger e protegido por
@@ -58,8 +59,8 @@ Você **não edita `src/`**. `Bash`/`Grep` são para leitura e diagnóstico
 - Cookies `SESSION`/`AUTHSESSION` sem colisão? Lockout anti-brute-force
   (`LoginAttemptService`) intacto e dependente de `X-Forwarded-For` confiável?
 - **Headers de segurança HTTP** presentes (CSP, `X-Frame-Options`/`frame-ancestors`, HSTS,
-  `X-Content-Type-Options`) no nginx do front e/ou no gateway? (ausência hoje = **G3** em
-  `docs/SECURITY.md`).
+  `X-Content-Type-Options`) no nginx do front e/ou no gateway? (a lista ativa está em
+  `docs/SECURITY.md` § Controles ativos; ausência é regressão).
 
 ### 4 — Dependências e premissas de prod
 - Bump de dependência de segurança não regrediu versão nem introduziu CVE?

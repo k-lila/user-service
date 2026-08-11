@@ -218,7 +218,7 @@ caro de manter e mais frágil sem cobrir nada a mais.
 
 | # | Asserção | Elo/bug coberto |
 | - | -------- | --------------- |
-| (e) | a base do compose não publica `gateway`/`interface` (checagem estática, roda antes de subir a stack) | G10 |
+| (e) | a base do compose não publica `gateway`/`interface` (checagem estática, roda antes de subir a stack) | ADR-019 |
 | (a) | `GET /login` devolve o form do IdP **e não** o `index.html` do SPA | Elo 3 |
 | (b) | `GET /default-ui.css` é `text/css` | Elo 3 |
 | (c) | `POST /login` (com `_csrf` real do auth-server) não é 403 e redireciona para `/login?error` | BUG-001 |
