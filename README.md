@@ -10,6 +10,10 @@ O front-end segue o padrão **BFF**: o gateway é o cliente OAuth2, o SPA usa se
 
 ---
 
+https://github.com/user-attachments/assets/4fc78b99-18c2-49ad-ac7c-8c2349b6665c
+
+---
+
 ## Arquitetura
 
 ```
