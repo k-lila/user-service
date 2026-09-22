@@ -8,7 +8,7 @@
 # hostnames eram criados — exige cadastro de cartão de crédito mesmo no plano free. O operador não
 # vai cadastrar. O modo *locally-managed* (`cloudflared tunnel create` pela CLI) não passa pelo
 # dashboard: a autenticação é o credentials-file JSON emitido pelo `create`, e o roteamento da
-# borda é ESTE arquivo. Roteiro de criação no README § 2b.
+# borda é ESTE arquivo. Roteiro de criação no docs/RECEITA.md, Caminho B.
 #
 # SIGILO (política do projeto): o domínio real NÃO aparece neste repositório — os valores concretos
 # vivem só no .env (gitignorado). É por isso que a única regra é o catch-all, sem `hostname:`, e

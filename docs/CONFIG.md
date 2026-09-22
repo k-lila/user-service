@@ -66,7 +66,7 @@ REDIS_PASSWORD=$(openssl rand -hex 32) OAUTH_CLIENT_SECRET=... infra/secrets/gen
 > não reconcilia nada: sobrescreve `./secrets/` inteiro e, além de trocar por defaults de dev toda
 > senha não exportada, **regera o par JWK** (o `gen-keys.sh` roda `openssl genpkey` sempre). A
 > chave de assinatura muda, todo access/refresh token em circulação deixa de ser verificável e
-> todos os usuários logados caem. É por isso que o roteiro do [README § 2b](../README.md) termina
+> todos os usuários logados caem. É por isso que o roteiro do [RECEITA.md, Caminho B](RECEITA.md) termina
 > em `down -v` + `up` — ele descarta o estado junto. Para só acrescentar o arquivo que falta:
 >
 > ```bash
@@ -248,7 +248,7 @@ CORS na borda + configurável por ambiente. Cada serviço lê a property `cors.a
 
 O overlay de deploy é dirigido por **uma única variável**: a origem pública. Sob a topologia de
 **hostname único** (o túnel entrega em `interface:80`, o nginx do SPA, que faz proxy same-origin ao
-gateway), todas as URLs de front-channel derivam dela. Roteiro de subida no [README § 2b](../README.md).
+gateway), todas as URLs de front-channel derivam dela. Roteiro de subida no [RECEITA.md, Caminho B](RECEITA.md).
 
 | Variável        | Onde é lida                        | Default | Observação                                                                                       |
 | --------------- | ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------ |

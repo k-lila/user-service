@@ -1002,8 +1002,8 @@ docs/
 .claude/
 ├── agents/          # 7 papéis: product-manager, senso-critico, techlead, qa-tester,
 │                    #   security-reviewer, dependency-steward, report-writer
-├── skills/          # 5 skills de conhecimento + 5 invocáveis (check-compat, new-adr,
-│                    #   security-scan, suggest-tests, write-readme)
+├── skills/          # 5 skills de conhecimento + 4 invocáveis (check-compat, new-adr,
+│                    #   security-scan, suggest-tests)
 ├── workflows/       # feature · bugfix · hotfix · new-service · dependency-update
 ├── memory/          # context.json · decisions.md · blockers.md (estado entre sessões)
 └── settings.local.json

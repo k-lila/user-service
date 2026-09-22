@@ -42,7 +42,9 @@ usa sessão por cookie e **não** manuseia JWT.
 
 | Documento | Conteúdo |
 | --- | --- |
-| [README.md](README.md) | pré-requisitos e execução (público humano) |
+| [README.md](README.md) | apresentação do projeto (público humano) |
+| [docs/INFO.md](docs/INFO.md) | resumo geral: visão, arquitetura, estrutura de pastas, CI, testes |
+| [docs/RECEITA.md](docs/RECEITA.md) | passo a passo de execução: pré-requisitos, local, deploy via túnel |
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | camadas de cada serviço, fluxos ponta a ponta, contratos, árvore de arquivos anotada |
 | [docs/SERVICOS.md](docs/SERVICOS.md) | referência da API: endpoints, schema MongoDB, cache |
 | [docs/CONFIG.md](docs/CONFIG.md) | variáveis de ambiente, Docker secrets, limites de recursos |
@@ -128,7 +130,7 @@ O que saber antes de mexer no compose — detalhe em [docs/CONFIG.md](docs/CONFI
 **Deploy via Cloudflare Tunnel:** named tunnel com domínio fixo, modo locally-managed, topologia
 de **hostname único** — o túnel entrega em `interface:80` (nginx do SPA), que faz proxy same-origin
 de 9 paths ao gateway. Nem gateway nem auth-server ficam alcançáveis de fora. Roteiro de subida em
-[README § 2b](README.md); ingress versionadas em `infra/cloudflared/config.yml`; racional em
+[docs/RECEITA.md, Caminho B](docs/RECEITA.md); ingress versionadas em `infra/cloudflared/config.yml`; racional em
 [docs/SECURITY.md](docs/SECURITY.md) e ADR-018/019/020.
 
 ### Ordem manual (sem Docker)
@@ -372,4 +374,4 @@ pipeline linear.
 rodadas de revisão sem aprovação, escale ao humano.
 
 Estado persistente em `.claude/memory/`; workflows em `.claude/workflows/`. Skills invocáveis:
-`/suggest-tests`, `/check-compat`, `/security-scan`, `/new-adr`, `/write-readme`.
+`/suggest-tests`, `/check-compat`, `/security-scan`, `/new-adr`.
