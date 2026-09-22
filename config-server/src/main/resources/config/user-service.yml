@@ -133,7 +133,13 @@ eureka:
     lease-expiration-duration-in-seconds: 30
 
 logging:
+  # O CONSOLE_LOG_PATTERN do Boot tem três slots de identidade: o `pattern.level` (abaixo), o
+  # `%esb(){APPLICATION_NAME}` e o `%correlationId`. Os dois últimos repetem o que o primeiro já
+  # imprime — o `%correlationId` entra sozinho porque o Micrometer Tracing liga
+  # `logging.expect-correlation-id`. Desligar os dois deixa uma única correlação por linha.
+  include-application-name: false
   pattern:
+    correlation: ""
     level: "%5p [${spring.application.name:},traceId=%X{traceId:-},spanId=%X{spanId:-}]"
 
 springdoc:

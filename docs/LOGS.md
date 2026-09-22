@@ -38,7 +38,9 @@ Padrão em **pipe**, fácil de filtrar via grep. Estrutura: `| [VERBO_HTTP] | a�
 
 ## Exemplos de linha
 
-O prefixo `%5p [app,traceId=...,spanId=...]` vem do `logging.pattern.level` (ver abaixo); a mensagem segue o padrão pipe:
+O prefixo `%5p [app,traceId=...,spanId=...]` vem do `logging.pattern.level` (ver abaixo); a mensagem segue o padrão pipe.
+Os outros dois slots de identidade do `CONSOLE_LOG_PATTERN` do Boot — `%esb(){APPLICATION_NAME}` e `%correlationId` —
+estão desligados de propósito, senão nome do serviço e trace saem duas vezes na mesma linha:
 
 ```
  INFO [user-service,traceId=a1b2...,spanId=c3d4...]  | GET | usuário autenticado | ID: 665f1c2e8a3b4c0012abcd34
@@ -52,7 +54,11 @@ DEBUG [user-service,traceId=...,spanId=...]          | cache usersById | put | I
 
 ## Correlação entre serviços
 
-- O `logging.pattern.level` (definido nos `*.yml` do config-server para user-service, gateway e authorization-server) inclui `traceId`/`spanId` do Micrometer.
+- O `logging.pattern.level` (definido nos `*.yml` do config-server para os quatro módulos com tracing — user-service,
+  authorization-server, gateway e notification-service) inclui `traceId`/`spanId` do Micrometer.
+- Os mesmos quatro `*.yml` desligam a duplicata do padrão do Boot: `logging.include-application-name: false` remove o
+  `[app]` avulso e `logging.pattern.correlation: ""` remove o `%correlationId` (`[traceId-spanId]`), que o Micrometer
+  Tracing liga sozinho via `logging.expect-correlation-id`. A correlação em si não muda — só deixa de ser impressa duas vezes.
 - Esses IDs são propagados via **B3/Zipkin** de ponta a ponta — inclusive no salto Feign auth-server → user-service, graças ao `FeignTracingConfig` (a instrumentação automática do feign-micrometer registrava o span cliente mas não emitia os headers B3; o interceptor injeta o contexto corrente, evitando o trace órfão no user-service).
 - O gateway é reativo (WebFlux): o `traceId`/`spanId` no MDC só é preenchido com `spring.reactor.context-propagation: auto` (no `gateway.yml`). Sem isso o log da borda sai com `traceId=` vazio.
 - O gateway também loga o `X-Correlation-ID` na borda (`CorrelationIdFilter`), **semeado a partir do traceId B3 corrente** (fallback UUID) — um id de correlação único alinhado ao trace.
