@@ -258,8 +258,10 @@ O `TokenCustomizerConfig.java` (authorization-server) injeta os seguintes claims
 
 ## Schema MongoDB (coleção `notificationOutbox`)
 
-Outbox sem poller (ADR-015) — criado e processado no mesmo evento que o originou (cadastro ou
-reenvio), sem `@Scheduled`/scan periódico. **Dois** índices compostos:
+Outbox (ADR-015) — criado e despachado no mesmo evento que o originou (reenvio self/admin). O que
+fica para trás (`FAILED`, ou `PENDING` além do backoff) é reprocessado pela varredura periódica do
+`OutboxRetryService` (`@Scheduled`, 5 min, lock `SETNX` fail-closed — emenda do ADR-015), que
+supera o registro e emite **token novo**. **Dois** índices compostos:
 `(userId, type, status)` e `(type, status, createdAt)` — o segundo existe porque o primeiro tem
 `userId` no prefixo e não serve a varredura do `OutboxRetryService`, que filtra por `(type, status)`
 sem conhecer o titular; sem ele, COLLSCAN da coleção inteira.
@@ -288,7 +290,9 @@ sem conhecer o titular; sem ele, COLLSCAN da coleção inteira.
 ## Schema MongoDB (coleção `auditLogs`)
 
 Trilha de auditoria de acesso a dado pessoal (LGPD, ADR-011) — distinta do log operacional SLF4J.
-Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetUserId, timestamp desc)`.
+Append-only; escrita assíncrona pelo `AuditService`. Índices: `target_ts_idx`
+`(targetUserId, timestamp desc)` para o histórico por titular, `ts_idx` `(timestamp desc)` para o
+feed geral, e `purgeAt_ttl` (TTL *expire-at*, retenção — ADR-022).
 
 ```js
 {
@@ -304,19 +308,22 @@ Append-only; escrita assíncrona pelo `AuditService`. Índice composto `(targetU
   actorRoles: [String],      // null quando SYSTEM
   targetUserId: String,      // titular do dado (quando aplicável)
   targetEmail: String,       // mascarado (ex: "f***@email.com"); null quando não aplicável
-  correlationId: String      // traceId B3, para correlação com logs/Zipkin
+  correlationId: String,     // traceId B3, para correlação com logs/Zipkin
+  purgeAt: ISODate           // TTL index (expireAfterSeconds: 0) — timestamp + 180d default
+                             //   (app.audit.retention, ADR-022); ausente em entradas legadas,
+                             //   que por isso nunca expiram
 }
 ```
 
-> Leitura do próprio dado (`/me`, consulta ao próprio ID/email) **não** gera trilha. Sem TTL — ver
-> ADR-011. A consulta da trilha via API existe desde o ADR-014: `GET /v1/admin/audit-logs` (feed
+> Leitura do próprio dado (`/me`, consulta ao próprio ID/email) **não** gera trilha. Retenção de
+> 180 dias por documento (`purgeAt`, [ADR-022](adr/ADR-022-higiene-estado-persistente.md)). A consulta da trilha via API existe desde o ADR-014: `GET /v1/admin/audit-logs` (feed
 > geral) e `GET /v1/admin/users/{id}/audit-logs` (por titular), ambos ADMIN-only e paginados.
 >
 > **`ADMIN_LIST_USERS` grava uma entrada por titular retornado** (fix G13, 2026-08-05), não uma
 > entrada agregada por requisição: com `targetUserId` nulo a listagem não apareceria no histórico
 > de titular algum — e "quem acessou o meu dado?" é a pergunta que a trilha existe para responder.
 > O custo é volume: uma página no teto (`MAX_AUDIT_PAGE_SIZE=100`) grava 100 entradas, num único
-> `insert` em lote, numa coleção que segue sem TTL. Página vazia não grava nada.
+> `insert` em lote, retidas pelos mesmos 180 dias. Página vazia não grava nada.
 
 ## Estratégia de cache (Redis)
 
@@ -353,6 +360,17 @@ pelo guard de refresh do auth-server. **Comportamento:** um access token cujo `i
 epoch é rejeitado com **401**, e o grant `refresh_token` de um titular revogado falha com
 `invalid_grant`. Fail-open se o Redis estiver indisponível.
 
+Demais famílias de chave no mesmo Redis:
+
+| Chave | Dono | Papel |
+| --- | --- | --- |
+| `resend_verification:{sha256(emailLower)}` | user-service | Contador do limite de reenvio por conta-alvo (janela fixa, 1h) |
+| `outbox_retry:lock` | user-service | Lock `SETNX` da varredura do `OutboxRetryService` (TTL 2× o intervalo) |
+| `login_fail:{sha256(emailLower\|ip)}` | auth-server | Contador do lockout por par (conta, IP) |
+| `oauth_state_purge:lock` | auth-server | Lock `SETNX` da purga do estado OAuth (TTL 2× o intervalo) |
+| `gateway:session:*` · `authserver:session:*` | gateway · auth-server | Sessões (ADR-007) |
+| `request_rate_limiter.{routeId.chave}.*` | gateway | Buckets do `RedisRateLimiter` |
+
 > **A revogação sozinha NÃO força re-autenticação — corrigido em 2026-08-09 (ADR-025).** As três
 > checagens comparam `iat < epoch`, e enquanto a sessão do IdP vivesse o `/oauth2/authorize`
 > reemitia credencial com `iat = agora`: todas aprovavam **por construção**. Quem força a
@@ -378,7 +396,9 @@ Todos os erros retornam `Content-Type: application/problem+json` com o schema ab
 | 400    | `Bad Request`           | Argumento inválido (`IllegalArgumentException`)                 |
 | 400    | `Validation Failed`     | Bean Validation (`@Valid`) — inclui propriedade extra `errors`  |
 | 400    | `Bad Request`           | Token de verificação inválido/expirado/já usado (`InvalidVerificationTokenException`) — mensagem genérica, anti-enumeração |
+| 403    | —                       | `AccessDeniedException` do `@PreAuthorize` — relançada para o Spring Security responder (sem o handler viraria 500) |
 | 404    | `Not Found`             | Entidade não encontrada (`DomainEntityNotFound`)                |
+| 404    | `Not Found`             | Path sem handler (`NoResourceFoundException`) — `detail` fixo: `"Recurso não encontrado"` (ex.: `/actuator/**` na porta de tráfego) |
 | 405    | `Method Not Allowed`    | Método não suportado no path — `detail` fixo: `"Método não suportado"` (ADR-021; sem este handler todo 405 virava 500) |
 | 409    | `Conflict`              | E-mail já cadastrado — `detail` fixo: `"Email already registered"` |
 | 409    | `Conflict`              | Auto-revogação de `ADMIN` pelo próprio ator (`SelfRoleRevocationException`) — `detail` **dinâmico** |

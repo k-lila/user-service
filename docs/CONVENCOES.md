@@ -116,8 +116,36 @@ impede a oitava cópia de entrar, e impede menos ainda que a lacuna já existent
 
 ## Configuração centralizada
 
-- Segredos vêm do **config-server via env**. Segredos hardcoded são **gaps conhecidos**
-  (ver [docs/SECURITY.md](SECURITY.md)), não o padrão — não introduza novos.
+- Configuração não-sensível vem do **config-server** (`classpath:/config`); **segredos vêm de
+  Docker secrets** montados em `/run/secrets/` e resolvidos pelo `configtree:` do
+  `SPRING_CONFIG_IMPORT` ([ADR-009](adr/ADR-009-base-secrets-native-docker-secrets.md)) — nunca
+  do `.env`. Segredos hardcoded são **gaps conhecidos** (ver [docs/SECURITY.md](SECURITY.md)),
+  não o padrão — não introduza novos.
+
+## Estado local tira o serviço do eixo replicável (ADR-024)
+
+Os quatro serviços de domínio pertencem ao **eixo replicável** (`--scale <svc>=N`) porque nenhum
+deles guarda estado no processo: cache no Redis (`RedisCacheManager`, nunca Caffeine), sessão no
+Redis, estado OAuth no Postgres, e os dois `@Scheduled` — `OutboxRetryService` (user-service) e
+`OAuthStatePurgeService` (auth-server) — protegidos por lock `SETNX` fail-closed; sem ele, N
+réplicas mandam N e-mails (ou N `DELETE` concorrentes) por ciclo.
+
+Isso se perde em silêncio: nada no build acusa, e uma réplica só revela o problema em produção.
+Ao introduzir código novo em qualquer um dos quatro, verifique que você **não** acrescentou:
+
+- `ConcurrentHashMap`, `Caffeine` ou `static Map` como estado em bean de serviço;
+- `@Scheduled` sem lock distribuído;
+- `@PostConstruct` ou `CommandLineRunner` que escreva no banco.
+
+Qualquer um dos três tira o serviço do eixo replicável. Se for inevitável, o eixo do componente
+muda e isso precisa ser declarado no ADR-024.
+
+**A exceção existente, e por que ela é segura:** o seed do `gateway-client` em
+`OAuth2ClientConfig` escreve no Postgres no boot, com N réplicas subindo juntas. Ele é
+check-then-act e a corrida o atravessa — quem impede a duplicata é o **índice único sobre
+`client_id`**, e o seed absorve a violação e relê o registro
+([ADR-022](adr/ADR-022-higiene-estado-persistente.md)). Escrita no boot só é aceitável com uma
+garantia desse tipo **no banco**, nunca no código.
 
 ## Cookies de sessão distintos por serviço (ADR-007)
 
@@ -202,3 +230,13 @@ arquivos por **caminho relativo** (ex.: `user-service/src/main`, `docs/adr/TEMPL
 - **ADR-005** — chave JWK persistente
 - **ADR-006** — canal interno isolado
 - **ADR-007** — sessão Redis + cookies distintos
+- **ADR-009** — base secrets-native (Docker secrets)
+- **ADR-012** — consentimento LGPD no cadastro
+- **ADR-013** — remoção das rotas admin de DELETE do `UserController`
+- **ADR-015** — verificação de e-mail no cadastro
+- **ADR-017** — revogação ativa de token
+- **ADR-021** — remoção da listagem pública de usuários
+- **ADR-022** — higiene do estado persistente
+- **ADR-024** — elasticidade, piso mínimo e eixos de escala
+- **ADR-025** — re-derivação do estado do titular na emissão
+- **ADR-026** — revogação na troca de senha ou e-mail

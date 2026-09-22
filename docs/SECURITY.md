@@ -53,10 +53,13 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   > em `/actuator/health` e `/actuator/prometheus` na 8181 (container `unhealthy`, Prometheus para
   > de raspar); e no authorization-server → **302** para `/login`, com o agravante de o healthcheck
   > continuar **passando** (`curl -f` não falha em 3xx) — falso healthy, métricas mudas.
-- **Rate limiting no gateway** (token bucket via Redis): LOW (registro/IP), MED (OAuth2/IP),
-  HIGH (autenticados/user).
+- **Rate limiting no gateway** (token bucket via Redis): LOW por IP (registro, verify-email,
+  `/default-ui.css`), MED por IP (`/oauth2/**`, `/login`, `/connect/**`), MED por usuário
+  (`/v1/admin/**`), HIGH por usuário (demais `/v1/users/**`). Tabela completa em
+  [ARQUITETURA.md § 4.3](ARQUITETURA.md#43-gateway--a-borda).
 - **CSRF no gateway** habilitado (`CookieServerCsrfTokenRepository`, cookie `XSRF-TOKEN`;
-  `/v1/users/register` isento); entry point devolve **401** (não 302).
+  `/v1/users/register` e `POST /login` isentos — pré-sessão); entry point devolve **401** (não
+  302), exceto `/swagger-ui/**`, que redireciona ao login (ADR-020).
 - **BCrypt** (custo 10) para hash de senha.
 - **Cookies de sessão distintos** por serviço (ADR-007) — evita colisão de sessão. Ambos
   honram a flag `Secure` parametrizável (`app.cookie.secure`/`APP_COOKIE_SECURE`): gateway
@@ -114,8 +117,8 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
   gateway, ADR-010). Escrita assíncrona e isolada de falha (dívida consciente detalhada na seção
   **LGPD**). **Consulta via API (ADR-014):** `GET /v1/admin/audit-logs` (feed geral) e
   `GET /v1/admin/users/{id}/audit-logs` (por titular), ambos ADMIN-only e paginados com teto de
-  100 itens/página — fecha **parcialmente** a dívida "sem endpoint de consulta" do ADR-011 (a
-  trilha ainda não tem TTL/retenção definida).
+  100 itens/página — fecha a dívida "sem endpoint de consulta" do ADR-011. **Retenção:** 180 dias
+  por documento (`purgeAt` + índice TTL *expire-at*, `AUDIT_LOG_RETENTION`, ADR-022).
 - **Gestão de roles via API (ADR-014):** `PATCH /v1/admin/users/{id}/roles` (ADMIN-only,
   `@PreAuthorize` no user-service) promove/revoga `ADMIN`/`USER`, elimina a necessidade de
   manipular o MongoDB diretamente em produção e audita `ROLE_GRANT`/`ROLE_REVOKE`. **Bloqueio de
@@ -232,7 +235,7 @@ Em modo manutenção, o objetivo aqui é duplo: **não regredir** os controles e
 | Gap | Estado / mitigação atual | O que falta para prod |
 | --- | --- | --- |
 | **Botão *Authorize* do Swagger inerte** | Resíduo do ADR-020. O `securityScheme` OAuth2 do `OpenAPIConfig` continua no doc (documenta que os endpoints exigem OAuth2), então o botão aparece — mas o bloco `springdoc.swagger-ui.oauth` foi removido, e sem `client-id`/secret preenchidos ele não completa o fluxo. O `Try it out` funciona pela sessão do BFF, não pelo botão. | Nada, se o botão for aceitável como inerte; alternativa é remover o `securityScheme` (perde informação do doc) ou registrar um cliente público `swagger-ui` dedicado |
-| **SMTP placeholder — não abrir para cadastro de terceiros** | **Bloqueante para usuário real.** Os secrets SMTP são placeholders de dev (`localhost:1025`, sem auth): o e-mail de verificação não sai. O default é inalcançável **por construção** sob Docker — `localhost` dentro do container é o próprio `notification-service`, e não há MailHog/Mailpit no compose nem override de SMTP em nenhum overlay; um MailHog no host também não seria alcançado. Confirmado empiricamente (2026-08-04): `POST /internal/notifications/email-verification` → **502**, `ConnectException: Connection refused` em `SMTPTransport.openServer`. Toda a cadeia até o SMTP está sadia (Eureka UP, `X-Internal-Token` OK, controller e `EmailService` executam) — o único elo quebrado é a conexão TCP. Como o login exige `emailVerified` após 24h de grace period (ADR-015) e o reenvio é o **único** caminho de envio, uma conta de terceiro fica permanentemente inacessível. **Paradoxo circular do self-service:** passada a janela, `POST /v1/users/resend-verification` é inalcançável — resolve o titular pelo `userID` do JWT e exige sessão, mas o login já está bloqueado por `DisabledException`; sobra **só** o reenvio administrativo (`POST /v1/admin/users/{id}/resend-verification`). Aceito porque o deploy é para teste pelo próprio operador. **Efeito operacional:** o `MailHealthIndicator` faz `testConnection()` a cada scrape → `/actuator/health` responde **503** e o container fica permanentemente `unhealthy`. Não impede o Feign (o Eureka não usa o actuator health por padrão, e o serviço segue `UP` no registro), mas um `depends_on: condition: service_healthy` futuro travaria a subida. | Provedor SMTP real nos 6 secrets (`SMTP_*`) antes de qualquer cadastro externo; para dev, um `mailpit` no compose com `SMTP_HOST` = nome do serviço (nunca `localhost`) |
+| **SMTP placeholder — não abrir para cadastro de terceiros** | **Bloqueante para usuário real.** Os secrets SMTP são placeholders de dev (`localhost:1025`, sem auth): o e-mail de verificação não sai. O default é inalcançável **por construção** sob Docker — `localhost` dentro do container é o próprio `notification-service`, e não há MailHog/Mailpit no compose nem override de SMTP em nenhum overlay; um MailHog no host também não seria alcançado. Confirmado empiricamente (2026-08-04): `POST /internal/notifications/email-verification` → **502**, `ConnectException: Connection refused` em `SMTPTransport.openServer`. Toda a cadeia até o SMTP está sadia (Eureka UP, `X-Internal-Token` OK, controller e `EmailService` executam) — o único elo quebrado é a conexão TCP. Como o login exige `emailVerified` após 24h de grace period (ADR-015) e o reenvio é o **único** caminho de envio, uma conta de terceiro fica permanentemente inacessível. **Paradoxo circular do self-service:** passada a janela, `POST /v1/users/resend-verification` é inalcançável — resolve o titular pelo `userID` do JWT e exige sessão, mas o login já está bloqueado por `DisabledException`; sobra **só** o reenvio administrativo (`POST /v1/admin/users/{id}/resend-verification`). Aceito porque o deploy é para teste pelo próprio operador. **Efeito operacional:** o `MailHealthIndicator` faz `testConnection()` a cada scrape → `/actuator/health` responde **503** e o container fica permanentemente `unhealthy`. Não impede o Feign (o Eureka não usa o actuator health por padrão, e o serviço segue `UP` no registro), mas um `depends_on: condition: service_healthy` futuro travaria a subida. | Provedor SMTP real nos 7 secrets (`SMTP_*`) antes de qualquer cadastro externo; para dev, um `mailpit` no compose com `SMTP_HOST` = nome do serviço (nunca `localhost`) |
 | **`/terms` e `/privacy` linkadas mas inexistentes** | Aceito no escopo atual, **frágil sob LGPD**. O `RegisterBox.tsx` linka as duas rotas, o router do SPA não as tem e o `try_files` devolve página em branco → o consentimento obrigatório do ADR-012 é colhido sobre texto que o titular não consegue ler. Base legal frágil. | Publicar as duas páginas antes de coletar consentimento de terceiros |
 | **Resíduo 0.3: credencial Mongo do `mongodb-exporter` em env** | Aceito. A imagem `percona/mongodb_exporter` é distroless (sem shell) e não tem flag/`_FILE` para a URI → `MONGO_USER`/`MONGO_PASSWORD` continuam no `.env` (deve casar com `./secrets/MONGO_PASSWORD`). Único segredo fora do Docker secrets. | Imagem wrapper (multi-stage com shell) lendo a URI do secret, ou usuário Mongo de monitoramento de baixo privilégio |
 | **Grafana sem lockout / rate limit / MFA** | Aceito. A senha vem de Docker secret (`GF_SECURITY_ADMIN_PASSWORD__FILE`), mas **a senha nunca foi o controle suficiente**: o Grafana só tem usuário/senha — o `LoginAttemptService` é do auth-server e o token bucket é do gateway, nenhum dos dois o cobre, e não há MFA. O controle real é a **inalcançabilidade de rede**: porta publicada só em `127.0.0.1` (dev e deploy) e nenhuma regra de ingress no túnel. Expô-lo publicamente colocaria na internet o componente com a autenticação mais fraca do ecossistema. | Se algum dia precisar ser público: SSO OIDC contra o próprio authorization-server com role mapeada (exige `roles` no id_token — hoje `TokenCustomizerConfig` só customiza `access_token`). Para acesso remoto sem superfície pública, malha privada (Tailscale/WireGuard) |
@@ -253,9 +256,9 @@ ou se trata, ou se ratifica como dívida.
 
 | Gap | Severidade | Cenário de exploração | Caminho de correção |
 | --- | --- | --- | --- |
-| **G5 — `/v1/admin/**` sem 2FA nem tier dedicado** | MÉDIO | As rotas admin caem no tier MED por-usuário genérico; não há step-up auth/2FA nem rate-limit mais restritivo para mutações destrutivas (`DELETE /v1/admin/users/del/{id}` hard-delete). Combinado com a ausência de revogação ativa de token, o blast radius de um token ADMIN comprometido é alto. | 2FA/step-up para ADMIN e/ou tier dedicado para deletes |
+| **G5 — `/v1/admin/**` sem 2FA nem tier dedicado** | MÉDIO | As rotas admin caem no tier MED por-usuário genérico; não há step-up auth/2FA nem rate-limit mais restritivo para mutações destrutivas (`DELETE /v1/admin/users/del/{id}` hard-delete). A revogação ativa (ADR-017) encurta a vida de um token ADMIN comprometido **depois** de detectado, mas não impede o dano feito até lá. | 2FA/step-up para ADMIN e/ou tier dedicado para deletes |
 | **G4 — CORS pattern curinga (risco operacional)** | BAIXO | `CORSConfig` usa `setAllowedOriginPatterns(allowedOrigins)` + `allowCredentials(true)`. Seguro hoje (default `localhost:5173`, não-wildcard), mas como vem de `CORS_ALLOWED_ORIGINS`, um pattern curinga setado por engano em prod vira exfiltração cross-origin **com credenciais**. | Validar/rejeitar pattern curinga quando `allowCredentials=true` |
-| **G8 — Sem invalidação de sessões concorrentes** | BAIXO | Não há limite/registro de sessões simultâneas; um usuário pode manter N sessões ativas e o logout encerra só a corrente. Combinado com a ausência de revogação ativa, sessões antigas não são revogáveis centralmente. | Limitar/registrar sessões concorrentes (Spring Session) |
+| **G8 — Sem invalidação de sessões concorrentes** | BAIXO | Não há limite/registro de sessões simultâneas; um usuário pode manter N sessões ativas e o logout encerra só a corrente. O epoch de revogação (ADR-017) derruba **todas** as sessões do titular de uma vez; o que falta é revogar **uma** sessão específica (ex.: "sair deste dispositivo"). | Limitar/registrar sessões concorrentes (Spring Session) |
 | **R-09 — Rede flat Docker (dívida aceita, ADR-019)** | BAIXO | Um container hostil na mesma rede Docker (`user-service-net`) alcança `gateway:8081` diretamente e pode forjar `X-Forwarded-*`, independentemente de `trusted-proxies` (que só protege contra peers externos) e do G10. Resíduo pré-existente — ADR-010 não cobre a rede interna. Mitigação atual: o modelo de ameaça assume que todos os containers da rede são do projeto. | Rede Docker isolada por serviço (network segmentation) em prod |
 
 **G9 — Scan transitivo de dependências pendente.** As versões diretas (Spring Boot 4.0.3 /
@@ -279,8 +282,8 @@ nenhuma pessoa lê ao auditar segurança.
 
 | ID | Item | Onde |
 |---|---|---|
-| **MELH-SEC-01** | Kill switch silencioso: desligar a re-derivação por config não emite WARN nem métrica — o sistema volta ao comportamento pré-ADR-025 sem sinal algum | `AuthorizationEndpointRevalidationFilter.java:146-150` |
-| **MELH-SEC-02** | `SESSION_MAX_LIFETIME=0` desativa o teto de vida da sessão **em silêncio**, sem log de aviso | idem `:217-222` |
+| **MELH-SEC-01** | Kill switch silencioso: desligar a re-derivação por config não emite WARN nem métrica — o sistema volta ao comportamento pré-ADR-025 sem sinal algum | `AuthorizationEndpointRevalidationFilter.java:139` (`shouldNotFilter`) |
+| **MELH-SEC-02** | `SESSION_MAX_LIFETIME=0` desativa o teto de vida da sessão **em silêncio**, sem log de aviso | idem `:208` |
 | **MELH-SEC-03** | O caminho de fail-open só é observável por WARN; sugerido contador Micrometer para alertabilidade | — |
 | **MELH-SEC-04** | Amplificação do canal interno: cada `/oauth2/authorize` passou a gerar 1 chamada interna + 1 entrada `READ_INTERNAL_CREDENTIAL` na trilha. Monitorar volume | — |
 | **MELH-06-01** | `domainAuthorities()` é allow-list por prefixo (`ROLE_`/`USER_ID:`) sem guarda de completude — uma authority nova com prefixo diferente é ignorada em silêncio na comparação | — |
@@ -300,8 +303,8 @@ legítimo, foi substituído.
 
 **Topologia — hostname único.** O túnel entrega em `interface:80` (o nginx do SPA), **não** no
 gateway. O nginx faz proxy same-origin de `/v1/users`, `/v1/admin`, `/oauth2`, `/login` (inclui
-`/login?error` e `/login/oauth2/**`), `/default-ui.css`, `/logout`, `/connect` e `/swagger-ui`
-ao gateway (ADR-019 — `/login/oauth2` substituído por `/login` que subsume todos os subpaths):
+`/login?error` e `/login/oauth2/**`), `/default-ui.css`, `/logout`, `/connect`, `/swagger-ui` e
+`/v3/api-docs` ao gateway (ADR-019 — `/login/oauth2` substituído por `/login` que subsume todos os subpaths):
 
 ```
 Cloudflare (TLS) → cloudflared → interface:80 (nginx) → gateway:8081 → serviços internos
@@ -373,8 +376,9 @@ controles já implementados e o que ainda falta.
 | **Notificação de incidente** | ⚠️ Parcial | A auditoria (`auditLogs`) e a observabilidade sustentam a investigação; falta **plano** formal de resposta/notificação e alertas (Alertmanager) sobre os SLOs. |
 
 **Dívida da trilha de auditoria (consciente):** escrita assíncrona → risco de perda em crash antes do
-flush; **sem retenção/TTL definidos** — dívida que ficou mais cara com o fix do G13, já que uma
-listagem no teto de página grava 100 entradas. (A cláusula "a listagem `GET /v1/users` não é
+flush. A retenção existe (180 dias, ADR-022), mas o prazo é **decisão de conformidade**, não
+técnica — ver `AUDIT_LOG_RETENTION` em [CONFIG.md](CONFIG.md); e o fix do G13 aumentou o volume,
+já que uma listagem no teto de página grava 100 entradas. (A cláusula "a listagem `GET /v1/users` não é
 auditada" saiu daqui em 2026-08-05: essa rota não existe desde o ADR-021, e a listagem
 administrativa que a substituiu é auditada.) O endpoint de consulta já existe (`GET /v1/admin/audit-logs` e `.../users/{id}/audit-logs`, ADMIN-only,
 [ADR-014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md)) — fecha parcialmente a dívida

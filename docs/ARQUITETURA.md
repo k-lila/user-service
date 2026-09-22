@@ -101,7 +101,7 @@ compose:
 porta alguma no host; quem publica é `docker-compose.override.yml` (dev) e
 `docker-compose.deploy.yml` (só observabilidade, presa a `127.0.0.1`). Detalhes de topologia
 executável e escala em [../README.md](../README.md) e
-[BLUEPRINT.md § E](BLUEPRINT.md).
+[ADR-024](adr/ADR-024-elasticidade-piso-minimo-eixos-escala.md).
 
 ---
 
@@ -777,6 +777,7 @@ user-service/src/test/
 ├── resources/application.yml
 └── java/com/users/userservice/
     ├── config/          InternalTokenFilterTest · RevocationTokenValidatorTest
+    │                    OpenAPIConfigTest ← fixa o servers[] RELATIVO do doc OpenAPI
     ├── controller/      UserControllerTest · AdminControllerTest · InternalUserControllerTest
     ├── exceptions/      GlobalExceptionHandlerTest
     ├── integration/     AbstractIntegrationTest ← base Testcontainers do módulo
@@ -940,8 +941,8 @@ discovery-server/
 login-interface/
 ├── Dockerfile · nginx.conf                  # ⚠️ proxy same-origin de 9 paths ao gateway,
 │                                            #   INCLUINDO /login (ADR-019). Guardado pelo smoke-test
-├── vite.config.ts                           # proxy de DEV: só 4 paths (em dev o browser vai
-│                                            #   direto ao :8082 no front-channel)
+├── vite.config.ts                           # proxy de DEV: 7 paths — sem /login, /default-ui.css
+│                                            #   (em dev o browser vai direto ao :8082) e /v1/admin
 ├── vitest.config.ts · tsconfig*.json · eslint.config.js · .prettierrc
 ├── index.html · package.json · .envexample · README.md
 └── src/
@@ -979,7 +980,9 @@ infra/
 │   │                                   #   ⚠️ threshold que assume o topo da escala é bug (ADR-024)
 │   └── provisioning/dashboards/ · datasources/
 ├── cloudflared/config.yml              # ingress rules versionadas (sem hostname nem tunnel id)
-└── smoke-test/login-topology-smoke-test.sh   # 5 asserções da cadeia nginx→gateway→auth (ADR-023)
+├── smoke-test/login-topology-smoke-test.sh   # 6 asserções da cadeia nginx→gateway→auth (ADR-023/025)
+└── traffic.sh                          # gerador de tráfego pela origem pública (cadastro → login
+                                        #   BFF → buscas → erros); BASE_URL=... N=... ./traffic.sh
 ```
 
 ## `docs/`, `.claude/` e `.github/`
@@ -993,9 +996,8 @@ docs/
 ├── SECURITY.md      # controles ativos, gaps abertos, dívida aceita
 ├── TESTES.md        # estratégia de testes, gate de cobertura, smoke-test
 ├── LOGS.md          # formato, níveis, mascaramento de PII
-├── BLUEPRINT.md     # genérico vs. específico do domínio + eixos de escala
 ├── ORQUESTRACAO.md  # protocolo do time de subagentes
-└── adr/             # ADR-001..024 + TEMPLATE.md — decisões formais, em ordem
+└── adr/             # ADR-001..026 + TEMPLATE.md — decisões formais, em ordem
 
 .claude/
 ├── agents/          # 7 papéis: product-manager, senso-critico, techlead, qa-tester,

@@ -22,7 +22,7 @@ Logging via SLF4J (`LoggerFactory.getLogger(Classe.class)`, `private static fina
 | ------- | ---------------------------------------------------------------------------------------------------------- |
 | `INFO`  | Eventos de fluxo de negócio bem-sucedidos (entrada de endpoint, registro, atualização, busca encontrada, `auth` enviando credenciais) e a requisição recebida no gateway. |
 | `WARN`  | Anomalias esperadas e recuperáveis: e-mail já cadastrado, entidade não encontrada (404), argumento inválido / validação falhou (400), falha de login, rejeição por rate limit (429). |
-| `ERROR` | Falhas inesperadas com stacktrace: handler genérico 500 e falha de comunicação Feign (auth-server → user-service). |
+| `ERROR` | Falhas inesperadas com stacktrace: handler genérico 500, falha inesperada ao carregar usuário no auth-server (ex.: desserialização), falha ao gravar a trilha de auditoria e falha da purga OAuth. Indisponibilidade do user-service **não** é ERROR: sai como WARN `[CIRCUIT-BREAKER]` no fallback. |
 | `DEBUG` | Alto volume / baixo valor operacional: operações de cache (`put`/`evict`) no `CacheService`.                |
 
 ## Formato e convenções de escrita
@@ -33,8 +33,9 @@ Padrão em **pipe**, fácil de filtrar via grep. Estrutura: `| [VERBO_HTTP] | a�
 - Verbo HTTP, quando presente, em **maiúsculas** (`POST`, `GET`, `PUT`, `DELETE`); ações de domínio em **minúsculas e pt-br** (`registrar`, `buscar`, `atualizar`, `desativação`, `deleção`).
 - Chave de campo padronizada: `ID:` (sempre maiúsculo), `email:`, `nome:`, `motivo:`, `correlationId:`; múltiplos campos no mesmo segmento separados por `, ` (ex.: `nome: {}, ID: {}`).
 - Pares simétricos sucesso/falha compartilham o mesmo prefixo de ação (ex.: `| busca por ID | encontrado` ↔ `| busca por ID | não encontrado`).
-- Logs do fluxo de autenticação (em ambos os módulos) usam o namespace `| auth | ...` (`carregando usuário`, `enviando credenciais`, `login falhou`, `falha Feign user-service`, `inexistente ou inativo`).
-- Sem texto em CAIXA ALTA em inglês e sem concatenação — sempre `{}` parametrizado.
+- Logs do fluxo de autenticação (em ambos os módulos) usam o namespace `| auth | ...` (`carregando usuário`, `enviando credenciais`, `login falhou`, `falha inesperada ao carregar usuário`, `inexistente ou inativo`, `titular inexistente ou inativo`).
+- Subsistemas e rotinas de fundo usam uma **tag em maiúsculas** como primeiro segmento, para grep direto: `| ADMIN |`, `| AUDIT |`, `| OUTBOX |`, `| OUTBOX-RETRY |`, `| EMAIL-VERIFICATION |`, `| EMAIL |`, `| OAUTH-PURGE |`, `| [CIRCUIT-BREAKER] |`, `| [CORS] |`. Fora dessas tags, o texto da mensagem segue em minúsculas e pt-br.
+- Sem concatenação — sempre `{}` parametrizado.
 
 ## Exemplos de linha
 
@@ -91,9 +92,21 @@ B3) liga as duas, e ao trace no Zipkin. Detalhe do escopo/modelo em [SERVICOS.md
 | `AuthenticationService`  | user-service / service           | `auth` — enviando credenciais (INFO) / inexistente ou inativo (WARN)                 |
 | `CacheService`           | user-service / service           | put/evict dos 3 caches (DEBUG)                                                       |
 | `GlobalExceptionHandler` | user-service / exceptions        | 404/409/400 (WARN), 500 (ERROR), 403 relançado p/ Spring Security                    |
-| `AuthorizationService`   | authorization-server / service   | `auth` — carregando usuário (INFO) + falha Feign user-service com stacktrace (ERROR) |
+| `AdminService`           | user-service / service           | `ADMIN` — listagem, busca, roles, auto-revogação bloqueada (WARN)                    |
+| `AuditService`           | user-service / service           | `AUDIT` — só falha ao gravar a trilha (ERROR); o sucesso não loga                    |
+| `EmailVerificationService` | user-service / service         | `EMAIL-VERIFICATION` — confirmação (INFO), reenvio throttled / titular ausente (WARN) |
+| `NotificationDispatchService` | user-service / service      | `OUTBOX` — envio confirmado (INFO) / falha, outbox `FAILED` (WARN)                   |
+| `OutboxRetryService`     | user-service / service           | `OUTBOX-RETRY` — varredura, token reemitido (INFO), teto atingido / lock indisponível (WARN) |
+| `TokenRevocationService` | user-service / service           | `revogação` — epoch gravado (INFO), falha de Redis fail-open (WARN)                 |
+| `NotificationClientFallbackFactory` | user-service / clients | `[CIRCUIT-BREAKER]` notification-service indisponível (WARN)                         |
+| `AuthorizationService`   | authorization-server / service   | `auth` — carregando usuário (INFO) + falha inesperada ao carregar usuário com stacktrace (ERROR) |
+| `UserClientFallbackFactory` | authorization-server / clients | `[CIRCUIT-BREAKER]` user-service indisponível (WARN); titular inexistente (DEBUG)    |
+| `AuthorizationEndpointRevalidationFilter` | authorization-server / filter | `revalidação` — sessão invalidada com o motivo (INFO), degradação (WARN)       |
+| `OAuthStatePurgeService` | authorization-server / service   | `OAUTH-PURGE` — linhas removidas (INFO), lock indisponível (WARN), falha (ERROR)     |
 | `AuthFailureListener`    | authorization-server / listeners | falhas de login via `AbstractAuthenticationFailureEvent` (WARN)                      |
 | `CorrelationIdFilter`    | gateway / filter                 | requisição recebida + `correlationId`                                                |
 | `RateLimitLogFilter`     | gateway / filter                 | rejeições 429 (WARN)                                                                 |
+| `RevocationWebFilter`    | gateway / filter                 | `revogação` — token revogado rejeitado na borda (INFO), fail-open (WARN)             |
+| `EmailService`           | notification-service / service   | `EMAIL` — enviado (INFO) / falha no envio (WARN)                                     |
 
 > Nota: o handler `@ExceptionHandler(AccessDeniedException.class)` no `GlobalExceptionHandler` **relança** a exceção — sem ele, o catch-all `Exception` transformaria os 403 do `@PreAuthorize` em 500.

@@ -52,7 +52,6 @@ usa sessão por cookie e **não** manuseia JWT.
 | [docs/OBSERVABILIDADE.md](docs/OBSERVABILIDADE.md) | tracing, métricas, dashboards e seus thresholds |
 | [docs/SECURITY.md](docs/SECURITY.md) | controles ativos e gaps de segurança conhecidos |
 | [docs/ORQUESTRACAO.md](docs/ORQUESTRACAO.md) | sistema de orquestração de agentes |
-| [docs/BLUEPRINT.md](docs/BLUEPRINT.md) | infraestrutura genérica vs. código específico do domínio usuário |
 | [docs/adr/](docs/adr/) | Architecture Decision Records (ADR-001…026; template em `TEMPLATE.md`) |
 
 ADRs são criados pelo `techlead` em mudanças de contrato/schema. Catálogo completo, em ordem, no
@@ -218,8 +217,9 @@ Domínio central: CRUD de usuários (MongoDB, coleção `users`) + cache Redis. 
   `ResponseEntityExceptionHandler`, então sem handler o catch-all devolve 500.
 - **Verificação de e-mail** com outbox e retry ([ADR-015](docs/adr/ADR-015-verificacao-email-cadastro.md)); o retry emite token **novo** (só o hash é
   persistido) e o teto de tentativas conta **registros**, não o campo `attempts`.
-- **`OutboxRetryService` é o único lock fail-CLOSED do sistema** — os demais (cache, rate limit,
-  revogação) são fail-open porque Redis fora não pode barrar autenticação.
+- **Os locks dos dois `@Scheduled` são fail-CLOSED** (`OutboxRetryService` aqui,
+  `OAuthStatePurgeService` no auth-server) — o resto (cache, rate limit, revogação) é fail-open
+  porque Redis fora não pode barrar autenticação.
 - **Trilha de auditoria LGPD** ([ADR-011](docs/adr/ADR-011-trilha-auditoria-dado-pessoal.md)), assíncrona e isolada de falha, com retenção de 180d por
   `purgeAt` + índice TTL *expire-at* (ADR-022). `ADMIN_LIST_USERS` grava **uma entrada por titular**.
 - **Revogação ativa de token** ([ADR-017](docs/adr/ADR-017-revogacao-ativa-token.md) + [ADR-026](docs/adr/ADR-026-revogacao-troca-senha-email.md)): epoch por usuário no Redis, gravado em
@@ -267,8 +267,15 @@ React 19 + TypeScript + Vite + TailwindCSS 4. BFF ponta a ponta: token nunca toc
 
 - **`/login` pertence ao IdP, não ao SPA** ([ADR-019](docs/adr/ADR-019-correcao-elos-login-hostname-unico.md)): o `router.tsx` **não tem** rota `/login`.
   Recriá-la colide com o formulário do authorization-server sob hostname único.
-- **Os dois proxies divergem de propósito:** nginx (Docker/deploy) encaminha 9 paths, incluindo
-  `/login`; Vite (dev manual) encaminha 4, porque em dev o browser vai direto ao `localhost:8082`.
+- **Os dois proxies divergem de propósito:** nginx (Docker/deploy) encaminha 9 paths; Vite (dev
+  manual), 7. Faltam-lhe `/login`, `/default-ui.css` e `/v1/admin` — os dois primeiros porque em
+  dev o browser vai direto ao `localhost:8082`; o terceiro porque o SPA não chama rota admin.
+  Fora esses três a lista anda em par: divergir é o que faz o dev local deixar de exercitar a
+  cadeia do deploy e esconder bug (foi assim com o logout, ver `docs/CONFIG.md`).
+- **`OAUTH_END_SESSION_URI` tem de ser same-origin com o SPA:** o logout é POST top-level via
+  `<form>` e a CSP do nginx traz `form-action 'self'`, que o Chrome aplica também ao redirect —
+  apontá-lo ao `localhost:8082` mata o logout em Docker local. Racional em
+  [docs/CONFIG.md](docs/CONFIG.md).
 
 ---
 
@@ -365,4 +372,4 @@ pipeline linear.
 rodadas de revisão sem aprovação, escale ao humano.
 
 Estado persistente em `.claude/memory/`; workflows em `.claude/workflows/`. Skills invocáveis:
-`/suggest-tests`, `/check-compat`, `/security-scan`, `/new-adr`.
+`/suggest-tests`, `/check-compat`, `/security-scan`, `/new-adr`, `/write-readme`.
