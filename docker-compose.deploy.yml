@@ -119,7 +119,6 @@ services:
       # origem pública — daí a rota /connect/** no GatewayRouter (ADR-018).
       OAUTH_END_SESSION_URI: ${PUBLIC_ORIGIN}/connect/logout
       POST_LOGOUT_REDIRECT_URI: ${PUBLIC_ORIGIN}/
-      API_BASE_URL: ${PUBLIC_ORIGIN}
       # AUTH_URL/AUTH_TOKEN alimentam SÓ o securityScheme OAuth2 do doc OpenAPI (OpenAPIConfig) —
       # é o browser, na página do Swagger, que os usa. O back-channel do BFF (issuer-uri/token-uri
       # do spring.security.oauth2.client) permanece interno e NÃO vai para o túnel.
@@ -145,11 +144,13 @@ services:
       OAUTH_CLIENT_REDIRECT_URIS: ${PUBLIC_ORIGIN}/login/oauth2/code/gateway-client,${PUBLIC_ORIGIN}/swagger-ui/oauth2-redirect.html
       OAUTH_CLIENT_POST_LOGOUT_URIS: ${PUBLIC_ORIGIN}/
 
-  # O doc OpenAPI exibido pelo Swagger-UI (servido pelo gateway, mas agregando /v3/api-docs/user)
-  # é gerado pelo user-service. Sem API_BASE_URL apontando para a origem pública, o campo servers[]
-  # cai no default http://localhost:8081 e o "Try it out" dispara para localhost → mixed content
-  # (página HTTPS → request HTTP) e "Failed to fetch". AUTH_URL/AUTH_TOKEN idem para o fluxo
-  # Authorize a partir deste doc.
+  # API_BASE_URL monta o link de confirmação de e-mail (app.verification.base-url, ADR-015), que o
+  # titular abre no browser: tem de ser a origem pública, não o localhost do default de dev.
+  # Ela NÃO alimenta mais o servers[] do doc OpenAPI — esse passou a ser RELATIVO, porque qualquer
+  # URL absoluta ali casa com uma só das origens que servem a página do Swagger (nginx do SPA,
+  # Vite em dev manual, gateway em :8081) e nas outras o "Try it out" vira cross-origin, barrado
+  # pelo connect-src 'self' da CSP. Ver o javadoc de OpenAPIConfig no user-service.
+  # AUTH_URL/AUTH_TOKEN seguem alimentando o securityScheme exibido neste doc.
   user-service:
     environment:
       API_BASE_URL: ${PUBLIC_ORIGIN}

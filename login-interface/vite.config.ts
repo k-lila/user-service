@@ -21,12 +21,17 @@ export default defineConfig({
   // casa nenhuma rota do React Router e renderiza página em branco.
   // /swagger-ui e /v3/api-docs andam em par e espelham o nginx: o link do ProfileBox aponta para o
   // primeiro, e o swagger-initializer busca a spec no segundo — proxiar só um deixa a UI vazia.
+  // /connect espelha o nginx pelo mesmo motivo que /logout: é o front-channel do RP-Initiated
+  // Logout (ADR-018), para onde o gateway manda o BROWSER depois de encerrar a sessão. Sem ele,
+  // quem roda o Vite contra o gateway do Docker (que injeta OAUTH_END_SESSION_URI apontando para
+  // :5173) cairia no fallback do SPA e o logout terminaria sem encerrar a sessão do IdP.
   server: {
     proxy: {
       '/v1/users': { target: 'http://localhost:8081', changeOrigin: true },
       '/oauth2': { target: 'http://localhost:8081', changeOrigin: true },
       '/login/oauth2': { target: 'http://localhost:8081', changeOrigin: true },
       '/logout': { target: 'http://localhost:8081', changeOrigin: true },
+      '/connect': { target: 'http://localhost:8081', changeOrigin: true },
       '/swagger-ui': { target: 'http://localhost:8081', changeOrigin: true },
       '/v3/api-docs': { target: 'http://localhost:8081', changeOrigin: true },
     },

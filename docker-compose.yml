@@ -688,11 +688,21 @@ services:
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-http://localhost:5173/login/oauth2/code/gateway-client}
       # RP-Initiated Logout (lidos em gateway SecurityConfig via @Value). Em prod, hostnames
       # públicos reais — sem isto, o logout front-channel volta a localhost.
-      OAUTH_END_SESSION_URI: ${OAUTH_END_SESSION_URI:-http://localhost:8082/connect/logout}
+      #
+      # O end_session aponta para a ORIGEM DO SPA (:5173), não para o auth-server (:8082), e o
+      # nginx do SPA encaminha /connect/** ao gateway (rota connect-logout, ADR-018). Não é
+      # indireção gratuita: o logout é um POST top-level via <form> (authClient.ts) e a CSP que
+      # o nginx emite no documento do SPA termina em `form-action 'self'` — o Chrome aplica essa
+      # diretiva também ao REDIRECT da submissão, então um 302 para outra origem é recusado antes
+      # de sair do browser. O efeito era cruel: o 1º clique encerrava a sessão e apagava o cookie
+      # XSRF-TOKEN, mas a página não navegava; os cliques seguintes mandavam _csrf vazio e
+      # levavam 403. O deploy nunca viu o bug porque lá o end_session já é ${PUBLIC_ORIGIN}.
+      # Mantém local e deploy exercitando a MESMA cadeia. Em dev manual (sem Docker) esta variável
+      # não é injetada e vale o default do @Value (:8082) — lá não há nginx nem CSP.
+      OAUTH_END_SESSION_URI: ${OAUTH_END_SESSION_URI:-http://localhost:5173/connect/logout}
       POST_LOGOUT_REDIRECT_URI: ${POST_LOGOUT_REDIRECT_URI:-http://localhost:5173/}
       AUTH_URL: ${AUTH_URL:-http://localhost:8082/oauth2/authorize}
       AUTH_TOKEN: ${AUTH_TOKEN:-http://localhost:8082/oauth2/token}
-      API_BASE_URL: ${API_BASE_URL:-http://localhost:8081}
       # Regex (ancorada, Pattern.matches) do peer imediato aceito como proxy confiável. Sem esta
       # propriedade o SCG 5.0.0 não registra XForwardedHeadersFilter/ForwardedHeadersFilter
       # (ADR-019). Aspas SIMPLES no YAML: o valor tem `\.`, que em aspas duplas o YAML leria como
