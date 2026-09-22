@@ -16,17 +16,17 @@
 #     export PUBLIC_ORIGIN=https://app.exemplo.com     # ou defina no .env
 #     docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
 #
-# PRÉ-REQUISITOS (fora deste repositório — ver README § 2b):
+# PRÉ-REQUISITOS (fora deste repositório — ver docs/RECEITA.md, Caminho B):
 #   1. Domínio na Cloudflare com nameservers propagados.
 #   2. Named tunnel criado pela CLI (`cloudflared tunnel create`), em modo LOCALLY-MANAGED; o JSON
 #      de credenciais (~/.cloudflared/<UUID>.json) vira o secret ./secrets/CLOUDFLARE_TUNNEL_CREDENTIALS
 #      (via CLOUDFLARE_TUNNEL_CREDENTIALS=~/.cloudflared/<UUID>.json infra/secrets/gen-secrets.sh).
 #   3. CNAME do hostname público criado com `cloudflared tunnel route dns <túnel> ${PUBLIC_HOST}`.
-#   4. Cloudflare Access cobrindo ${PUBLIC_HOST}/swagger-ui/* e /v3/api-docs/* (política de e-mail
-#      único + OTP). NÃO aplicar Access em /v1/** — são XHR do SPA e quebrariam.
-#      ATENÇÃO: o Access faz parte do Zero Trust e hoje está BLOQUEADO (o painel exige cartão de
-#      crédito, que o operador não vai cadastrar). Enquanto isso, /swagger-ui/* e /v3/api-docs/*
-#      ficam públicos — ver docs/SECURITY.md.
+#   4. (Opcional, hoje não aplicado) Cloudflare Access sobre ${PUBLIC_HOST}/swagger-ui/* e
+#      /v3/api-docs/*. O Access faz parte do Zero Trust, BLOQUEADO pela exigência de cartão — e
+#      desde o ADR-020 deixou de ser necessário: as duas rotas exigem a sessão OAuth2 do BFF
+#      (anônimo leva 302 em /swagger-ui/** e 401 em /v3/api-docs/**). Se um dia for habilitado,
+#      NÃO aplicar em /v1/** — são XHR do SPA e quebrariam.
 #
 # MODO LOCALLY-MANAGED (era: token do dashboard). O Zero Trust exige cartão de crédito mesmo no
 # plano free, então o túnel passou a ser criado pela CLI e as ingress rules vivem em
@@ -81,7 +81,7 @@ services:
     # container (docker inspect / ps -e). O ID do túnel é argumento posicional do `run` porque o
     # compose interpola aqui, mas não dentro do YAML montado — e assim o domínio/UUID reais ficam
     # no .env, fora do repositório (política de sigilo do domínio real).
-    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?defina TUNNEL_ID com o UUID impresso por `cloudflared tunnel create` (ver README § 2b)}
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?defina TUNNEL_ID com o UUID impresso por `cloudflared tunnel create` (ver docs/RECEITA.md, Caminho B)}
     volumes:
       - ./infra/cloudflared/config.yml:/etc/cloudflared/config.yml:ro
     secrets:

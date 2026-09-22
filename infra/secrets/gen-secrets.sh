@@ -23,7 +23,7 @@
 #   2. o par JWK é REGERADO (openssl genpkey roda sempre, ver o fim do arquivo) — a chave de
 #      assinatura muda, todo access/refresh token em circulação deixa de ser verificável e
 #      todos os usuários logados caem.
-# Por isso o roteiro do README § 2b termina em `down -v` + `up`: o estado é descartado junto.
+# Por isso o roteiro de deploy (docs/RECEITA.md, Caminho B) termina em `down -v` + `up`: o estado é descartado junto.
 # Para acrescentar UM secret novo a um deploy existente, NÃO re-rode este script — crie só o
 # arquivo que falta (ex.: `printf '%s' false > secrets/SMTP_SSL_ENABLE && chmod 644 ...`).
 #
