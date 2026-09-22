@@ -28,7 +28,7 @@ frontmatter e no corpo de `.claude/agents/<nome>.md`.
 | `report-writer` | Sob demanda, fora do pipeline linear |
 
 Skills invocáveis: `/suggest-tests <Classe>`, `/check-compat [base-ref]`, `/security-scan [escopo]`,
-`/new-adr "<título>"`, `/write-readme [alvo]`. Skills de referência (lidas pelos agentes, não invocáveis): `java-microservices`,
+`/new-adr "<título>"`. Skills de referência (lidas pelos agentes, não invocáveis): `java-microservices`,
 `test-strategy`, `inter-service-communication`, `observability`, `invariants-and-contracts` — esta
 última é a base do `/check-compat`. Todas em `.claude/skills/`.
 
