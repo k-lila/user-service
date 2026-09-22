@@ -344,4 +344,112 @@ class RegisterServiceTest {
         verify(userRepository).insert(captor.capture());
         assertNull(captor.getValue().getTenantIds());
     }
+
+    // --- Revogação ativa no update (G15 / ADR-026) ---------------------------------------
+    // Trocar a senha ou o e-mail grava o epoch de revogação; trocar só o nome, não. Antes do
+    // ADR-026 nenhum dos dois revogava — trocar a senha não expulsava quem já estava dentro.
+
+    @Test
+    void deveRevogarToken_quandoSenhaAlterada() {
+        String userId = "id-1";
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Fulano");
+        dto.setEmail("fulano@email.com");
+        dto.setPassword("novaSenha123");
+
+        User existing = buildUser(userId, "fulano@email.com", true);
+        User updated = buildUser(userId, "fulano@email.com", true);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
+        when(passwordEncoder.encode("novaSenha123")).thenReturn("$2a$10$novoHash");
+        when(userRepository.save(any(User.class))).thenReturn(updated);
+
+        service.updateUser(dto, userId);
+
+        verify(passwordEncoder).encode("novaSenha123");
+        verify(tokenRevocationService).revoke(userId);
+    }
+
+    @Test
+    void deveRevogarToken_quandoEmailAlterado() {
+        String userId = "id-1";
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Fulano");
+        dto.setEmail("novo@email.com");
+
+        User existing = buildUser(userId, "antigo@email.com", true);
+        User updated = buildUser(userId, "novo@email.com", true);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
+        when(userRepository.findByEmail("novo@email.com")).thenReturn(Optional.empty());
+        when(userRepository.save(any(User.class))).thenReturn(updated);
+
+        service.updateUser(dto, userId);
+
+        verify(tokenRevocationService).revoke(userId);
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    void naoDeveRevogarToken_quandoApenasNomeAlterado() {
+        String userId = "id-1";
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Novo Nome");
+        dto.setEmail("fulano@email.com");
+
+        User existing = buildUser(userId, "fulano@email.com", true);
+        User updated = buildUser(userId, "fulano@email.com", true);
+        updated.setName("Novo Nome");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenReturn(updated);
+
+        service.updateUser(dto, userId);
+
+        verify(tokenRevocationService, never()).revoke(anyString());
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    void naoDeveRevogarToken_quandoSenhaEmBranco() {
+        String userId = "id-1";
+        UserRequestDTO dto = new UserRequestDTO();
+        dto.setName("Fulano");
+        dto.setEmail("fulano@email.com");
+        dto.setPassword("   ");
+
+        User existing = buildUser(userId, "fulano@email.com", true);
+        User updated = buildUser(userId, "fulano@email.com", true);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenReturn(updated);
+
+        service.updateUser(dto, userId);
+
+        verify(tokenRevocationService, never()).revoke(anyString());
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    void deveRevogarToken_quandoDeactivateUser() {
+        User user = buildUser("id-1", "fulano@email.com", true);
+
+        when(userRepository.findById("id-1")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenReturn(user);
+
+        service.deactivateUser("id-1");
+
+        verify(tokenRevocationService).revoke("id-1");
+    }
+
+    @Test
+    void deveRevogarToken_quandoDeleteUser() {
+        User user = buildUser("id-1", "fulano@email.com", true);
+
+        when(userRepository.findById("id-1")).thenReturn(Optional.of(user));
+
+        service.deleteUser("id-1");
+
+        verify(tokenRevocationService).revoke("id-1");
+    }
 }

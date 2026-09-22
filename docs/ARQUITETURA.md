@@ -101,7 +101,7 @@ compose:
 porta alguma no host; quem publica é `docker-compose.override.yml` (dev) e
 `docker-compose.deploy.yml` (só observabilidade, presa a `127.0.0.1`). Detalhes de topologia
 executável e escala em [../README.md](../README.md) e
-[BLUEPRINT.md § E](BLUEPRINT.md).
+[ADR-024](adr/ADR-024-elasticidade-piso-minimo-eixos-escala.md).
 
 ---
 
@@ -151,9 +151,12 @@ com.users.<modulo>/
 
 Três fatos estruturais que fogem do gabarito e são fáceis de tropeçar:
 
-**Não existe módulo `commons` nem POM agregador.** Cada módulo tem `pom.xml` independente e é
-buildado sozinho (é assim que a matrix do CI roda). O preço é código **duplicado por cópia**
-entre módulos:
+**Existe POM pai/agregador na raiz, mas não existe módulo `commons`** — e a distinção é
+deliberada. O pai centraliza **versões e configuração de build** (Spring Boot/Cloud, gate JaCoCo,
+pins de springdoc/wiremock/feign-micrometer); ele **não** compartilha código. A duplicação de
+classes entre módulos é uma **decisão mantida**, não uma pendência: extrair um `commons` criaria
+acoplamento de release entre serviços que hoje evoluem sozinhos, por um punhado de classes
+pequenas. O preço assumido é código **duplicado por cópia**:
 
 | Classe | Onde vive duplicada |
 |---|---|
@@ -377,6 +380,25 @@ O `RevocationWebFilter` existe porque o BFF autentica **por sessão**, não por 
 do resource server não pega o tráfego do SPA. O user-service continua sendo a camada
 autoritativa; aqui o ganho é rejeição imediata na borda.
 
+**Token expirado deixou de ser fail-open (ADR-025).** A decodificação usava o decoder do resource
+server, que valida `exp` — então com o access token da sessão vencido (3× em 35 min de uso normal,
+ou seja, o caminho **comum**) a checagem inteira era pulada. Hoje `userID`/`iat` vêm do
+`RevocationTokenReader`, que verifica **assinatura** e ignora `exp`.
+
+> **Invariante — leia antes de mexer no `RevocationTokenReader`.** Esse leitor **nunca** é bean de
+> `ReactiveJwtDecoder`, sob qualifier nenhum. O gateway não declara esse bean (vem da autoconfig,
+> `@ConditionalOnMissingBean`); declará-lo desligaria a autoconfig e faria o resource server
+> **aceitar bearer expirado**. Pior: `AbstractGatewayIntegrationTest:37` **mocka** o decoder, então
+> nenhum teste antigo pegaria a regressão.
+>
+> A guarda é um **par**, e só o par funciona: (1) "existe exatamente um bean de
+> `ReactiveJwtDecoder`" **e** (2) asserção comportamental de que esse bean rejeita `exp` no passado,
+> com JWKS real via WireMock, sem herdar o mock. **A primeira sozinha passa no cenário
+> catastrófico** — por isso não basta.
+>
+> Detalhe correlato: `security.revocation.jwk-set-uri` errado **não quebra nada visível**. Cai no
+> fail-open, e a correção fica inerte com o build verde.
+
 ### 4.4 notification-service — o bounded context de notificação
 
 Stateless: sem Mongo, sem Redis, sem Postgres, **sem Spring Security** e **sem springdoc**. Um
@@ -518,6 +540,7 @@ revogação, na mesma operação.
 
 ```
 AdminService.updateUserRoles | RegisterService.deactivateUser | .deleteUser
+                             | RegisterService.updateUser  (senha OU e-mail — ADR-026)
   → TokenRevocationService.revoke(userID)  →  Redis revoke:user:{id} (TTL 75m)
 
 Daí em diante, em paralelo:
@@ -530,6 +553,9 @@ Daí em diante, em paralelo:
 
 Todas são **fail-open**: outage de Redis não bloqueia autenticação. A invalidação não muta a sessão
 viva — o re-login re-deriva roles e reaplica os gates de e-mail e `active`.
+
+Na troca de senha ou e-mail ([ADR-026](adr/ADR-026-revogacao-troca-senha-email.md)) o **autor da
+troca também cai** — o epoch é por titular, não por sessão. Trocar só o nome não revoga.
 
 > **Corrigido em 2026-08-09 — não reintroduza a frase antiga.** Este parágrafo dizia que "a
 > revogação **força re-autenticação**". Não força, e a diferença custou um incidente: as três
@@ -591,8 +617,8 @@ com serializer Jackson por tipo (`CacheConfig`). Evicção explícita em toda mu
 raspadas por `dns_sd_configs` (é o que dá **um target por réplica**); logs SLF4J parametrizados
 em formato de pipe com `traceId`/`spanId` no MDC e PII mascarada por `LogUtils.maskEmail()`.
 No gateway, o MDC só é populado com `spring.reactor.context-propagation: auto` — sem isso o log
-da borda sai com `traceId=` vazio. Detalhes em [LOGS.md](LOGS.md) e no
-[CLAUDE.md § Observabilidade](../CLAUDE.md).
+da borda sai com `traceId=` vazio. Detalhes em [LOGS.md](LOGS.md) e em
+[OBSERVABILIDADE.md](OBSERVABILIDADE.md).
 
 **Resiliência:** os dois saltos Feign têm circuit breaker Resilience4j nomeado (`configs.*`, não
 `instances.*` — com group habilitado este último é inerte) e fallback factory. Timeout 3s,
@@ -645,7 +671,7 @@ alterar.
 | `user-service/controller/UserController.java` | [001](adr/ADR-001-leitura-somente-ativos.md) · [013](adr/ADR-013-remocao-rotas-admin-delete-user-controller.md) · [016](adr/ADR-016-leitura-pii-restrita-admin.md) · [021](adr/ADR-021-remocao-listagem-publica-usuarios.md) |
 | `user-service/controller/AdminController.java` | [013](adr/ADR-013-remocao-rotas-admin-delete-user-controller.md) · [014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md) · [016](adr/ADR-016-leitura-pii-restrita-admin.md) |
 | `user-service/controller/InternalUserController.java` | [006](adr/ADR-006-canal-interno-isolado.md) |
-| `user-service/services/RegisterService.java` | [012](adr/ADR-012-consentimento-lgpd-cadastro.md) · [015](adr/ADR-015-verificacao-email-cadastro.md) · [017](adr/ADR-017-revogacao-ativa-token.md) |
+| `user-service/services/RegisterService.java` | [012](adr/ADR-012-consentimento-lgpd-cadastro.md) · [015](adr/ADR-015-verificacao-email-cadastro.md) · [017](adr/ADR-017-revogacao-ativa-token.md) · [026](adr/ADR-026-revogacao-troca-senha-email.md) |
 | `user-service/services/EmailVerificationService.java` + outbox | [015](adr/ADR-015-verificacao-email-cadastro.md) |
 | `user-service/services/OutboxRetryService.java` | [015](adr/ADR-015-verificacao-email-cadastro.md) (emenda) · [022](adr/ADR-022-higiene-estado-persistente.md) |
 | `user-service/services/AuditService.java`, `domain/AuditLog.java` | [011](adr/ADR-011-trilha-auditoria-dado-pessoal.md) · [014](adr/ADR-014-admin-controller-gestao-roles-auditoria.md) · [022](adr/ADR-022-higiene-estado-persistente.md) |
@@ -662,7 +688,7 @@ alterar.
 
 # Parte II — Árvore de arquivos anotada
 
-Monorepo de seis módulos Maven **independentes** (não há POM agregador na raiz), um SPA e a
+Monorepo de seis módulos Maven sob um **POM pai/agregador na raiz**, um SPA e a
 infraestrutura. Podas aplicadas: `node_modules/`, `target/`, `.git/`, `dist/`, `coverage/`.
 
 ## Raiz
@@ -675,7 +701,8 @@ user-service/                          # raiz do monorepo (homônima do módulo 
 ├── docker-compose.override.yml        # deltas de dev (republica portas); auto-carregado no `up`
 ├── docker-compose.deploy.yml          # overlay Cloudflare Tunnel; observabilidade em 127.0.0.1
 ├── .env / .env.example                # contrato de variáveis (o .env real é gitignorado)
-├── .dockerignore / .gitignore
+├── pom.xml                             # POM pai/agregador: versões, gate JaCoCo, pins
+├── .dockerignore / .gitignore          # .dockerignore é FAIL-CLOSED (nega tudo, readmite o build)
 ├── secrets/                           # Docker secrets montados em /run/secrets/ — GITIGNORADO,
 │                                      #   gerado por infra/secrets/gen-secrets.sh (ADR-009).
 │                                      #   19 arquivos: credenciais, par JWK, SMTP_*, túnel
@@ -693,7 +720,7 @@ user-service/                          # raiz do monorepo (homônima do módulo 
 
 ```
 user-service/
-├── Dockerfile · pom.xml
+├── pom.xml
 └── src/main/java/com/users/userservice/
     ├── UserServiceApplication.java          # @EnableFeignClients + @EnableScheduling
     ├── clients/                             # saída Feign → notification-service
@@ -750,6 +777,7 @@ user-service/src/test/
 ├── resources/application.yml
 └── java/com/users/userservice/
     ├── config/          InternalTokenFilterTest · RevocationTokenValidatorTest
+    │                    OpenAPIConfigTest ← fixa o servers[] RELATIVO do doc OpenAPI
     ├── controller/      UserControllerTest · AdminControllerTest · InternalUserControllerTest
     ├── exceptions/      GlobalExceptionHandlerTest
     ├── integration/     AbstractIntegrationTest ← base Testcontainers do módulo
@@ -764,7 +792,7 @@ user-service/src/test/
 
 ```
 authorization-server/
-├── Dockerfile · pom.xml · .gitattributes · .mvn/wrapper/
+├── pom.xml
 └── src/main/java/authorizationserver/       # ⚠️ raiz de pacote SEM "com.users"
     ├── AuthorizationServerApplication.java
     ├── clients/
@@ -827,7 +855,7 @@ authorization-server/src/test/java/authorizationserver/
 
 ```
 gateway/
-├── Dockerfile · pom.xml
+├── pom.xml
 └── src/main/java/com/users/gateway/
     ├── GatewayApplication.java
     ├── routing/GatewayRouter.java           # ⚠️ tabela de rotas; ordem de declaração importa
@@ -867,7 +895,7 @@ gateway/src/test/java/com/users/gateway/
 
 ```
 notification-service/
-├── Dockerfile · pom.xml                     # ⚠️ SEM springdoc — não reintroduzir (ADR-021)
+├── pom.xml                                  # ⚠️ SEM springdoc — não reintroduzir (ADR-021)
 └── src/main/java/com/users/notificationservice/
     ├── NotificationServiceApplication.java
     ├── config/
@@ -888,7 +916,7 @@ Não há `src/test/resources` — o serviço é stateless e não tem teste de in
 
 ```
 config-server/
-├── Dockerfile · pom.xml
+├── pom.xml
 └── src/main/
     ├── java/com/users/configserver/
     │   ├── ConfigServerApplication.java     # @EnableConfigServer, profile native
@@ -903,7 +931,7 @@ config-server/src/test/java/com/users/configserver/
                                                               ↑ guarda vazamento de segredo
 
 discovery-server/
-├── Dockerfile · pom.xml
+├── pom.xml
 └── src/main/java/com/users/discoveryserver/DiscoveryServerApplication.java   # @EnableEurekaServer
 ```
 
@@ -913,8 +941,8 @@ discovery-server/
 login-interface/
 ├── Dockerfile · nginx.conf                  # ⚠️ proxy same-origin de 9 paths ao gateway,
 │                                            #   INCLUINDO /login (ADR-019). Guardado pelo smoke-test
-├── vite.config.ts                           # proxy de DEV: só 4 paths (em dev o browser vai
-│                                            #   direto ao :8082 no front-channel)
+├── vite.config.ts                           # proxy de DEV: 7 paths — sem /login, /default-ui.css
+│                                            #   (em dev o browser vai direto ao :8082) e /v1/admin
 ├── vitest.config.ts · tsconfig*.json · eslint.config.js · .prettierrc
 ├── index.html · package.json · .envexample · README.md
 └── src/
@@ -934,6 +962,9 @@ espelho como no back-end. A camada de acesso HTTP chama-se `api/`, não `service
 
 ```
 infra/
+├── docker/Dockerfile.jvm               # Dockerfile ÚNICO dos 6 módulos Spring, param. por ARG
+│                                       #   MODULE. Contexto de build = raiz (o <parent> dos
+│                                       #   filhos precisa estar dentro do contexto)
 ├── prometheus.yml                      # alvos: dns_sd na 8181 + 3 exporters + config-server (Basic)
 ├── secrets/gen-secrets.sh              # gera ./secrets/ — PRÉ-REQUISITO do 1º up (ADR-009)
 ├── jwk/gen-keys.sh                     # gera o par RSA de assinatura do JWT (ADR-005)
@@ -949,7 +980,9 @@ infra/
 │   │                                   #   ⚠️ threshold que assume o topo da escala é bug (ADR-024)
 │   └── provisioning/dashboards/ · datasources/
 ├── cloudflared/config.yml              # ingress rules versionadas (sem hostname nem tunnel id)
-└── smoke-test/login-topology-smoke-test.sh   # 5 asserções da cadeia nginx→gateway→auth (ADR-023)
+├── smoke-test/login-topology-smoke-test.sh   # 6 asserções da cadeia nginx→gateway→auth (ADR-023/025)
+└── traffic.sh                          # gerador de tráfego pela origem pública (cadastro → login
+                                        #   BFF → buscas → erros); BASE_URL=... N=... ./traffic.sh
 ```
 
 ## `docs/`, `.claude/` e `.github/`
@@ -963,9 +996,8 @@ docs/
 ├── SECURITY.md      # controles ativos, gaps abertos, dívida aceita
 ├── TESTES.md        # estratégia de testes, gate de cobertura, smoke-test
 ├── LOGS.md          # formato, níveis, mascaramento de PII
-├── BLUEPRINT.md     # genérico vs. específico do domínio + eixos de escala
 ├── ORQUESTRACAO.md  # protocolo do time de subagentes
-└── adr/             # ADR-001..024 + TEMPLATE.md — decisões formais, em ordem
+└── adr/             # ADR-001..026 + TEMPLATE.md — decisões formais, em ordem
 
 .claude/
 ├── agents/          # 7 papéis: product-manager, senso-critico, techlead, qa-tester,
@@ -999,7 +1031,9 @@ docs/
 5. **DTO converte a si mesmo** por método estático; não há camada de mapper.
 6. **Classe duplicada entre módulos tem gêmea** — ver a tabela em
    [§3](#3-anatomia-comum-de-um-serviço). Alterou uma, verifique a outra: o build não acusa.
-7. **Ao acrescentar um serviço**, o gabarito mínimo é `Dockerfile` + `pom.xml` independente +
+7. **Ao acrescentar um serviço**, o gabarito mínimo é `pom.xml` herdando do POM pai + entrada em
+   `<modules>` na raiz + bloco `build:` no compose apontando para `infra/docker/Dockerfile.jvm`
+   com `args: MODULE: <servico>` (não se cria Dockerfile novo) +
    `application.yml` com `spring.config.import` + entrada em
    `config-server/.../config/<servico>.yml` + registro no Eureka + alvo no `infra/prometheus.yml`
    (porta de management **8181**, nunca a de tráfego) + `management.server.port: 8181`. O

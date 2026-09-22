@@ -31,7 +31,7 @@ em `docs/SECURITY.md` (liste como "já conhecido", não como novo).
 !`echo "--- BCrypt / encoder:"; grep -rnE 'BCryptPasswordEncoder|PasswordEncoder|strength' --include='*.java' authorization-server/src/main user-service/src/main 2>/dev/null | head; echo; echo "--- Token no front (NÃO deve haver Bearer/localStorage):"; grep -rnE 'Authorization|Bearer|localStorage' login-interface/src 2>/dev/null | head`
 
 ### 5. Headers de segurança HTTP e authz por-titular (IDOR)
-!`echo "--- Headers de segurança (front nginx + gateway):"; grep -rniE 'Content-Security-Policy|X-Frame-Options|Strict-Transport-Security|X-Content-Type-Options|frame-ancestors' login-interface/nginx.conf gateway/src/main 2>/dev/null || echo "(NENHUM header de segurança encontrado — ver G3 em docs/SECURITY.md)"; echo; echo "--- Authz das rotas de leitura por id/e-mail (verificar manualmente se checam titularidade ou são ADMIN-only — ver G1):"; grep -rnE '@GetMapping|@PreAuthorize|hasRole' user-service/src/main/java/com/users/userservice/controller/UserController.java 2>/dev/null | head -30`
+!`echo "--- Headers de segurança (front nginx + gateway):"; grep -rniE 'Content-Security-Policy|X-Frame-Options|Strict-Transport-Security|X-Content-Type-Options|frame-ancestors' login-interface/nginx.conf gateway/src/main 2>/dev/null || echo "(NENHUM header de segurança encontrado — ver 'Controles ativos' em docs/SECURITY.md)"; echo; echo "--- Authz das rotas de leitura por id/e-mail (verificar manualmente se checam titularidade ou são ADMIN-only — ver ADR-016/ADR-021):"; grep -rnE '@GetMapping|@PreAuthorize|hasRole' user-service/src/main/java/com/users/userservice/controller/UserController.java 2>/dev/null | head -30`
 
 ---
 
@@ -46,11 +46,13 @@ Para cada achado, classifique e aponte `arquivo:linha`:
 - **MELHORIA** — endurecimento desejável (ex.: **ausência de headers de segurança HTTP** —
   CSP/X-Frame-Options/HSTS/X-Content-Type-Options — quando ainda não corrigida).
 - **JÁ CONHECIDO** — bate com um gap de `docs/SECURITY.md` (sem TLS prod, JWK dev,
-  Redis sem auth, etc.) — não é regressão. Inclui os achados da seção **"Gaps recém-identificados
-  (a tratar)"** (G1 IDOR de leitura de PII, G3 headers, G5 admin sem 2FA, …): se um deles ainda
+  Redis sem auth, etc.) — não é regressão. Inclui os achados da seção **"Gaps abertos, não
+  ratificados"** (G5 admin sem 2FA, G4 CORS curinga, G8 sessões concorrentes, G9 scan transitivo): se um deles ainda
   não foi corrigido, liste como "já conhecido"; **só** escale como CRÍTICO/BLOQUEADOR se a mudança
   sob revisão **agravou** o gap. Atenção especial: **leitura de PII de terceiro sem checagem de
-  titularidade** (IDOR/G1) numa rota nova/alterada é achado a classificar, não ignorar.
+  titularidade** numa rota nova/alterada é achado a classificar, não ignorar — foi assim que a
+  listagem pública sobreviveu seis semanas a um fechamento declarado ([ADR-016](../../../docs/adr/ADR-016-leitura-pii-restrita-admin.md)
+  + [ADR-021](../../../docs/adr/ADR-021-remocao-listagem-publica-usuarios.md)).
 
 **Saída:** tabela `{ achado, classificação, evidência, ação }`. Conclua com
 **"SEGURANÇA: LIMPO"** (só achados já conhecidos/melhorias) ou **"SEGURANÇA: ACHADOS"**

@@ -10,54 +10,109 @@
     "gateway": {
       "port": 8081,
       "management_port": 8181,
-      "role": "Único ponto de entrada externo; cliente OAuth2 do BFF (guarda o token na sessão, relaya via TokenRelay por rota); rate limiting Redis por tier; CSRF; entry point híbrido 401/302 (ADR-020); RevocationWebFilter (ADR-017)",
-      "stack": ["Spring Cloud Gateway (WebFlux)", "Redis (sessão Spring Session + rate limit)", "Eureka client"],
-      "depends_on": ["authorization-server", "user-service"],
-      "infra_depends_on": ["config-server", "discovery-server", "redis"]
+      "role": "Único ponto de entrada externo; cliente OAuth2 do BFF (guarda o token na sessão, relaya via TokenRelay por rota); rate limiting Redis por tier; CSRF; entry point híbrido 401/302 (ADR-020); RevocationWebFilter (ADR-017); RevocationTokenReader lê userID/iat ignorando exp — INVARIANTE: nunca declarar esse leitor como bean de ReactiveJwtDecoder, sob qualifier nenhum (ADR-025)",
+      "stack": [
+        "Spring Cloud Gateway (WebFlux)",
+        "Redis (sessão Spring Session + rate limit)",
+        "Eureka client"
+      ],
+      "depends_on": [
+        "authorization-server",
+        "user-service"
+      ],
+      "infra_depends_on": [
+        "config-server",
+        "discovery-server",
+        "redis"
+      ]
     },
     "authorization-server": {
       "port": 8082,
       "management_port": 8181,
-      "role": "OAuth2 Authorization Server (authorization_code + PKCE obrigatório + refresh + OIDC); customiza o JWT (userID/roles/permissions); lockout anti-brute-force por (conta, IP); gate de e-mail verificado com grace period (ADR-015); RevocationRefreshGuard bloqueia o refresh de titular revogado (ADR-017); purga do estado OAuth expirado (ADR-022)",
-      "stack": ["Spring Authorization Server", "PostgreSQL (estado OAuth: client/authorizations/consents)", "Redis (sessão, cookie AUTHSESSION)", "OpenFeign + Resilience4j"],
-      "depends_on": ["user-service"],
-      "infra_depends_on": ["config-server", "discovery-server", "auth-postgres", "redis"]
+      "role": "OAuth2 Authorization Server (authorization_code + PKCE obrigatório + refresh + OIDC); customiza o JWT (userID/roles/permissions); lockout anti-brute-force por (conta, IP); gate de e-mail verificado com grace period (ADR-015); RevocationRefreshGuard bloqueia o refresh de titular revogado (ADR-017); purga do estado OAuth expirado (ADR-022); re-derivação do estado do titular na emissão via AuthorizationEndpointRevalidationFilter + teto de vida da sessão ancorado no instante de autenticação (ADR-025)",
+      "stack": [
+        "Spring Authorization Server",
+        "PostgreSQL (estado OAuth: client/authorizations/consents)",
+        "Redis (sessão, cookie AUTHSESSION)",
+        "OpenFeign + Resilience4j"
+      ],
+      "depends_on": [
+        "user-service"
+      ],
+      "infra_depends_on": [
+        "config-server",
+        "discovery-server",
+        "auth-postgres",
+        "redis"
+      ]
     },
     "user-service": {
       "port": 8090,
       "management_port": 8181,
       "role": "Domínio central. UserController (self-service do próprio titular), AdminController /v1/admin/** ADMIN-only (leitura/listagem de PII, roles, deletes administrativos, trilha de auditoria — ADR-014/016/021), InternalUserController (canal interno para o auth-server); trilha de auditoria LGPD assíncrona (ADR-011); outbox + cliente Feign do notification-service com retry periódico (ADR-015); grava o epoch de revogação (ADR-017)",
-      "stack": ["Spring Boot", "MongoDB (replica set rs0 — coleções users, auditLogs, notificationOutbox)", "Redis (cache usersById/usersByEmail/authByEmail + rate limit de reenvio + epoch de revogação)", "OpenFeign + Resilience4j"],
-      "depends_on": ["notification-service"],
-      "infra_depends_on": ["config-server", "discovery-server", "mongodb", "redis"]
+      "stack": [
+        "Spring Boot",
+        "MongoDB (replica set rs0 — coleções users, auditLogs, notificationOutbox)",
+        "Redis (cache usersById/usersByEmail/authByEmail + rate limit de reenvio + epoch de revogação)",
+        "OpenFeign + Resilience4j"
+      ],
+      "depends_on": [
+        "notification-service"
+      ],
+      "infra_depends_on": [
+        "config-server",
+        "discovery-server",
+        "mongodb",
+        "redis"
+      ]
     },
     "notification-service": {
       "port": 8095,
       "management_port": 8181,
       "role": "Envio de e-mail de verificação de cadastro (ADR-015); stateless (sem datastore próprio); nunca exposto pelo gateway; springdoc REMOVIDO do pom por invariante (ADR-021) — não reintroduzir",
-      "stack": ["Spring Boot", "JavaMailSender (SMTP)"],
+      "stack": [
+        "Spring Boot",
+        "JavaMailSender (SMTP)"
+      ],
       "depends_on": [],
-      "infra_depends_on": ["config-server", "discovery-server"]
+      "infra_depends_on": [
+        "config-server",
+        "discovery-server"
+      ]
     },
     "config-server": {
       "port": 8888,
-      "role": "Config centralizada via classpath:/config (HA: config-server-1/2 atrás de config-lb/nginx); HTTP Basic, /actuator/health aberto p/ healthcheck. Deve subir primeiro",
-      "stack": ["Spring Cloud Config"],
+      "role": "Config centralizada via classpath:/config. Serviço ÚNICO e escalável por --scale (não mais o par nomeado config-server-1/2 — ADR-024), atrás do config-lb/nginx, que resolve por DNS. HTTP Basic, /actuator/health aberto p/ healthcheck. Deve subir primeiro",
+      "stack": [
+        "Spring Cloud Config"
+      ],
       "depends_on": [],
       "infra_depends_on": []
     },
     "discovery-server": {
       "port": "9091/9092",
-      "role": "Eureka HA (dois nós em peer replication)",
-      "stack": ["Netflix Eureka"],
+      "role": "Eureka em peer replication. No piso mínimo (default) roda UM nó; discovery-server-2 vive no profile ha (ADR-024)",
+      "stack": [
+        "Netflix Eureka"
+      ],
       "depends_on": [],
-      "infra_depends_on": ["config-server"]
+      "infra_depends_on": [
+        "config-server"
+      ]
     },
     "login-interface": {
       "port": "5173 (dev Vite) / 80 (nginx no Docker)",
       "role": "SPA React no padrão BFF; nunca manuseia JWT nem usa localStorage. No Docker/deploy o próprio nginx é a origem pública e faz proxy same-origin de 9 paths ao gateway (ADR-019); '/login' pertence ao IdP, não ao React Router",
-      "stack": ["React 19", "TypeScript", "Vite", "TailwindCSS 4", "nginx (Docker)"],
-      "depends_on": ["gateway"],
+      "stack": [
+        "React 19",
+        "TypeScript",
+        "Vite",
+        "TailwindCSS 4",
+        "nginx (Docker)"
+      ],
+      "depends_on": [
+        "gateway"
+      ],
       "infra_depends_on": []
     }
   },
@@ -71,9 +126,14 @@
   "shared_state": {
     "revocation_epoch": {
       "key": "revoke:user:{userID} no Redis (property security.revocation.key-prefix)",
-      "writer": "user-service (AdminService.updateUserRoles, RegisterService.deactivateUser/.deleteUser)",
-      "readers": ["user-service (RevocationTokenValidator)", "gateway (RevocationWebFilter)", "authorization-server (RevocationRefreshGuard)"],
-      "invariant": "o key-prefix tem de ser IDÊNTICO nos três serviços; divergir quebra em silêncio. Fail-open por decisão (ADR-017)"
+      "writer": "user-service (AdminService.updateUserRoles, RegisterService.deactivateUser/.deleteUser e RegisterService.updateUser quando muda senha ou e-mail — ADR-026)",
+      "readers": [
+        "user-service (RevocationTokenValidator)",
+        "gateway (RevocationWebFilter)",
+        "authorization-server (RevocationRefreshGuard)"
+      ],
+      "invariant": "o key-prefix tem de ser IDÊNTICO nos três serviços; divergir quebra em silêncio. Fail-open por decisão (ADR-017)",
+      "inventory": "as sete cópias do estado de autorização, com dono e mecanismo de invalidação de cada uma, vivem em docs/CONVENCOES.md; introduzir uma oitava exige declará-la lá no mesmo commit"
     },
     "session_cookies": "gateway=SESSION (namespace gateway:session), auth-server=AUTHSESSION (namespace authserver:session) — nomes e namespaces distintos evitam colisão no salto front-channel (ADR-007)"
   },

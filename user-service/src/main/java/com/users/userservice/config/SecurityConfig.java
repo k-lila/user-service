@@ -83,13 +83,12 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
                     "/internal/**",
-                        // NÃO remova "/actuator/**" achando que é resíduo depois que o actuator
-                        // foi para a porta de management (8181, gap G14): esta chain governa
-                        // TAMBÉM essa porta — o contexto filho de management herda o filtro de
-                        // segurança do pai. Sem esta linha, /actuator/health e /actuator/prometheus
-                        // na 8181 devolvem 401: o healthcheck do compose derruba o container e o
-                        // Prometheus para de raspar (medido em 2026-08-05, não teórico).
-                        // O controle do G14 é a 8181 não ser publicada, não este matcher.
+                        // NÃO remova "/actuator/**" achando que é resíduo depois da mudança do
+                        // actuator para a porta de management (8181, G14): o contexto filho de
+                        // management herda o filtro de segurança do pai, então esta chain governa
+                        // TAMBÉM essa porta. Sem a linha, o actuator da 8181 devolve 401 — o
+                        // healthcheck do compose derruba o container e o Prometheus para de
+                        // raspar. O controle do G14 é a 8181 não ser publicada, não este matcher.
                         "/actuator/**",
                         "/swagger-ui/**",
                         "/v3/api-docs/**",

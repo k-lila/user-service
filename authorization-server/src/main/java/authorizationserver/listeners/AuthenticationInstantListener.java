@@ -24,12 +24,11 @@ import jakarta.servlet.http.HttpSession;
  *
  * <p><b>A re-derivação do ADR-025 não passa por aqui, e isso é requisito (AC-38).</b> O filtro chama
  * {@code UserDetailsService.loadUserByUsername} <b>direto</b>, fora do
- * {@code AuthenticationManager}/{@code ProviderManager}, justamente para não publicar
- * {@link AuthenticationSuccessEvent}. Se publicasse, um único defeito quebraria dois controles de
- * uma vez: aqui, o carimbo avançaria a cada autorização e esvaziaria o teto de vida <i>pelo mesmo
- * mecanismo de auto-renovação que o incidente descreveu</i> — e também derrotaria a degradação por
- * epoch, porque {@code RevocationRefreshGuard.isRevoked} testa {@code epoch > instante} e um instante
- * sempre fresco devolveria {@code false} para sempre; e no {@link LoginAttemptListener}, o
+ * {@code AuthenticationManager}/{@code ProviderManager}, para não publicar
+ * {@link AuthenticationSuccessEvent}. Se publicasse, um defeito quebraria três controles: o carimbo
+ * avançaria a cada autorização e esvaziaria o teto de vida; a degradação por epoch morreria, porque
+ * {@code RevocationRefreshGuard.isRevoked} testa {@code epoch > instante} e um instante sempre
+ * fresco devolve {@code false} para sempre; e no {@link LoginAttemptListener} o
  * {@code loginSucceeded} <b>zeraria</b> o lockout do ADR-010 sem prova de senha.
  *
  * <p>O carimbo sobrevive ao {@code changeSessionId} do login (a proteção contra session fixation

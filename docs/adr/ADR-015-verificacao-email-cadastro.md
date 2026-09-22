@@ -279,7 +279,9 @@ legado `null`); e o teto `retry-max-attempts` (5).
 
 **Locking entre instâncias** — a complexidade que o descarte original citava, e que é real:
 lock `SETNX`+TTL no Redis (`outbox_retry:lock`), sem dependência nova (ShedLock foi descartado
-por isso). **É o único ponto do sistema que é fail-CLOSED no Redis**: cache, rate limit e
+por isso). **É o único ponto do sistema que é fail-CLOSED no Redis** _(emenda: deixou de ser
+único com o `OAuthStatePurgeService` do [ADR-022](ADR-022-higiene-estado-persistente.md), que
+adota o mesmo lock pelo mesmo motivo)_: cache, rate limit e
 revogação de token são fail-open de propósito, porque um Redis fora não pode barrar
 autenticação; aqui o inverso, porque falhar aberto com N instâncias significaria N e-mails
 duplicados por ciclo, e pular um ciclo de 5 min não custa nada.

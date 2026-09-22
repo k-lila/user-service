@@ -155,18 +155,13 @@ public class AdminService {
     public record RoleUpdateResult(AdminUserResponseDTO response, boolean adminGranted, boolean adminRevoked) {}
 
     /**
-     * Atualiza as roles de um titular. Regras (ADR-014):
-     * <ol>
-     *   <li>404 se o titular não existir.</li>
-     *   <li>400 ({@code IllegalArgumentException}) se {@code newRoles} contiver valor fora de
-     *       {@code {USER, ADMIN}}, ou se {@code USER} estiver ausente (rejeição explícita, sem
-     *       normalização silenciosa).</li>
-     *   <li>409 ({@link SelfRoleRevocationException}) se o ator ({@code requestingAdminId}) for o
-     *       próprio titular E o estado <b>persistido</b> tiver ADMIN E o payload remover ADMIN.</li>
-     *   <li>Persiste e evicta os 3 caches ({@code usersById}, {@code usersByEmail},
-     *       {@code authByEmail}) — roles afetam {@code AuthDTO}, consumido pelo authorization-server
-     *       via Feign.</li>
-     * </ol>
+     * Atualiza as roles de um titular (ADR-014). 404 se não existir; 400 se {@code newRoles} tiver
+     * valor fora de {@code {USER, ADMIN}} ou omitir {@code USER} (rejeição explícita, sem
+     * normalização silenciosa); 409 ({@link SelfRoleRevocationException}) se o ator for o próprio
+     * titular E o estado <b>persistido</b> tiver ADMIN E o payload o remover.
+     *
+     * <p>Persiste e evicta os 3 caches ({@code usersById}, {@code usersByEmail},
+     * {@code authByEmail}) — roles afetam o {@code AuthDTO} que o authorization-server consome.
      */
     public RoleUpdateResult updateUserRoles(String userId, Set<String> newRoles, String requestingAdminId) {
         User user = userRepository.findById(userId)

@@ -23,14 +23,12 @@
 #   (d) Location de /oauth2/authorize traz host/proto públicos       → Elo 2 + Elo 6
 #   (f) sessão ÍNTEGRA obtém o authorization_code                    → ADR-025
 #
-# POR QUE (f) É OBRIGATÓRIA, E NÃO "NICE TO HAVE". Depois da re-derivação na emissão (ADR-025), a
-# asserção (d) passa TANTO com o fix correto QUANTO com a sua pior regressão — "o filtro invalida
-# toda sessão, sempre" —, porque nos dois casos o authorize sem sessão vai para o login. (d) prova
-# que SEM sessão vai-se ao formulário; só (f) prova que COM sessão íntegra emite-se o código. Sem o
-# par, o smoke-test deixa de distinguir o fix da regressão total. Isso não é hipotético: durante a
-# implementação do ADR-025 a comparação de authorities crua reprovou TODA sessão (o Spring Security 7
-# acrescenta FACTOR_PASSWORD ao token do login, ausente no UserDetails re-derivado) — exatamente esta
-# regressão, pega por um teste de integração equivalente a (f).
+# POR QUE (f) É OBRIGATÓRIA. Depois do ADR-025 a asserção (d) passa TANTO com o fix correto QUANTO
+# com a sua pior regressão — "o filtro invalida toda sessão, sempre" —, porque nos dois casos o
+# authorize sem sessão vai para o login. (d) prova que SEM sessão vai-se ao formulário; só (f) prova
+# que COM sessão íntegra emite-se o código. Sem o par, o smoke-test não distingue o fix da regressão
+# total — que é uma regressão real: a comparação de authorities crua reprovava TODA sessão, porque o
+# Spring Security 7 acrescenta FACTOR_PASSWORD ao token do login e o UserDetails re-derivado não tem.
 #
 # USO:
 #   bash infra/smoke-test/login-topology-smoke-test.sh
@@ -39,15 +37,13 @@
 # SMOKE_KEEP_STACK=1 mantém a stack NO AR para inspeção depois do teste. Ele NÃO preserva dado: a
 # purga de estado acontece ANTES da subida, e é obrigatória (ver o comentário em compose_up).
 #
-# ⚠️  DESTRUTIVO. Sobe a stack com o MESMO nome de projeto Compose do deploy (o nome sai do
-# diretório) e roda `down -v` ANTES e DEPOIS — o que APAGA os volumes de Mongo e Postgres. O `down -v`
-# de antes não é zelo excessivo: sem ele o `gateway-client` herdado de outro PUBLIC_ORIGIN faz a
-# asserção (d) reprovar por estado sujo (ver compose_up). Não dá para
-# isolar por `-p nome-diferente`: `networks.default.name: user-service-net` fixa o nome da rede, e
-# dois projetos na mesma rede colidiriam nos aliases de container.
-# Por isso o script RECUSA rodar se já houver container do projeto no ar (ver
-# assert_no_running_stack) — instrução em comentário é exatamente o antipadrão que o ADR-023
-# rejeita. Derrube a stack você mesmo antes, para que a destruição seja um ato explícito.
+# ⚠️  DESTRUTIVO. Sobe a stack com o MESMO nome de projeto Compose do deploy (herdado do diretório)
+# e roda `down -v` ANTES e DEPOIS — o que APAGA os volumes de Mongo e Postgres. O `down -v` de antes
+# é obrigatório: sem ele o `gateway-client` herdado de outro PUBLIC_ORIGIN faz a asserção (d)
+# reprovar por estado sujo (ver compose_up). Isolar por `-p nome-diferente` não resolve, porque
+# `networks.default.name: user-service-net` fixa o nome da rede e dois projetos nela colidiriam nos
+# aliases de container. Por isso o script RECUSA rodar com container do projeto no ar (ver
+# assert_no_running_stack): derrube a stack você mesmo, para que a destruição seja ato explícito.
 #
 # MANUTENÇÃO. Quem editar login-interface/nginx.conf, gateway/.../GatewayRouter.java ou os
 # SecurityConfig do gateway/authorization-server tem de revisitar as asserções daqui — é a

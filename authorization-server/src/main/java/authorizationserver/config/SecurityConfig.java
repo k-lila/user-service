@@ -26,36 +26,35 @@ import authorizationserver.services.RevocationRefreshGuard;
 
 @Configuration
 @EnableWebSecurity
-// Sessão HTTP (login/consent) no Redis — escala horizontal.
-// Habilitação explícita: no Spring Boot 4.0 a autoconfig de Spring Session não dispara só pela dep.
-// redisNamespace dedicado ("authserver:session"): isola as sessões do auth-server das do gateway
-// ("gateway:session") no mesmo Redis, em vez de depender só da unicidade dos session ids.
+// Sessão HTTP (login/consent) no Redis — escala horizontal. Habilitação explícita: no Spring Boot
+// 4.0 a autoconfig de Spring Session não dispara só pela dependência. O redisNamespace dedicado
+// isola as sessões do auth-server das do gateway ("gateway:session") no mesmo Redis, em vez de
+// depender só da unicidade dos session ids.
 @EnableRedisHttpSession(redisNamespace = "authserver:session")
 public class SecurityConfig {
 
 	@Value("${auth.issuer}")
 	private String issuer;
 
-	// Flag Secure do cookie AUTHSESSION. Default false p/ dev HTTP puro; o overlay de deploy
-	// (docker-compose.deploy.yml, Cloudflare) liga via APP_COOKIE_SECURE=true. Simétrico ao
-	// gateway: atrás de proxy que termina TLS a flag é explícita (não inferida do request).
+	// Flag Secure do cookie AUTHSESSION. Default false p/ dev HTTP puro; o overlay de deploy liga
+	// via APP_COOKIE_SECURE=true. Explícita e não inferida do request porque atrás de proxy que
+	// termina TLS o dado não chega — simétrico ao gateway.
 	@Value("${app.cookie.secure:false}")
 	private boolean cookieSecure;
 
-	// Teto de vida da sessão do IdP, medido a partir do INSTANTE DE AUTENTICAÇÃO (ADR-025) — não de
-	// getCreationTime(), que no BFF mede também o tempo de sessão anônima (CSRF + saved request) e
-	// faria um login legítimo nascer vencido. Os 30 min do Spring Session são de INATIVIDADE e cada
-	// autorização os renova: sem este teto, uma sessão em uso contínuo nunca expira.
-	// GRANULARIDADE REAL ≈ vida do refresh token (60 min, defaults do SAS): quem renova por
-	// refresh_token não passa pelo authorize. "Teto absoluto" seria a mesma imprecisão de "revogação
-	// força re-autenticação" que a ADR-025 corrige.
+	// Teto de vida da sessão do IdP, medido do INSTANTE DE AUTENTICAÇÃO (ADR-025) — não de
+	// getCreationTime(), que no BFF mede também a sessão anônima (CSRF + saved request) e faria um
+	// login legítimo nascer vencido. Os 30 min do Spring Session são de INATIVIDADE e cada
+	// autorização os renova: sem este teto, sessão em uso contínuo nunca expira.
+	// GRANULARIDADE REAL ≈ vida do refresh token (60 min): quem renova por refresh_token não passa
+	// pelo authorize, então "teto absoluto" seria imprecisão.
 	@Value("${security.session.max-lifetime:8h}")
 	private Duration sessionMaxLifetime;
 
-	// REVERSÃO OPERACIONAL, não configuração suportada (ADR-025). O raio de um defeito no filtro de
-	// re-derivação é "ninguém consegue logar" (R-01, P0), e com a propriedade servida pelo
-	// config-server o rollback é restart, sem rebuild. Precedente: TOKEN_REVOCATION_ENABLED.
-	// Em `false` o sistema volta ao comportamento vulnerável descrito na ADR-025 — não deixe assim.
+	// REVERSÃO OPERACIONAL, não configuração suportada (ADR-025): o raio de um defeito no filtro de
+	// re-derivação é "ninguém consegue logar" (R-01, P0), e servida pelo config-server o rollback é
+	// restart sem rebuild. Precedente: TOKEN_REVOCATION_ENABLED.
+	// Em `false` o sistema volta ao comportamento vulnerável da ADR-025 — não deixe assim.
 	@Value("${security.session.revalidation.enabled:true}")
 	private boolean revalidationEnabled;
 
@@ -105,18 +104,14 @@ public class SecurityConfig {
 			);
 
 		// Re-derivação do titular na emissão (ADR-025). TRÊS coisas a NÃO regredir aqui:
-		//
 		//  (1) A POSIÇÃO. addFilterAfter(SecurityContextHolderFilter): antes dele o
-		//      SecurityContextHolder ainda está vazio e o filtro vira NO-OP SILENCIOSO — filtro
-		//      correto em posição errada é a mesma classe de falha do sampling de tracing
-		//      documentado e inerte, com build verde. Guarda:
-		//      AuthorizationChainStructureIntegrationTest assere o índice na FilterChainProxy.
+		//      SecurityContextHolder está vazio e o filtro vira NO-OP SILENCIOSO, com build verde.
+		//      Guarda: AuthorizationChainStructureIntegrationTest assere o índice na FilterChainProxy.
 		//  (2) A CHAIN. Só a @Order(1) serve: é ela que tem securityMatcher(endpointsMatcher) e,
 		//      portanto, a única que vê /oauth2/authorize. Na @Order(2) o filtro nunca rodaria.
-		//  (3) NÃO é @Component nem @Bean. Qualquer bean de tipo Filter é auto-registrado pelo
-		//      Boot no container servlet, o que o faria atuar em TODO path fora da security chain
-		//      — inclusive na porta de management. Instanciar com `new` aqui é o que mantém o
-		//      escopo restrito ao matcher positivo do próprio filtro.
+		//  (3) NÃO é @Component nem @Bean. Bean de tipo Filter é auto-registrado pelo Boot no
+		//      container servlet e passaria a atuar em TODO path fora da security chain, inclusive
+		//      na porta de management. O `new` aqui é o que mantém o escopo restrito ao matcher.
 		http.addFilterAfter(
 			new AuthorizationEndpointRevalidationFilter(
 				// Derivado das settings, nunca do literal "/oauth2/authorize": um endpoint
@@ -143,13 +138,13 @@ public class SecurityConfig {
         					"/.well-known/**",
         					"/login",
         					"/error",
-					// NÃO remova "/actuator/**" achando que é resíduo depois que o actuator foi
-					// para a porta de management (8181, gap G14): esta chain governa TAMBÉM essa
-					// porta — o contexto filho de management herda o filtro de segurança do pai.
-					// Sem esta linha o formLogin redireciona o actuator da 8181 para /login (302),
-					// o Prometheus recebe HTML e para de raspar — e o healthcheck do compose passa
-					// mesmo assim, porque `curl -f` não falha em 302 (falso healthy medido em
-					// 2026-08-05). O controle do G14 é a 8181 não ser publicada, não este matcher.
+					// NÃO remova "/actuator/**" achando que é resíduo depois da mudança do
+					// actuator para a porta de management (8181, G14): o contexto filho de
+					// management herda o filtro de segurança do pai, então esta chain governa
+					// TAMBÉM essa porta. Sem a linha, o formLogin redireciona o actuator da 8181
+					// para /login (302), o Prometheus recebe HTML e para de raspar — e o
+					// healthcheck passa mesmo assim, porque `curl -f` não falha em 302 (falso
+					// healthy). O controle do G14 é a 8181 não ser publicada, não este matcher.
 							"/actuator/**"
 				).permitAll()
 				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

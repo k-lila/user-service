@@ -40,16 +40,16 @@ import reactor.core.publisher.Mono;
 
 @Configuration
 @EnableWebFluxSecurity
-// Sessão WebFlux (OAuth2AuthorizedClient/JWT) no Redis — escala horizontal.
-// Habilitação explícita: no Spring Boot 4.0 a autoconfig de Spring Session não dispara só pela dep.
-// redisNamespace dedicado ("gateway:session"): isola as sessões do gateway das do auth-server
-// ("authserver:session") no mesmo Redis, em vez de depender só da unicidade dos session ids.
+// Sessão WebFlux (OAuth2AuthorizedClient/JWT) no Redis — escala horizontal. Habilitação explícita:
+// no Spring Boot 4.0 a autoconfig de Spring Session não dispara só pela dependência. O
+// redisNamespace dedicado isola as sessões do gateway das do auth-server ("authserver:session") no
+// mesmo Redis, em vez de depender só da unicidade dos session ids.
 @EnableRedisWebSession(redisNamespace = "gateway:session")
 public class SecurityConfig {
 
-    // Flag Secure dos cookies (SESSION/XSRF-TOKEN). Default false p/ dev HTTP puro;
-    // o overlay de deploy (docker-compose.deploy.yml, Cloudflare) liga via APP_COOKIE_SECURE=true.
-    // Atrás de proxy que termina TLS o sslInfo do exchange é null, então a flag é explícita (não inferida).
+    // Flag Secure dos cookies (SESSION/XSRF-TOKEN). Default false p/ dev HTTP puro; o overlay de
+    // deploy liga via APP_COOKIE_SECURE=true. Explícita e não inferida porque atrás de proxy que
+    // termina TLS o sslInfo do exchange é null.
     @Value("${app.cookie.secure:false}")
     private boolean cookieSecure;
 
@@ -66,22 +66,16 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                 .csrfTokenRepository(csrfTokenRepository)
                 .csrfTokenRequestHandler(new ServerCsrfTokenRequestAttributeHandler())
-                // /v1/users/register (POST) é público e pré-sessão (ADR-015): CSRF não protege
-                // nada ali (sem cookie/sessão para um atacante forjar). /v1/users/verify-email
-                // é GET — já fora do CSRF por padrão. /v1/users/resend-verification deixou de
-                // ser pré-sessão (agora self-service autenticado) — exige X-XSRF-TOKEN como
-                // qualquer outra rota autenticada.
+                // Isenções (ADR-015, ADR-019, BUG-001/003). /v1/users/register e /login (POST)
+                // são pré-sessão: não há sessão do gateway que um atacante possa forjar, e o
+                // CSRF daqui só defende ações sobre essa sessão. O formulário do IdP tem CSRF
+                // próprio — o gateway não consegue embutir seu XSRF-TOKEN num HTML gerado pelo
+                // auth-server. /v1/users/verify-email é GET, já fora por método seguro;
+                // /v1/users/resend-verification virou self-service autenticado e exige o header.
                 //
-                // /login (POST) é isentado pelo mesmo racional de /v1/users/register: o request
-                // é unauthenticated (sem sessão do gateway que um atacante possa forjar).
-                // A proteção CSRF do gateway defende ações sobre a sessão do gateway; POST /login
-                // não tem sessão a defender. O auth-server tem CSRF próprio no formulário que
-                // ele renderiza — o gateway não tem como embutir seu XSRF-TOKEN num HTML gerado
-                // pelo auth-server.
-                // Escopo: pathMatchers("/login") compara contra getPath().pathWithinApplication()
-                // (sem query string), portanto casa /login E /login?error — mas /login?error é
-                // GET e já fica fora do DEFAULT_CSRF_MATCHER por método seguro. Não casa
-                // /login/oauth2/code/gateway-client (path diferente). (ADR-019, BUG-001/003)
+                // Escopo: pathMatchers("/login") compara pathWithinApplication() (sem query),
+                // então casa /login E /login?error — este já sai pelo método seguro. NÃO casa
+                // /login/oauth2/code/gateway-client (path diferente).
                 .requireCsrfProtectionMatcher(new AndServerWebExchangeMatcher(
                         CsrfWebFilter.DEFAULT_CSRF_MATCHER,
                         new NegatedServerWebExchangeMatcher(
@@ -98,25 +92,22 @@ public class SecurityConfig {
                         "/oauth2/token",
                         "/login/oauth2/**",
                         // Front-channel do RP-Initiated Logout (ADR-018): o browser chega aqui
-                        // DEPOIS de o POST /logout ter encerrado a sessão do gateway, ou seja,
-                        // sem autenticação. Fora do permitAll, o entry point devolveria 401 e o
-                        // logout nunca alcançaria o end_session_endpoint do auth-server.
+                        // sem autenticação, DEPOIS de o POST /logout encerrar a sessão. Fora do
+                        // permitAll o entry point devolveria 401 e o logout nunca alcançaria o
+                        // end_session_endpoint.
                         "/connect/**",
-                        // CSS do formulário de login do IdP (ADR-019): solicitado pelo browser
-                        // antes de autenticar (sem sessão). Sem permitAll, 401 → formulário sem
-                        // estilo. Roteado pela rota auth-default-ui → lb://authorization-server.
+                        // CSS do formulário de login do IdP (ADR-019): pedido pelo browser antes
+                        // de autenticar. Sem permitAll, 401 → formulário sem estilo.
                         "/default-ui.css",
-                        // NÃO é resíduo, apesar de o actuator já viver na porta de management
-                        // 8181 (gateway.yml): esta chain governa TAMBÉM essa porta. Remover a
-                        // linha faz /actuator/health e /actuator/prometheus na 8181 devolverem
-                        // 401 — healthcheck do compose e scrape do Prometheus caem junto
-                        // (medido no user-service em 2026-08-05, ao fechar o G14). O controle
-                        // é a 8181 não ser publicada, não este matcher.
+                        // NÃO é resíduo, apesar de o actuator viver na porta de management 8181:
+                        // esta chain governa TAMBÉM essa porta, e remover a linha faz o actuator
+                        // da 8181 devolver 401 — healthcheck do compose e scrape do Prometheus
+                        // caem junto (G14). O controle é a 8181 não ser publicada, não este
+                        // matcher.
                         "/actuator/**",
                         // /swagger-ui/**, /swagger-ui.html e /v3/api-docs/** SAÍRAM do permitAll
-                        // (ADR-020): caem em anyExchange().authenticated(). O Cloudflare Access,
-                        // controle previsto para eles, exige cartão no Zero Trust — a sessão OAuth2
-                        // do próprio BFF passou a ser o controle de acesso da documentação.
+                        // (ADR-020): caem em anyExchange().authenticated(), e a sessão OAuth2 do
+                        // próprio BFF é o controle de acesso da documentação.
                         "/v1/users/register",
                         "/v1/users/verify-email",
                         "/v1/users/resend-verification"
@@ -143,21 +134,18 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // Entry point híbrido (ADR-020). O default do BFF é 401: o SPA é cliente JSON e decide sozinho
-    // quando iniciar o login — redirecionar um XHR para o /oauth2/authorize devolveria HTML onde o
-    // front espera JSON. Mas /swagger-ui/** deixou de ser público e passou a ser navegação de
-    // browser: com 401 seco o operador veria uma página em branco, sem caminho para autenticar.
-    // Só esses paths ganham 302 para o oauth2Login; todo o resto continua 401.
+    // Entry point híbrido (ADR-020). O default do BFF é 401: o SPA é cliente JSON e redirecionar
+    // um XHR para /oauth2/authorize devolveria HTML onde ele espera JSON. Só /swagger-ui/**, que é
+    // NAVEGAÇÃO de browser e deixou de ser público, ganha 302 — com 401 seco o operador veria
+    // página em branco, sem caminho para autenticar.
     //
-    // Volta ao Swagger depois do login: RedirectServerAuthenticationEntryPoint já traz um
-    // WebSessionServerRequestCache por default e o OAuth2LoginSpec injeta o cache do
-    // ServerHttpSecurity no seu success handler — instâncias distintas, mesma chave de atributo na
-    // WebSession, então o request salvo é restaurado.
+    // /v3/api-docs/** fica FORA desta lista de propósito: é XHR (o JS da página busca o doc), e um
+    // 302 faria o swagger-client parsear a tela de login como JSON; o 401 é o erro legível. Carregar
+    // a página primeiro já garante a sessão antes de o doc ser buscado.
     //
-    // /v3/api-docs/** fica FORA desta lista de propósito: é caminho de XHR (o JS da página busca o
-    // doc). Um 302 para o HTML do login faria o swagger-client tentar parsear a tela de login como
-    // JSON; o 401 do default é o erro legível. O caminho normal — carregar a página primeiro — já
-    // garante a sessão antes de o doc ser buscado.
+    // A volta ao Swagger após o login funciona porque o RedirectServerAuthenticationEntryPoint traz
+    // um WebSessionServerRequestCache por default e o OAuth2LoginSpec injeta o cache do
+    // ServerHttpSecurity no success handler — instâncias distintas, mesma chave na WebSession.
     private ServerAuthenticationEntryPoint swaggerAwareEntryPoint() {
         RedirectServerAuthenticationEntryPoint swaggerLogin =
                 new RedirectServerAuthenticationEntryPoint("/oauth2/authorization/gateway-client");

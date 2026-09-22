@@ -58,6 +58,19 @@ Dois canais internos existem hoje: `/internal/users/email/{email}` (auth-server 
 
 ## As sete cópias do estado de autorização (ADR-025)
 
+**O epoch de revogação por usuário (`revoke:user:{userID}` no Redis) é a fonte ÚNICA**, com
+`key-prefix` **idêntico** nos três serviços: o user-service grava; gateway, user-service e
+auth-server leem. A checagem é **fail-open** — outage de Redis não bloqueia a autenticação. Não
+troque por introspection por-request nem por denylist de `jti`: nenhuma das duas cobre "revogar
+todos os tokens de um usuário", que é o caso de uso.
+
+> **Autocorreção registrada (2026-08-08).** A revogação, **sozinha, não forçava re-autenticação** —
+> ao contrário do que a documentação deste projeto afirmou até essa data. Enquanto a sessão do IdP
+> vivesse, o `/oauth2/authorize` reemitia credencial nova com `iat = agora`, e as três checagens
+> (`iat < epoch`) aprovavam **por construção**. Quem força a re-autenticação de fato é a
+> **re-derivação na emissão** (ADR-025). O registro fica aqui porque a afirmação errada sobreviveu
+> meses sem ser contestada, e apagá-la em silêncio perderia a lição.
+
 O estado de autorização de um titular existe **hoje em sete lugares**. Cada um precisa de um dono e de
 um mecanismo de invalidação **declarados** — a ADR-025 nasceu porque uma delas (a sessão do IdP) não
 tinha nenhum, e sozinha refabricava credencial nova e limpa a partir de estado obsoleto: nove
@@ -68,19 +81,19 @@ tinha nenhum, e sozinha refabricava credencial nova e limpa a partir de estado o
 | 1 | MongoDB `users` | user-service | **Fonte de verdade** — nada a invalidar |
 | 2 | Cache Redis `usersById`/`usersByEmail`/`authByEmail` | user-service | Evict explícito nas mutações + TTL 5 min |
 | 3 | **Sessão do IdP** (`AUTHSESSION`, `authserver:session:sessions:*`) | auth-server | Re-derivação na emissão + teto de vida (**ADR-025**) — antes: **NENHUM** |
-| 4 | Claims do access token | auth-server emite; gateway/user-service checam | Epoch de revogação (ADR-017) |
-| 5 | Refresh token | auth-server | `RevocationRefreshGuard` (ADR-017) |
+| 4 | Claims do access token | auth-server emite; gateway/user-service checam | Epoch de revogação (ADR-017; escrito também na troca de senha/e-mail — ADR-026) |
+| 5 | Refresh token | auth-server | `RevocationRefreshGuard` (ADR-017 + ADR-026) |
 | 6 | PostgreSQL `oauth2_authorization` | auth-server | Só purga por expiração (ADR-022) |
 | 7 | Sessão do gateway (`SESSION`, `gateway:session`) | gateway | `RevocationWebFilter` (ADR-017 + correção do `exp`, ADR-025) |
 
 **Lacunas conhecidas** (listadas de propósito — um inventário que só mostra o que **está** coberto não
 impede a oitava cópia de entrar, e impede menos ainda que a lacuna já existente seja esquecida):
 
-- **Troca de senha não invalida nada.** `RegisterService.java:105-109` apenas regrava o hash: sem
-  epoch de revogação, sem invalidar a sessão do IdP, sem invalidar a sessão do gateway e sem derrubar
-  tokens vivos. Consequência: **trocar a senha não expulsa quem já está dentro** — inclusive um
-  atacante com sessão ativa, que é precisamente o caso de uso de trocar a senha. Gap **identificado e
-  registrado**, fora do escopo da ADR-025 (ver `docs/SECURITY.md`).
+- ~~**Troca de senha não invalida nada.**~~ **Fechada em 2026-08-10 pela
+  [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md).** `RegisterService.updateUser`
+  grava o epoch de revogação quando a senha **ou** o e-mail muda, derrubando as cópias #4 e #5 — e,
+  por consequência, a #7 no `RevocationWebFilter` e a #3 na re-derivação da ADR-025. Trocar só o nome
+  não revoga. O autor da troca também é deslogado (o epoch é por titular, não por sessão).
 - **Eliminação push ausente:** não há canal para o auth-server apagar sessões/registros de um titular
   sob demanda; a ADR-025 reduz o resíduo (a sessão órfã fica inerte e morre no primeiro contato), não
   o zera. ADR própria, futura.
@@ -89,6 +102,11 @@ impede a oitava cópia de entrar, e impede menos ainda que a lacuna já existent
 > mecanismo de invalidação** nesta tabela, no mesmo commit. Esta correção foi o **quarto remendo da
 > mesma família** (ADR-017 cobriu #4 e #5, o filtro de borda cobriu #7, a ADR-025 cobriu #3); a tabela
 > existe para que não haja um quinto pela mesma razão.
+>
+> A [ADR-026](adr/ADR-026-revogacao-troca-senha-email.md) **não** é esse quinto remendo, e a distinção
+> importa: ela não descobriu uma cópia sem dono, fechou uma lacuna que esta tabela já declarava por
+> escrito. É a tabela funcionando como pretendido — o gap foi encontrado por leitura do inventário,
+> não por incidente.
 
 ## Credenciais e roles
 
@@ -98,8 +116,36 @@ impede a oitava cópia de entrar, e impede menos ainda que a lacuna já existent
 
 ## Configuração centralizada
 
-- Segredos vêm do **config-server via env**. Segredos hardcoded são **gaps conhecidos**
-  (ver [docs/SECURITY.md](SECURITY.md)), não o padrão — não introduza novos.
+- Configuração não-sensível vem do **config-server** (`classpath:/config`); **segredos vêm de
+  Docker secrets** montados em `/run/secrets/` e resolvidos pelo `configtree:` do
+  `SPRING_CONFIG_IMPORT` ([ADR-009](adr/ADR-009-base-secrets-native-docker-secrets.md)) — nunca
+  do `.env`. Segredos hardcoded são **gaps conhecidos** (ver [docs/SECURITY.md](SECURITY.md)),
+  não o padrão — não introduza novos.
+
+## Estado local tira o serviço do eixo replicável (ADR-024)
+
+Os quatro serviços de domínio pertencem ao **eixo replicável** (`--scale <svc>=N`) porque nenhum
+deles guarda estado no processo: cache no Redis (`RedisCacheManager`, nunca Caffeine), sessão no
+Redis, estado OAuth no Postgres, e os dois `@Scheduled` — `OutboxRetryService` (user-service) e
+`OAuthStatePurgeService` (auth-server) — protegidos por lock `SETNX` fail-closed; sem ele, N
+réplicas mandam N e-mails (ou N `DELETE` concorrentes) por ciclo.
+
+Isso se perde em silêncio: nada no build acusa, e uma réplica só revela o problema em produção.
+Ao introduzir código novo em qualquer um dos quatro, verifique que você **não** acrescentou:
+
+- `ConcurrentHashMap`, `Caffeine` ou `static Map` como estado em bean de serviço;
+- `@Scheduled` sem lock distribuído;
+- `@PostConstruct` ou `CommandLineRunner` que escreva no banco.
+
+Qualquer um dos três tira o serviço do eixo replicável. Se for inevitável, o eixo do componente
+muda e isso precisa ser declarado no ADR-024.
+
+**A exceção existente, e por que ela é segura:** o seed do `gateway-client` em
+`OAuth2ClientConfig` escreve no Postgres no boot, com N réplicas subindo juntas. Ele é
+check-then-act e a corrida o atravessa — quem impede a duplicata é o **índice único sobre
+`client_id`**, e o seed absorve a violação e relê o registro
+([ADR-022](adr/ADR-022-higiene-estado-persistente.md)). Escrita no boot só é aceitável com uma
+garantia desse tipo **no banco**, nunca no código.
 
 ## Cookies de sessão distintos por serviço (ADR-007)
 
@@ -184,3 +230,13 @@ arquivos por **caminho relativo** (ex.: `user-service/src/main`, `docs/adr/TEMPL
 - **ADR-005** — chave JWK persistente
 - **ADR-006** — canal interno isolado
 - **ADR-007** — sessão Redis + cookies distintos
+- **ADR-009** — base secrets-native (Docker secrets)
+- **ADR-012** — consentimento LGPD no cadastro
+- **ADR-013** — remoção das rotas admin de DELETE do `UserController`
+- **ADR-015** — verificação de e-mail no cadastro
+- **ADR-017** — revogação ativa de token
+- **ADR-021** — remoção da listagem pública de usuários
+- **ADR-022** — higiene do estado persistente
+- **ADR-024** — elasticidade, piso mínimo e eixos de escala
+- **ADR-025** — re-derivação do estado do titular na emissão
+- **ADR-026** — revogação na troca de senha ou e-mail

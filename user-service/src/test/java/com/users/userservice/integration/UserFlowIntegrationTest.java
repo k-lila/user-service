@@ -3,6 +3,7 @@ package com.users.userservice.integration;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.time.Instant;
+import java.util.OptionalLong;
 import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
@@ -20,6 +21,7 @@ import com.users.userservice.exceptions.EmailAlreadyRegisteredException;
 import com.users.userservice.repository.IUserRepository;
 import com.users.userservice.services.RegisterService;
 import com.users.userservice.services.SearchService;
+import com.users.userservice.services.TokenRevocationService;
 
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class UserFlowIntegrationTest extends AbstractIntegrationTest {
@@ -27,6 +29,7 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
     @Autowired RegisterService registerService;
     @Autowired SearchService searchService;
     @Autowired IUserRepository userRepository;
+    @Autowired TokenRevocationService tokenRevocationService;
 
     @BeforeEach
     void limpar() {
@@ -57,8 +60,8 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertNotNull(encontrado);
         assertEquals("fulano@email.com", encontrado.getEmail());
         assertEquals("Fulano", encontrado.getName());
-        assertTrue(encontrado.getActive());           // lacuna 1
-        assertNotNull(encontrado.getRegistrationDate()); // lacuna 2
+        assertTrue(encontrado.getActive());
+        assertNotNull(encontrado.getRegistrationDate());
         // Consentimento LGPD persistido no cadastro (aceite versionado com timestamp).
         assertNotNull(encontrado.getConsentAcceptedAt());
         assertEquals("v1", encontrado.getTermsVersion());
@@ -172,7 +175,6 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
                 registerService.updateUser(buildDTO("Novo", "novo@email.com", null), "id-inexistente"));
     }
 
-    // lacuna 3
     @Test
     void deveAtribuirRoleUser_quandoUsuarioRegistrado() {
         UserResponseDTO registrado = registerService.registerUser(
@@ -184,7 +186,6 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertEquals(1, persistido.getRoles().size());
     }
 
-    // lacuna 4
     @Test
     void deveHashearSenhaComBcrypt_quandoUsuarioRegistrado() {
         UserResponseDTO registrado = registerService.registerUser(
@@ -196,14 +197,12 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertNotEquals("senha123", persistido.getPasswordHash());
     }
 
-    // lacuna 5
     @Test
     void deveLancarDomainEntityNotFound_quandoIdInexistenteNaBusca() {
         assertThrows(DomainEntityNotFound.class, () ->
                 searchService.searchById("id-inexistente"));
     }
 
-    // lacuna 6
     @Test
     void deveBuscarPorEmail_quandoEmailExiste() {
         registerService.registerUser(buildDTO("Fulano", "fulano@email.com", "senha123"));
@@ -215,14 +214,12 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
         assertEquals("fulano@email.com", encontrado.getEmail());
     }
 
-    // lacuna 7
     @Test
     void deveLancarDomainEntityNotFound_quandoEmailInexistente() {
         assertThrows(DomainEntityNotFound.class, () ->
                 searchService.searchByEmail("nao@existe.com"));
     }
 
-    // lacuna 8
     @Test
     void deveLancarEmailAlreadyRegisteredException_quandoEmailDeAtualizacaoConflita() {
         UserResponseDTO userA = registerService.registerUser(
@@ -231,6 +228,48 @@ class UserFlowIntegrationTest extends AbstractIntegrationTest {
 
         assertThrows(EmailAlreadyRegisteredException.class, () ->
                 registerService.updateUser(buildDTO("Fulano", "ciclano@email.com", null), userA.getId()));
+    }
+
+    // --- Revogação ativa no update (G15 / ADR-026), contra o Redis real -------------------
+
+    @Test
+    void deveGravarEpochDeRevogacaoNoRedisReal_aoTrocarSenha() {
+        UserResponseDTO user = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+        assertTrue(tokenRevocationService.revokedAtMillis(user.getId()).isEmpty());
+
+        long antes = System.currentTimeMillis();
+        registerService.updateUser(buildDTO("Fulano", "fulano@email.com", "novaSenha456"), user.getId());
+
+        OptionalLong epoch = tokenRevocationService.revokedAtMillis(user.getId());
+        assertTrue(epoch.isPresent(), "troca de senha deve gravar o epoch de revogação");
+        assertTrue(epoch.getAsLong() >= antes);
+    }
+
+    @Test
+    void deveGravarEpochDeRevogacaoNoRedisReal_aoTrocarEmail() {
+        UserResponseDTO user = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+        assertTrue(tokenRevocationService.revokedAtMillis(user.getId()).isEmpty());
+
+        long antes = System.currentTimeMillis();
+        registerService.updateUser(buildDTO("Fulano", "novo@email.com", null), user.getId());
+
+        OptionalLong epoch = tokenRevocationService.revokedAtMillis(user.getId());
+        assertTrue(epoch.isPresent(), "troca de e-mail deve gravar o epoch de revogação");
+        assertTrue(epoch.getAsLong() >= antes);
+    }
+
+    @Test
+    void naoDeveGravarEpochDeRevogacao_aoTrocarApenasONome() {
+        UserResponseDTO user = registerService.registerUser(
+                buildDTO("Fulano", "fulano@email.com", "senha123"));
+
+        registerService.updateUser(buildDTO("Fulano Silva", "fulano@email.com", null), user.getId());
+
+        assertTrue(
+                tokenRevocationService.revokedAtMillis(user.getId()).isEmpty(),
+                "trocar só o nome não é evento de segurança — não deve revogar");
     }
 
 }

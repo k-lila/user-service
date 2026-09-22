@@ -1,0 +1,41 @@
+# Dockerfile único dos seis módulos Spring. Substitui as seis cópias byte-a-byte idênticas que
+# existiam em config-server/, discovery-server/, authorization-server/, user-service/, gateway/ e
+# notification-service/.
+#
+# O contexto de build é a RAIZ do repositório, não o diretório do módulo — obrigatório desde o POM
+# pai: o `<parent>` dos filhos aponta para ../pom.xml, e com o contexto no módulo esse arquivo não
+# seria enviado ao daemon (Maven falharia com "Non-resolvable parent POM").
+#
+# Qual módulo construir vem de --build-arg MODULE=<nome>, declarado nos blocos `build:` do
+# docker-compose.yml. Ver .dockerignore na raiz: ele é fail-closed (nega tudo e readmite só o que o
+# build precisa) para que secrets/ e .env nunca entrem no contexto.
+#
+# login-interface NÃO usa este arquivo — é Node/nginx e mantém o Dockerfile próprio.
+
+FROM maven:3.9.6-eclipse-temurin-21 AS builder
+ARG MODULE
+WORKDIR /opt/app
+
+# Só os POMs primeiro: enquanto nenhum deles mudar, a camada de dependências é reaproveitada do
+# cache mesmo que o código-fonte mude. Os seis POMs de módulo entram porque o reator os lê todos.
+COPY pom.xml .
+COPY config-server/pom.xml config-server/
+COPY discovery-server/pom.xml discovery-server/
+COPY authorization-server/pom.xml authorization-server/
+COPY user-service/pom.xml user-service/
+COPY gateway/pom.xml gateway/
+COPY notification-service/pom.xml notification-service/
+RUN mvn -B -pl ${MODULE} -am dependency:go-offline
+
+COPY ${MODULE}/src ${MODULE}/src
+RUN mvn -B -pl ${MODULE} -am clean package -DskipTests
+
+FROM eclipse-temurin:21-jre-jammy
+ARG MODULE
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+WORKDIR /opt/app
+COPY --from=builder /opt/app/${MODULE}/target/*.jar app.jar
+RUN chown appuser:appuser app.jar
+USER appuser
+ENTRYPOINT ["java", "-jar", "app.jar"]

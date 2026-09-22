@@ -69,12 +69,12 @@ public class AuditLog {
      *
      * <p>Padrão <i>expire-at</i> ({@code expireAfterSeconds = 0}), o mesmo do
      * {@code NotificationOutbox}: o prazo é decidido por documento na escrita, a partir de
-     * {@code app.audit.retention}. Um TTL fixo no índice prenderia a retenção ao valor usado
-     * na criação — mudá-la exigiria {@code collMod}, não configuração.
+     * {@code app.audit.retention}. TTL fixo no índice prenderia a retenção ao valor usado na
+     * criação — mudá-la exigiria {@code collMod}, não configuração.
      *
-     * <p>Documentos gravados antes desta mudança não têm o campo, e o TTL do Mongo <b>ignora</b>
-     * documento sem o campo indexado: o histórico anterior nunca é apagado. É o lado seguro
-     * numa trilha de conformidade — o dado apagado não volta.
+     * <p>Documento gravado antes desta mudança não tem o campo, e o TTL do Mongo <b>ignora</b>
+     * documento sem o campo indexado: o histórico anterior nunca é apagado — lado seguro numa
+     * trilha de conformidade, já que o dado apagado não volta.
      */
     @Indexed(name = "purgeAt_ttl", expireAfterSeconds = 0)
     private Instant purgeAt;

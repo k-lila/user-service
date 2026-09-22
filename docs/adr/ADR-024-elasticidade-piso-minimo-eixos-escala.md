@@ -46,7 +46,7 @@ nos dois extremos, e o ADR-008 (`requirepass` + `masterauth` + `sentinel auth-pa
 emenda. O custo de um piso degenerado é não ter failover — o que é correto por construção: não há
 para onde falhar.
 
-**Três eixos de escala, declarados** (catalogados em `docs/BLUEPRINT.md § E`):
+**Três eixos de escala, declarados:**
 
 | Eixo | Componentes | Como cresce |
 |---|---|---|

@@ -238,6 +238,13 @@ trabalha normalmente por até **~1h** e só então cai no formulário. Consequê
 backlog do SPA **não pode prometer** correlacionar a mensagem ao ato de trocar o e-mail, porque no
 instante em que o titular cai o ato já ficou para trás.
 
+> **Emenda (2026-08-10, [ADR-026](ADR-026-revogacao-troca-senha-email.md)):** o parágrafo acima
+> descreve o estado anterior e fica preservado como registro. A troca de e-mail passou a gravar o
+> **epoch de revogação**, então o access token e o refresh morrem imediatamente e o desligamento caiu
+> de ~1h para **~segundos** — a restrição ao item de backlog do SPA deixou de valer. O que **não**
+> mudou: o motivo logado continua sendo `NOT_FOUND`, porque `REVOKED_EPOCH` só é emitido no caminho
+> degradado (user-service fora do ar). Ver a ressalva abaixo, em Observabilidade.
+
 **Variante rejeitada por escrito:** re-derivar por `userID` (disponível na authority `USER_ID:`) em vez
 de por e-mail. Exigiria um endpoint interno novo, ampliando a superfície da
 [ADR-006](ADR-006-canal-interno-isolado.md), e quebraria o reuso do `UserDetailsService` que é toda a
@@ -254,6 +261,12 @@ semana seguinte: o incidente só foi diagnosticável por perícia manual no Post
 > **`NOT_FOUND` é ambíguo por desenho, e o registro disto é obrigatório:** tem **duas** causas
 > legítimas — titular eliminado **e** titular que trocou o próprio e-mail (P-01). Quem usar essa linha
 > como evidência de que a eliminação funcionou precisa cruzá-la com outro sinal.
+>
+> A [ADR-026](ADR-026-revogacao-troca-senha-email.md) **não** estreitou esta ambiguidade, ao contrário
+> do que se poderia supor: `REVOKED_EPOCH` só é emitido no ramo `catch (AuthenticationException)` —
+> user-service indisponível. No caminho normal, o e-mail trocado continua caindo em
+> `loadUserByUsername` → `UsernameNotFoundException` → `NOT_FOUND`. O epoch mudou a latência, não o
+> motivo.
 
 ### Contrato de API
 

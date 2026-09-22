@@ -9,18 +9,17 @@ import jakarta.servlet.http.HttpSession;
  * {@code AuthenticationInstantListener} no login e lido pelo
  * {@code AuthorizationEndpointRevalidationFilter}.
  *
- * <p><b>Por que não {@code getCreationTime()}.</b> No BFF a sessão nasce <i>antes</i> do login, para
- * carregar o token CSRF e o saved request do {@code /oauth2/authorize} — esse é o caminho normal, não
- * a exceção. Ancorar o teto de vida na criação puniria o tempo de sessão <b>anônima</b>: uma aba
- * aberta há 8h faria o login legítimo nascer já vencido. O teto tem de medir "há quanto tempo esta
- * credencial foi provada", que é o carimbo daqui.
+ * <p><b>Nunca {@code getCreationTime()}.</b> No BFF a sessão nasce <i>antes</i> do login, para
+ * carregar o token CSRF e o saved request do {@code /oauth2/authorize} — caminho normal, não
+ * exceção. Ancorar o teto de vida na criação puniria o tempo de sessão <b>anônima</b>: uma aba
+ * aberta há 8h faria o login legítimo nascer vencido. O teto mede "há quanto tempo esta credencial
+ * foi provada".
  *
- * <p><b>O tipo é requisito, não detalhe.</b> A sessão é Spring Session sobre Redis com serialização
- * JDK, e este atributo é escrito em <b>todo</b> login bem-sucedido: um valor não-serializável não
- * quebraria um caminho de borda, quebraria o login inteiro (precedente do ADR-021, em que o objeto
- * guardado pelo failure handler derrubou três testes de integração com {@code SerializationException}).
- * Daí {@link Long} de epoch millis — não {@link Instant}, não tipo próprio. O nome do atributo é
- * constante única, referenciada pelo listener e pelo filtro; nunca duplique a string literal.
+ * <p><b>O tipo é requisito, não detalhe:</b> {@link Long} de epoch millis, nunca {@link Instant}
+ * nem tipo próprio. A sessão é Spring Session sobre Redis com serialização JDK e este atributo é
+ * escrito em <b>todo</b> login bem-sucedido — um valor não-serializável quebraria o login inteiro,
+ * não um caminho de borda (precedente no ADR-021). O nome do atributo é constante única, lida pelo
+ * listener e pelo filtro; nunca duplique a string literal.
  */
 public final class AuthenticationInstantAttribute {
 

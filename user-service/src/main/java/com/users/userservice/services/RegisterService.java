@@ -102,9 +102,11 @@ public class RegisterService {
             throw new EmailAlreadyRegisteredException(userDTO.getEmail());
         }
         String oldMail = existingUser.getEmail();
+        boolean senhaAlterada = userDTO.getPassword() != null && !userDTO.getPassword().isBlank();
+        boolean emailAlterado = !oldMail.equals(userDTO.getEmail());
         existingUser.setName(userDTO.getName());
         existingUser.setEmail(userDTO.getEmail());
-        if (userDTO.getPassword() != null && !userDTO.getPassword().isBlank()) {
+        if (senhaAlterada) {
             existingUser.setPasswordHash(passwordEncoder.encode(userDTO.getPassword()));
         }
         User updated = userRepository.save(existingUser);
@@ -114,6 +116,13 @@ public class RegisterService {
         cacheService.evictById(userID);
         cacheService.putById(userID, updatedDTO);
         cacheService.putByEmail(updated.getEmail(), updatedDTO);
+        // Revogação ativa (ADR-017 + ADR-026): trocar a senha ou o e-mail é evento de segurança
+        // — quem já está dentro com o token antigo tem de cair. Sem isto, trocar a senha não
+        // expulsa um atacante com sessão viva, que é justamente o motivo de trocá-la (G15).
+        // Só o nome mudou: nada a revogar.
+        if (senhaAlterada || emailAlterado) {
+            tokenRevocationService.revoke(userID);
+        }
 
         LOGGER.info(
             "| usuário atualizado | nome: {}, ID: {}",

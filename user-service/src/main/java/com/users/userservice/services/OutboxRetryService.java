@@ -23,15 +23,15 @@ import com.users.userservice.repository.IUserRepository;
  * Varredura periódica do outbox de verificação de e-mail — reprocessa o que o disparo por evento
  * deixou para trás (emenda do ADR-015, que originalmente aceitou "outbox sem retry automático").
  *
- * <p>Sem esta varredura um outbox {@code FAILED} é um beco sem saída: o
- * {@code NotificationDispatchService} marca a falha e nada mais toca o registro. O titular fica
- * com {@code emailVerified=false} e, passada a carência de 24h do ADR-015, a conta se torna
- * inacessível — a única saída seria o reenvio manual, que exige o titular saber que precisa pedir.
+ * <p>Sem ela um outbox {@code FAILED} é beco sem saída: o {@code NotificationDispatchService} marca
+ * a falha e nada mais toca o registro. O titular fica com {@code emailVerified=false} e, passada a
+ * carência de 24h do ADR-015, a conta se torna inacessível — restaria o reenvio manual, que exige
+ * o titular saber que precisa pedir.
  *
- * <p><b>Por que o retry emite um token NOVO em vez de reenviar o mesmo e-mail.</b> O outbox
- * persiste apenas o {@code tokenHash}; o token em claro nunca é salvo (decisão de segurança do
- * ADR-015). Não há como remontar o link original, então o retry supera o registro antigo
- * ({@code SUPERSEDED}) e emite um par token/link novo, pelo mesmo caminho do reenvio manual.
+ * <p><b>O retry emite um token NOVO</b> em vez de reenviar o mesmo e-mail: o outbox persiste apenas
+ * o {@code tokenHash} e o token em claro nunca é salvo (ADR-015), então não há como remontar o link
+ * original. O registro antigo é superado ({@code SUPERSEDED}) e um par token/link novo sai pelo
+ * mesmo caminho do reenvio manual.
  */
 @Service
 public class OutboxRetryService {
