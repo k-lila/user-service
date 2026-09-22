@@ -141,19 +141,19 @@ jobs:
         run: |
           docker compose -f docker-compose.yml config \
             | python3 -c '
-import sys, yaml
-c = yaml.safe_load(sys.stdin)
-falhas = []
-for nome in ["gateway", "user-service", "authorization-server", "notification-service", "config-server"]:
-    svc = c["services"][nome]
-    if "container_name" in svc:
-        falhas.append(f"{nome}: container_name impede --scale")
-    if svc.get("ports"):
-        falhas.append(f"{nome}: ports na base impede --scale (mova para o override)")
-if falhas:
-    print("[ERRO] " + "; ".join(falhas)); sys.exit(1)
-print("[OK] eixo replicável sem container_name nem ports na base")
-'
+          import sys, yaml
+          c = yaml.safe_load(sys.stdin)
+          falhas = []
+          for nome in ["gateway", "user-service", "authorization-server", "notification-service", "config-server"]:
+              svc = c["services"][nome]
+              if "container_name" in svc:
+                  falhas.append(f"{nome}: container_name impede --scale")
+              if svc.get("ports"):
+                  falhas.append(f"{nome}: ports na base impede --scale (mova para o override)")
+          if falhas:
+              print("[ERRO] " + "; ".join(falhas)); sys.exit(1)
+          print("[OK] eixo replicável sem container_name nem ports na base")
+          '
 
   # Smoke-test da topologia de login sob hostname único (ADR-023). Sobe nginx + gateway +
   # authorization-server (menos o cloudflared, que não roda em CI) e verifica por HTTP os pontos
